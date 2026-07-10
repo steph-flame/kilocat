@@ -27,11 +27,18 @@ Built for one cat originally, but the model is general.
 ## The science
 
 - `RER = 70 × kg^0.75` (ACVN-endorsed).
-- `MER = feline factor × RER` (AAHA Nutrition Toolkit; Pet Nutrition Alliance):
-  neutered adult 1.2, intact 1.4, inactive 1.0, weight loss 0.8–1.0 (at target
-  weight), gain ~1.6, kitten peak 2.5 tapering to the adult factor by 12 months.
+- `MER = feline factor × RER`: neutered adult 1.2, intact 1.4, inactive 1.0, weight
+  loss 0.8–1.0 (at target weight), gain ~1.6, kitten peak 2.5 tapering to the adult
+  factor by 12 months.
 - Note: `vetcalculators.com` lists 1.6 / 1.8 for neutered / intact — those are
   **canine** factors and overestimate for a cat.
+
+Check the factors yourself against the primary sources:
+
+- [2021 AAHA Nutrition and Weight Management Guidelines — resource center](https://www.aaha.org/resources/2021-aaha-nutrition-and-weight-management-guidelines/resource-center/)
+  (see "How to Calculate Energy Requirements" and the BCS ↔ overweight-% chart).
+- [Pet Nutrition Alliance — Calorie Calculator](https://petnutritionalliance.org/resources/calorie-calculator)
+  (the MER factor table this tool mirrors).
 
 The energy factors are all editable in the app under "energy factors."
 
@@ -43,7 +50,7 @@ Storage and semantics are kept in separate modules that never import each other:
 src/
   lib/
     nutrition.js   energy model — RER, MER, life-stage goals, targets (pure)
-    foods.js       food math (splits, transitions) + the food library (pure)
+    foods.js       food math (splits, transitions, energy density) + library (pure)
     storage.js     persistence only — one JSON blob in localStorage
     util.js        tiny shared number/id helpers
   hooks/
@@ -65,12 +72,26 @@ localStorage for a backend (fetch, IndexedDB, a sync service) is a one-file chan
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # production build to dist/
-npm run preview  # serve the built output
+npm run dev        # http://localhost:5173
+npm run build      # production build to dist/
+npm run preview    # serve the built output
+npm test           # run the unit suite once (vitest)
+npm run test:watch # re-run on change
 ```
 
-Stack: React 18, Vite, Tailwind CSS, lucide-react.
+Stack: React 18, Vite, Tailwind CSS, lucide-react, Vitest.
+
+### Tests
+
+Because `nutrition.js` and `foods.js` are pure, the claims the app makes are pinned
+by assertions rather than re-verified by hand (`src/lib/*.test.js`), including:
+
+- maintenance always uses the adult factor, never the kitten growth factor;
+- the growth factor tapers from 2.5 (≤4 mo) to the adult factor (12 mo);
+- BCS ↔ % round-trips for every integer score;
+- `distribute` returns integers that sum exactly to the target;
+- `waterfall` keeps a split at 100% — including dragging the last row;
+- a transition day's kcal column sums to the target at every blend fraction.
 
 > The two `npm audit` advisories are in Vite's dev-server dependency (esbuild) and
 > affect only the local dev server, not the production build. Upgrading requires a

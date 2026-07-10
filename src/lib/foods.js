@@ -51,6 +51,19 @@ export function waterfall(rows, id, raw) {
 
 export const blankFood = () => ({ id: uid(), name: "", mode: "perKg", kcalPerKg: "", gramsPerCup: "", kcalPerUnit: "", gramsPerUnit: "", pct: 0 });
 
+// One transition-table cell: how much of food `f` to feed on a day when this blend
+// covers `blendFrac` of the ration (old blend = 1 - toNew, new ration = toNew).
+// `listSum` is that blend's total pct (its rows may not sum to exactly 100). Returns
+// kcal when unit === "kcal", else grams. Summed across every food in both blends on a
+// given day this equals `target` exactly (in kcal) — total energy is held constant.
+export function transitionAmount(f, blendFrac, listSum, target, unit) {
+  const share = listSum > 0 ? num(f.pct) / listSum : 0;
+  const kc = target * blendFrac * share;
+  if (unit === "kcal") return kc;
+  const kpg = kcalPerG(f);
+  return kpg > 0 ? kc / kpg : 0;
+}
+
 /* ---------- seeds ---------- */
 export const makeRationSeed = () => [
   { ...blankFood(), name: "Tiki Cat After Dark", mode: "perUnit", kcalPerUnit: 70, gramsPerUnit: 79.4, pct: 17 },

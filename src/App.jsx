@@ -3,8 +3,8 @@ import { Plus, Scale, Info, ChevronDown, ChevronRight, RotateCcw, ArrowRight } f
 
 import { C } from "./theme.js";
 import { num, r0, r1 } from "./lib/util.js";
-import { computeTargets, seedProfile } from "./lib/nutrition.js";
-import { kcalPerG, makeRationSeed, makeStartSeed, makeLibrarySeed, isCompleteFood, toLibraryEntry } from "./lib/foods.js";
+import { computeTargets, seedProfile, bcsToPct, pctToBcs } from "./lib/nutrition.js";
+import { makeRationSeed, makeStartSeed, makeLibrarySeed, isCompleteFood, toLibraryEntry, transitionAmount } from "./lib/foods.js";
 import { usePersistence, store } from "./lib/storage.js";
 import { useFoodList } from "./hooks/useFoodList.js";
 import { useFoodLibrary } from "./hooks/useFoodLibrary.js";
@@ -58,8 +58,8 @@ export default function CatRationCalculator() {
   const set = (k, v) => setP((s) => ({ ...s, [k]: v }));
   const setFactor = (k, v) => setP((s) => ({ ...s, factors: { ...s.factors, [k]: v } }));
   const setAgeDisplay = (v) => set("ageMonths", ageUnit === "years" ? num(v) * 12 : num(v));
-  const setBcs = (v) => setP((s) => ({ ...s, bcs: v, pctOver: (v - 5) * 10 }));           // BCS -> %
-  const setPct = (v) => setP((s) => ({ ...s, pctOver: v, bcs: Math.max(1, Math.min(9, Math.round(5 + num(v) / 10))) })); // % -> BCS
+  const setBcs = (v) => setP((s) => ({ ...s, bcs: v, pctOver: bcsToPct(v) }));   // BCS -> %
+  const setPct = (v) => setP((s) => ({ ...s, pctOver: v, bcs: pctToBcs(v) }));   // % -> BCS
   const reset = () => {
     store.clear();
     setP(seedProfile); ration.reset(); start.reset(); library.reset();
@@ -215,7 +215,7 @@ export default function CatRationCalculator() {
                   );
                 })}
               </div>
-              <p style={{ color: C.faint }} className="text-xs mt-1.5 leading-snug">Growth-at-ideal funds development at her target size — gentler and slower, letting frame growth dilute the fat. Resting-at-current is a firmer hold on intake.</p>
+              <p style={{ color: C.faint }} className="text-xs mt-1.5 leading-snug">Resting-at-current (the default) is the firmer, more reliable hold on intake. Growth-at-ideal is gentler — it funds development at her target size and lets frame growth dilute the fat — but it assumes she'll actually grow into that frame, which you can't confirm from a single weigh-in. Start with resting-at-current and re-weigh before loosening to growth-at-ideal.</p>
             </div>
           )}
           <button onClick={() => setShowMath((s) => !s)} style={{ color: C.spruce }} className="mt-3 inline-flex items-center gap-1 text-xs font-mono">{showMath ? <ChevronDown size={13} /> : <ChevronRight size={13} />} show the math</button>
@@ -295,7 +295,7 @@ export default function CatRationCalculator() {
                   <tbody>
                     {Array.from({ length: tr.days }, (_, i) => i + 1).map((day) => {
                       const toNew = day / tr.days, last = day === tr.days;
-                      const cellFor = (f, blendFrac, sum) => { const share = sum > 0 ? num(f.pct) / sum : 0; const kc = t.target * blendFrac * share; if (tlUnit === "kcal") return r0(kc); const kpg = kcalPerG(f); return kpg > 0 ? r0(kc / kpg) : 0; };
+                      const cellFor = (f, blendFrac, sum) => r0(transitionAmount(f, blendFrac, sum, t.target, tlUnit));
                       return (
                         <tr key={day} style={{ borderColor: C.line, background: last ? C.spruceSoft : "transparent" }} className="border-b last:border-0">
                           <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: C.ink }}>{day} <span style={{ color: C.faint }}>· {r0(toNew * 100)}%</span></td>

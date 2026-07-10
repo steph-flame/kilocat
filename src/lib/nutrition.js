@@ -12,6 +12,12 @@ import { num } from "./util.js";
 
 export const RER = (kg) => 70 * Math.pow(kg, 0.75);
 
+// Body condition: a 1-9 BCS maps to % over/under ideal at 10 points per score, with
+// 5 = ideal. Inverse clamps back into the 1-9 range. Round-trips exactly for scores
+// that land on a 10% step (i.e. every integer BCS).
+export const bcsToPct = (bcs) => (bcs - 5) * 10;
+export const pctToBcs = (pct) => Math.max(1, Math.min(9, Math.round(5 + num(pct) / 10)));
+
 // The goal options offered depend on life stage: kittens can't "maintain", etc.
 export function goalsForAge(age) {
   const custom = { id: "custom", label: "Custom target", hint: "set kcal directly" };
@@ -35,7 +41,7 @@ export function goalsForAge(age) {
 export function computeTargets(p) {
   const f = p.factors;
   const w = num(p.weightKg), age = num(p.ageMonths);
-  const pctOver = p.bcMode === "bcs" ? (p.bcs - 5) * 10 : num(p.pctOver);
+  const pctOver = p.bcMode === "bcs" ? bcsToPct(p.bcs) : num(p.pctOver);
   const idealWeight = 1 + pctOver / 100 > 0 ? w / (1 + pctOver / 100) : w;
   const rerCur = RER(w), rerIdeal = RER(idealWeight);
   const stage = age < 4 ? "young kitten" : age < 12 ? "growing kitten" : "adult";
