@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState } from "react";
-import { num, r1 } from "../lib/util.js";
+import { num, r1, clamp } from "../lib/util.js";
 import { computeTargets, seedProfile, bcsToPct, pctToBcs } from "../lib/nutrition.js";
 import { makeRationSeed, makeStartSeed, makeLibrarySeed, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName, migrateLegacyFood, ensureBuiltins } from "../lib/foods.js";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure } from "../lib/expenditure.js";
@@ -68,7 +68,7 @@ export function AppProvider({ children }) {
   const setFactor = (k, v) => setP((s) => ({ ...s, factors: { ...s.factors, [k]: v } }));
   const setAgeDisplay = (v) => set("ageMonths", ageUnit === "years" ? num(v) * 12 : num(v));
   const setBcs = (v) => setP((s) => ({ ...s, bcs: v, pctOver: bcsToPct(v) }));
-  const setPct = (v) => setP((s) => ({ ...s, pctOver: v, bcs: pctToBcs(v) }));
+  const setPct = (v) => { const cv = clamp(num(v), -60, 100); setP((s) => ({ ...s, pctOver: cv, bcs: pctToBcs(cv) })); }; // clamp: a wild % → absurd ideal weight → overfeed
   const setExpSettings = (patch) => setExpSettingsRaw((s) => ({ ...s, ...patch }));
   const reset = () => {
     store.clear();

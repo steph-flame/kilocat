@@ -8,7 +8,7 @@
 //   (AAHA Nutrition Toolkit; Pet Nutrition Alliance MER table.)
 //   vetcalculators.com lists neutered 1.6 / intact 1.8 — those are CANINE.
 
-import { num } from "./util.js";
+import { num, clamp } from "./util.js";
 
 export const RER = (kg) => 70 * Math.pow(kg, 0.75);
 
@@ -42,7 +42,10 @@ export function computeTargets(p) {
   const f = p.factors;
   const w = num(p.weightKg), age = num(p.ageMonths);
   const pctOver = p.bcMode === "bcs" ? bcsToPct(p.bcs) : num(p.pctOver);
-  const idealWeight = 1 + pctOver / 100 > 0 ? w / (1 + pctOver / 100) : w;
+  // Ideal weight backs out the excess/deficit; clamp to a physiological band so a stray
+  // % (e.g. a persisted −95%) can't yield an absurd ideal weight and a runaway target.
+  const idealRaw = 1 + pctOver / 100 > 0 ? w / (1 + pctOver / 100) : w;
+  const idealWeight = w > 0 ? clamp(idealRaw, 0.4 * w, 2.5 * w) : idealRaw;
   const rerCur = RER(w), rerIdeal = RER(idealWeight);
   const stage = age < 4 ? "young kitten" : age < 12 ? "growing kitten" : "adult";
   const adultFactor = p.neutered ? f.neutered : f.intact;

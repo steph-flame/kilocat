@@ -96,7 +96,7 @@ export default function RationPlanner() {
             <h1 className="text-2xl font-semibold leading-tight" style={{ letterSpacing: "-0.01em" }}>How much to feed</h1>
             <p style={{ color: C.sub }} className="text-sm mt-1">Target energy from the animal, grams from the split, and a transition schedule. It shows its work.</p>
           </div>
-          <button onClick={reset} title="Reset to defaults" style={{ borderColor: C.line, color: C.sub }} className="shrink-0 mt-1 inline-flex items-center gap-1 text-xs border rounded-lg px-2 py-1.5 hover:bg-white"><RotateCcw size={12} /> reset</button>
+          <button onClick={() => { if (window.confirm("Erase everything — the cat's profile, your saved foods, and all weigh-in and intake history? This can't be undone.")) reset(); }} title="Erase all saved data (cat, foods, logs)" style={{ borderColor: C.line, color: C.sub }} className="shrink-0 mt-1 inline-flex items-center gap-1 text-xs border rounded-lg px-2 py-1.5 hover:bg-white"><RotateCcw size={12} /> erase all</button>
         </div>
 
         {/* the animal */}

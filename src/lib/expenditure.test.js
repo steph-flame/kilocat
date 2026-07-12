@@ -64,6 +64,12 @@ describe("robustness", () => {
     expect(r.enoughData).toBe(false);
     expect(r.kcal).toBeNull();
   });
+  it("does NOT report a ±0 band from two sparse weigh-ins (false-precision guard)", () => {
+    const w = [{ date: "2026-01-01", value: 5.0 }, { date: "2026-01-21", value: 4.7 }];
+    const i = Array.from({ length: 21 }, (_, d) => ({ date: addDays("2026-01-01", d), value: 200 }));
+    const r = estimateExpenditure(w, i, { minDays: 10 });
+    expect(r.sd).toBeGreaterThan(5); // a real band, not ~0
+  });
 });
 
 describe("weigh-method metadata (contract for precision-weighting later)", () => {

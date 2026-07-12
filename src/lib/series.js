@@ -105,3 +105,21 @@ export function linreg(ys) {
   const s2 = n > 2 ? sse / (n - 2) : 0;
   return { slope, intercept, slopeSE: Math.sqrt(s2 / sxx) };
 }
+
+// OLS of y on arbitrary x (unlike linreg, x need not be 0,1,2,…). Returns slope per unit x,
+// intercept, and the slope's standard error — from the ACTUAL points, so a sparse series
+// doesn't get a falsely tiny SE the way fitting an interpolated grid would.
+export function linregXY(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return { slope: 0, intercept: n ? ys[0] : 0, slopeSE: Infinity };
+  const xbar = mean(xs), ybar = mean(ys);
+  let sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { sxx += (xs[i] - xbar) ** 2; sxy += (xs[i] - xbar) * (ys[i] - ybar); }
+  if (sxx === 0) return { slope: 0, intercept: ybar, slopeSE: Infinity };
+  const slope = sxy / sxx;
+  const intercept = ybar - slope * xbar;
+  let sse = 0;
+  for (let i = 0; i < n; i++) { const r = ys[i] - (intercept + slope * xs[i]); sse += r * r; }
+  const s2 = n > 2 ? sse / (n - 2) : 0;
+  return { slope, intercept, slopeSE: Math.sqrt(s2 / sxx) };
+}

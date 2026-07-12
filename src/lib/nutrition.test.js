@@ -64,4 +64,9 @@ describe("ideal weight backs out the excess", () => {
     const t = computeTargets(profile({ weightKg: 4.38, pctOver: 20 }));
     expect(t.idealWeight).toBeCloseTo(4.38 / 1.2, 4);
   });
+  it("clamps ideal weight to a physiological band for a wild % (no runaway target)", () => {
+    const t = computeTargets(profile({ weightKg: 5, pctOver: -95 }));
+    expect(t.idealWeight).toBeLessThanOrEqual(2.5 * 5); // clamped, not w/0.05 = 100 kg
+    expect(t.idealWeight).toBeGreaterThanOrEqual(0.4 * 5);
+  });
 });

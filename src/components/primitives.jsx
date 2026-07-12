@@ -59,7 +59,7 @@ export function RefRow({ label, val, on, note }) {
 
 export function Note({ children, tone }) {
   const bg = tone === "warn" ? C.amberSoft : C.spruceSoft;
-  const fg = tone === "warn" ? C.amber : C.spruce;
+  const fg = tone === "warn" ? C.warn : C.spruce;
   return (
     <div style={{ background: bg, color: fg }} className="mt-3 rounded-xl px-3 py-2 text-xs leading-snug flex gap-2">
       <Info size={14} className="shrink-0 mt-0.5" /><span>{children}</span>

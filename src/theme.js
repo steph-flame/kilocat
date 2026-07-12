@@ -2,7 +2,9 @@
 export const C = {
   paper: "#F6F7F4", card: "#FFFFFF", ink: "#1C2420", sub: "#5A665E",
   line: "#DDE1D8", spruce: "#3E5C50", spruceSoft: "#EAF0EC",
-  amber: "#B7791F", amberSoft: "#F6EEDD", faint: "#8A968D",
+  amber: "#B7791F", amberSoft: "#F6EEDD", faint: "#626D65",
+  // warn: darker amber for warning *text* (the accent amber fails contrast at small sizes).
+  warn: "#8A5A12",
 };
 
 // Chart series colors — punchier than the muted UI spruce so lines read as distinct

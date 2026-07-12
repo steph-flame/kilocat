@@ -137,7 +137,7 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
 
           {/* energy (band + two lines, clipped) */}
           <g clipPath="url(#eClip)">
-            <path d={bandPolygon(frame, (p) => p.e, xAt, eY)} fill={CHART.expenditure} opacity="0.12" />
+            <path d={bandPolygon(frame, (p) => p.e, xAt, eY)} fill={CHART.expenditure} opacity="0.2" />
             <path d={linePath(frame, (p) => p.kin, xAt, eY)} fill="none" stroke={CHART.intake} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
             {hasExp && <path d={linePath(frame, (p) => p.e, xAt, eY)} fill="none" stroke={CHART.expenditure} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
           </g>
@@ -149,12 +149,16 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
               {gridAxis(bTicks, bY, isRate ? "%/wk" : "kcal", bTop)}
               {isRate && (
                 <g clipPath="url(#bClip)">
-                  <rect x={px0} width={px1 - px0} y={bY(-RATE.min)} height={Math.max(0, bY(-RATE.max) - bY(-RATE.min))} fill={CHART.expenditure} opacity="0.08" />
-                  <rect x={px0} width={px1 - px0} y={bY(RATE.max)} height={Math.max(0, bY(RATE.min) - bY(RATE.max))} fill={CHART.expenditure} opacity="0.08" />
+                  <rect x={px0} width={px1 - px0} y={bY(-RATE.min)} height={Math.max(0, bY(-RATE.max) - bY(-RATE.min))} fill={CHART.expenditure} opacity="0.14" />
+                  <rect x={px0} width={px1 - px0} y={bY(RATE.max)} height={Math.max(0, bY(RATE.min) - bY(RATE.max))} fill={CHART.expenditure} opacity="0.14" />
+                  {[-RATE.min, -RATE.max, RATE.min, RATE.max].map((v) => (
+                    <line key={v} x1={px0} x2={px1} y1={bY(v)} y2={bY(v)} stroke={CHART.expenditure} strokeWidth="1" strokeDasharray="2 3" opacity="0.55" />
+                  ))}
+                  <text x={px1 - 2} y={bY(-RATE.max) - 3} textAnchor="end" fontSize="8" fontFamily="monospace" fill={CHART.expenditure}>safe {RATE.min}–{RATE.max}%/wk</text>
                 </g>
               )}
               <g clipPath="url(#bClip)">
-                {!isRate && <path d={bandPolygon(frame, aOf, xAt, bY)} fill={C.ink} opacity="0.08" />}
+                {!isRate && <path d={bandPolygon(frame, aOf, xAt, bY)} fill={C.ink} opacity="0.16" />}
                 <path d={linePath(frame, aOf, xAt, bY)} fill="none" stroke={C.ink} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
               </g>
               <line x1={px0} x2={px1} y1={bY(0)} y2={bY(0)} stroke={C.sub} strokeWidth="1" strokeDasharray="2 2" />
@@ -201,6 +205,7 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
         <LegendChip color={CHART.intake} label="calories in" />
         {hasExp && <LegendChip color={CHART.expenditure} label="est. expenditure" band />}
         {showAnalysis && <LegendChip color={C.ink} label={isRate ? "weight-change rate" : "balance (in − burns)"} />}
+        {showAnalysis && isRate && <LegendChip color={CHART.expenditure} label={`safe ${RATE.min}–${RATE.max}%/wk`} band />}
       </div>
     </div>
   );

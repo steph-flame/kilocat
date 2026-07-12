@@ -9,7 +9,7 @@
 // shape (kcal + confidence band + enoughData) is stable, so a v2 Kalman / v3 unobserved-
 // components model can replace the internals without touching callers. See README "The science".
 
-import { median, mean, dailyReduce, fillDaily, ewma, linreg, addDays, diffDays, enumerateDays } from "./series.js";
+import { median, mean, dailyReduce, fillDaily, ewma, linregXY, addDays, diffDays, enumerateDays } from "./series.js";
 import { matmul, transpose, matadd, symmetrize, diag, identity } from "./mat.js";
 
 // Energy density of feline weight change (ρ), kcal per kg. There is NO directly measured
@@ -30,6 +30,7 @@ import { matmul, transpose, matadd, symmetrize, diag, identity } from "./mat.js"
 export const KCAL_PER_KG = 7800;
 
 export const DEFAULTS = { rho: KCAL_PER_KG, windowDays: 28, minDays: 10, alpha: 0.25, maxMissing: 0.5 };
+const V1_WEIGHT_SIGMA = 0.03; // kg, a per-weigh-in noise floor so the v1 band can't read ±0
 
 // How a weigh-in was measured. `sigmaKg` is the rough per-reading measurement noise —
 // captured now, and reserved for precision-weighting (WLS) in the v2 filter. Mixing
@@ -63,13 +64,19 @@ export function estimateExpenditure(weightEntries = [], intakeEntries = [], opts
   const span = diffDays(dailyW[0].date, last) + 1;
   const winStart = addDays(last, -(Math.min(windowDays, span) - 1));
 
-  // Weight: fill to a daily grid over the window and fit a line for the rate (kg/day).
+  // Weight: fit the rate (kg/day) on the REAL weigh-ins (against their day offsets), not the
+  // interpolated grid — otherwise imputed points sit exactly on the fit and collapse the SE to
+  // ~0, giving false certainty. Floor the SE by a measurement-noise term so a couple of points
+  // can never read ±0.
   const wWin = dailyW.filter((d) => d.date >= winStart);
   if (wWin.length < 2) return { ...empty, trendWeightKg: dailyW[dailyW.length - 1].value };
-  const wFilled = fillDaily(wWin, "interp");
-  const ys = wFilled.map((d) => d.value);
-  const { slope, slopeSE } = linreg(ys);            // kg per day (negative = losing)
-  const trendSeries = ewma(ys, alpha);
+  const xs = wWin.map((d) => diffDays(winStart, d.date));
+  const { slope, slopeSE: rawSE } = linregXY(xs, wWin.map((d) => d.value)); // kg/day (neg = losing)
+  const spanDays = Math.max(1, xs[xs.length - 1] - xs[0]);
+  const seFloor = (V1_WEIGHT_SIGMA * Math.SQRT2) / spanDays;  // endpoint-noise slope SE
+  const slopeSE = Math.max(Number.isFinite(rawSE) ? rawSE : 0, seFloor);
+  const wFilled = fillDaily(wWin, "interp");         // smoothed weight for the display trend line
+  const trendSeries = ewma(wFilled.map((d) => d.value), alpha);
   const trendWeightKg = trendSeries[trendSeries.length - 1];
 
   // Intake: mean over the days we actually logged in the window; track how sparse it was.

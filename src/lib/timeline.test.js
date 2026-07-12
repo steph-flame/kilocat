@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { extent, niceTicks, linScale } from "./scale.js";
+import { linregXY } from "./series.js";
 import { buildDailyFrame, historySpanDays, weightChangeRate } from "./timeline.js";
 import { groupByDay } from "./series.js";
 
@@ -22,6 +23,13 @@ describe("scale", () => {
   });
   it("linScale guards a zero-width domain", () => {
     expect(() => linScale([5, 5], [0, 100])(5)).not.toThrow();
+  });
+  it("linregXY fits arbitrary x and gives a real SE for scattered points", () => {
+    // y = 10 + 2x on irregular x, with a residual → nonzero slopeSE
+    const { slope, slopeSE } = linregXY([0, 5, 20, 21], [10.0, 20.1, 49.8, 52.2]);
+    expect(slope).toBeCloseTo(2, 0);
+    expect(slopeSE).toBeGreaterThan(0);
+    expect(Number.isFinite(slopeSE)).toBe(true);
   });
 });
 

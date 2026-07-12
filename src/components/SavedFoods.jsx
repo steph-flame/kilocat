@@ -58,7 +58,7 @@ export default function SavedFoods({ library }) {
               </div>
             );
           })}
-          <button onClick={library.reset} style={{ borderColor: C.line, color: C.sub }} className="w-full border border-dashed rounded-xl py-2 text-xs hover:bg-white">
+          <button onClick={() => { if (window.confirm("Replace your saved foods with the built-in starter list? Foods you added or edited will be lost.")) library.reset(); }} style={{ borderColor: C.line, color: C.sub }} className="w-full border border-dashed rounded-xl py-2 text-xs hover:bg-white">
             Reset library to the built-in starter foods
           </button>
         </div>
