@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Plus, Scale, Info, ChevronDown, ChevronRight, ChevronLeft, RotateCcw, ArrowRight, Activity } from "lucide-react";
+import { Plus, Scale, Info, ChevronDown, ChevronRight, ChevronLeft, RotateCcw, ArrowRight, Activity, NotebookPen } from "lucide-react";
 import { C } from "../theme.js";
 import { num, r0, r1 } from "../lib/util.js";
 import { transitionAmount } from "../lib/foods.js";
 import { planWeightLoss } from "../lib/weightPlan.js";
+import { toDisplayWeight, fromDisplayWeight, weightLabel, round5 } from "../lib/units.js";
 import { useApp } from "../state/AppState.jsx";
 import RationRow from "../components/RationRow.jsx";
 import SavedFoods from "../components/SavedFoods.jsx";
@@ -19,6 +20,9 @@ export default function RationPlanner() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const { age, w: wkg, goalId } = t;
+  const unit = expSettings.unit || "kg";
+  const wLbl = weightLabel(unit);
+  const showW = (kg) => `${r1(toDisplayWeight(kg, unit))} ${wLbl}`;
 
   // Energy basis: the vet formula (default) or the measured expenditure. When "measured" is
   // selected and there's enough data, the working target comes from the estimate — and if the
@@ -28,14 +32,14 @@ export default function RationPlanner() {
   const deficitPlan = useMeasured && t.pctOver > 0
     ? planWeightLoss({ maintenanceKcal: measured, currentKg: t.w, idealKg: t.idealWeight, pctPerWeek: expSettings.pctPerWeek })
     : null;
-  const target = useMeasured ? (deficitPlan ? deficitPlan.targetKcal : measured) : t.target;
+  const target = useMeasured ? (deficitPlan ? round5(deficitPlan.targetKcal) : measured) : t.target;
 
   const goalText = {
-    grow: `feeding for growth at ${r1(wkg)} kg`,
-    maintain: `holding steady at ${r1(wkg)} kg`,
+    grow: `feeding for growth at ${showW(wkg)}`,
+    maintain: `holding steady at ${showW(wkg)}`,
     gentle: age < 12 ? `a gentle deficit — resting needs at current weight, so a growing cat fills out its frame rather than stripping fat mid-development` : `a gentle deficit, a little under maintenance, to ease weight down slowly`,
-    loss: `resting needs at a goal weight of ${r1(t.idealWeight)} kg`,
-    gain: `above maintenance, to build toward a goal weight of ${r1(t.idealWeight)} kg`,
+    loss: `resting needs at a goal weight of ${showW(t.idealWeight)}`,
+    gain: `above maintenance, to build toward a goal weight of ${showW(t.idealWeight)}`,
     custom: `a custom target of ${r0(t.target)} kcal you set`,
   }[goalId];
 
@@ -76,7 +80,10 @@ export default function RationPlanner() {
       <div className="max-w-xl mx-auto px-4 py-6 sm:py-8">
         <nav className="flex items-center justify-between mb-4 text-xs font-mono">
           <a href="#/" style={{ color: C.sub }} className="inline-flex items-center gap-1 hover:underline"><ChevronLeft size={13} /> home</a>
-          <a href="#/expenditure" style={{ color: C.spruce }} className="inline-flex items-center gap-1 hover:underline"><Activity size={12} /> energy expenditure</a>
+          <span className="flex items-center gap-3">
+            <a href="#/expenditure" style={{ color: C.spruce }} className="inline-flex items-center gap-1 hover:underline"><Activity size={12} /> expenditure</a>
+            <a href="#/log" style={{ color: C.spruce }} className="inline-flex items-center gap-1 hover:underline"><NotebookPen size={12} /> log</a>
+          </span>
         </nav>
 
         <div className="flex items-start justify-between gap-3 mb-6">
@@ -95,7 +102,9 @@ export default function RationPlanner() {
             <input value={p.name} onChange={(e) => set("name", e.target.value)} style={{ color: C.spruce }} className="text-right text-sm font-mono bg-transparent outline-none w-32" aria-label="name" />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Current weight" suffix="kg"><NumInput value={p.weightKg} onChange={(v) => set("weightKg", v)} step="0.01" /></Field>
+            <Field label="Current weight" suffix={<button onClick={() => setExpSettings({ unit: unit === "lb" ? "kg" : "lb" })} title="Switch weight unit" style={{ color: C.spruce }} className="font-mono underline decoration-dotted underline-offset-2">{wLbl}</button>}>
+              <NumInput value={unit === "lb" ? +toDisplayWeight(num(p.weightKg), unit).toFixed(2) : p.weightKg} onChange={(v) => set("weightKg", v === "" ? "" : fromDisplayWeight(num(v), unit))} step={unit === "lb" ? "0.05" : "0.01"} />
+            </Field>
             <Field label="Age" suffix={<button onClick={() => set("ageUnit", ageUnit === "years" ? "months" : "years")} title="Switch unit" style={{ color: C.spruce }} className="font-mono underline decoration-dotted underline-offset-2">{ageUnit}</button>}>
               <NumInput value={ageDisplay} onChange={setAgeDisplay} step={ageUnit === "years" ? "0.1" : "1"} />
             </Field>
@@ -153,7 +162,7 @@ export default function RationPlanner() {
                 {useMeasured ? (deficitPlan ? `measured − safe deficit (${deficitPlan.rate}%/wk)` : "from measured expenditure") : "from vet formula"}
               </div>
             </div>
-            <div style={{ color: C.faint }} className="text-xs text-right font-mono">{t.stage}<br />{showIdeal ? `ideal ${r1(t.idealWeight)} kg` : `RER ${r0(t.rerCur)}`}</div>
+            <div style={{ color: C.faint }} className="text-xs text-right font-mono">{t.stage}<br />{showIdeal ? `ideal ${showW(t.idealWeight)}` : `RER ${r0(t.rerCur)}`}</div>
           </div>
           <p style={{ color: C.sub }} className="text-sm mt-3 leading-snug">{p.name} is <span style={{ color: C.ink }}>{t.pctOver > 0 ? `${r0(t.pctOver)}% over ideal` : t.pctOver < 0 ? `${r0(-t.pctOver)}% under ideal` : "at ideal weight"}</span> — {useMeasured ? (deficitPlan ? `a safe deficit off measured maintenance (${r0(measured)} kcal), losing ~${deficitPlan.rate}%/week` : `measured maintenance of ${r0(measured)} kcal`) : goalText}.</p>
           {deficitPlan && deficitPlan.warnings.map((wtext, i) => (<Note key={i} tone="warn">{wtext}</Note>))}

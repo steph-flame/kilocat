@@ -2,17 +2,17 @@ import { useRef, useState } from "react";
 import { C, CHART } from "../theme.js";
 import { r0, r1 } from "../lib/util.js";
 import { extent, niceTicks, linScale } from "../lib/scale.js";
+import { toDisplayWeight, weightLabel, weeklyRate } from "../lib/units.js";
 
-// Two x-aligned panels sharing one time axis: weight (kg) on top, energy (kcal — calories
-// in vs. estimated expenditure) below. NOT a dual-axis overlay — two units get two panels,
-// so the intake↔expenditure gap sits right above the weight it drives.
+// x-aligned panels sharing one time axis: weight on top, energy (calories in vs. estimated
+// expenditure) below, and optionally an energy-balance (deficit/surplus) panel. NOT a
+// dual-axis overlay — each unit gets its own panel.
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const fmtDate = (d) => { const t = new Date(`${d}T00:00:00Z`); return `${MON[t.getUTCMonth()]} ${t.getUTCDate()}`; };
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-const fmtTick = (v) => String(+v.toFixed(3)); // strip float noise (5.8000001 → "5.8")
+const fmtTick = (v) => String(+v.toFixed(3));
 
-// Build an SVG path from a value accessor, breaking the line at null gaps.
 function linePath(frame, accessor, xAt, yScale) {
   let d = "", pen = false;
   frame.forEach((p, i) => {
@@ -24,20 +24,32 @@ function linePath(frame, accessor, xAt, yScale) {
   return d;
 }
 
-export default function TimelineChart({ frame, range, onRange, ranges }) {
+// A confidence band polygon (top edge L→R, bottom edge R→L) over points with a center + sd.
+function bandPolygon(frame, center, xAt, yScale, k = 1.96) {
+  const pts = frame.map((p, i) => ({ i, p })).filter(({ p }) => center(p) != null && p.sd != null);
+  if (pts.length < 2) return "";
+  const top = pts.map(({ i, p }) => `${i === pts[0].i ? "M" : "L"}${xAt(i).toFixed(1)} ${yScale(center(p) + k * p.sd).toFixed(1)}`).join("");
+  const bot = pts.slice().reverse().map(({ i, p }) => `L${xAt(i).toFixed(1)} ${yScale(center(p) - k * p.sd).toFixed(1)}`).join("");
+  return `${top}${bot}Z`;
+}
+
+export default function TimelineChart({ frame, range, onRange, ranges, unit = "kg", showBalance = false, rho = 8000 }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
   const n = frame.length;
 
-  const W = 640, padL = 44, padR = 14;
+  const W = 640, padL = 46, padR = 14;
   const px0 = padL, px1 = W - padR;
-  const wTop = 12, wH = 78;
-  const eTop = wTop + wH + 30, eH = 104;
-  const xAxisY = eTop + eH;
+  const wTop = 12, wH = 74;
+  const eTop = wTop + wH + 30, eH = 96;
+  const bTop = eTop + eH + 30, bH = 74;
+  const xAxisY = showBalance ? bTop + bH : eTop + eH;
   const H = xAxisY + 22;
 
   const hasExp = frame.some((p) => p.e != null);
   const xAt = (i) => (n <= 1 ? (px0 + px1) / 2 : px0 + (i / (n - 1)) * (px1 - px0));
+  const wOf = (p) => (p.w == null ? null : toDisplayWeight(p.w, unit));
+  const defOf = (p) => (p.kin != null && p.e != null ? p.kin - p.e : null);
 
   if (n < 2) {
     return (
@@ -50,42 +62,38 @@ export default function TimelineChart({ frame, range, onRange, ranges }) {
     );
   }
 
-  // scales (nice ticks define the domain so gridlines land on round numbers)
-  const wPad = 0.05;
-  const [wLo, wHi] = extent(frame.map((p) => p.w));
+  // weight scale
+  const [wLo, wHi] = extent(frame.map(wOf));
+  const wPad = (wHi - wLo) * 0.1 || 0.1;
   const wTicks = niceTicks(wLo - wPad, wHi + wPad, 4);
   const wY = linScale([wTicks[0], wTicks[wTicks.length - 1]], [wTop + wH, wTop]);
 
-  // Scale the energy axis to the LINES (intake + expenditure), not the confidence band —
-  // the early band is prior-dominated and huge, and would otherwise crush the real signal.
-  // The band is drawn but clipped to the panel.
+  // energy scale — to the lines, not the band (see the band comment below)
   const [eLo, eHi] = extent(frame.flatMap((p) => [p.kin, p.e]));
   const eTicks = niceTicks(eLo, eHi, 4);
   const eY = linScale([eTicks[0], eTicks[eTicks.length - 1]], [eTop + eH, eTop]);
 
-  // expenditure confidence band (top edge L→R, bottom edge R→L)
-  let bandPath = "";
-  const bandPts = frame.map((p, i) => ({ i, p })).filter(({ p }) => p.e != null && p.sd != null);
-  if (bandPts.length > 1) {
-    bandPath = bandPts.map(({ i, p }) => `${i === bandPts[0].i ? "M" : "L"}${xAt(i).toFixed(1)} ${eY(p.e + 1.96 * p.sd).toFixed(1)}`).join("")
-      + bandPts.slice().reverse().map(({ i, p }) => `L${xAt(i).toFixed(1)} ${eY(p.e - 1.96 * p.sd).toFixed(1)}`).join("") + "Z";
-  }
+  // balance scale (includes 0 so the reference line is on-chart)
+  const bVals = frame.map(defOf).concat([0]);
+  const [bLo, bHi] = extent(bVals);
+  const bTicks = niceTicks(bLo, bHi, 4);
+  const bY = linScale([bTicks[0], bTicks[bTicks.length - 1]], [bTop + bH, bTop]);
 
-  // x-axis date labels (≤5 evenly spaced)
   const nLabels = Math.min(5, n);
   const xLabels = Array.from({ length: nLabels }, (_, k) => Math.round((k / (nLabels - 1)) * (n - 1)));
 
   const onMove = (ev) => {
     const rect = ref.current.getBoundingClientRect();
-    const frac = (ev.clientX - rect.left) / rect.width;
-    setHover(clamp(Math.round(frac * (n - 1)), 0, n - 1));
+    setHover(clamp(Math.round(((ev.clientX - rect.left) / rect.width) * (n - 1)), 0, n - 1));
   };
 
   const hp = hover != null ? frame[hover] : null;
   const hx = hover != null ? xAt(hover) : 0;
-  const lastW = frame[n - 1];
+  const last = frame[n - 1];
+  const hDef = hp ? defOf(hp) : null;
+  const hRate = hDef != null ? weeklyRate((hDef / rho) * 7, unit) : null;
 
-  const gridAxis = (ticks, yScale, unit, panelTop, panelH) => (
+  const gridAxis = (ticks, yScale, unitLbl, panelTop) => (
     <g>
       {ticks.map((tv) => (
         <g key={tv}>
@@ -93,7 +101,7 @@ export default function TimelineChart({ frame, range, onRange, ranges }) {
           <text x={px0 - 6} y={yScale(tv) + 3} textAnchor="end" fontSize="9" fontFamily="monospace" fill={C.faint}>{fmtTick(tv)}</text>
         </g>
       ))}
-      <text x={px0 - 6} y={panelTop - 3} textAnchor="end" fontSize="8" fontFamily="monospace" fill={C.faint}>{unit}</text>
+      <text x={px0 - 6} y={panelTop - 3} textAnchor="end" fontSize="8" fontFamily="monospace" fill={C.faint}>{unitLbl}</text>
     </g>
   );
 
@@ -104,30 +112,43 @@ export default function TimelineChart({ frame, range, onRange, ranges }) {
         <svg ref={ref} viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", touchAction: "none" }}
           onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
           <defs>
-            <clipPath id="energyClip"><rect x={px0} y={eTop} width={px1 - px0} height={eH} /></clipPath>
+            <clipPath id="eClip"><rect x={px0} y={eTop} width={px1 - px0} height={eH} /></clipPath>
+            <clipPath id="bClip"><rect x={px0} y={bTop} width={px1 - px0} height={bH} /></clipPath>
           </defs>
-          {/* panel titles */}
-          <text x={px0} y={wTop - 3} fontSize="9" fontFamily="monospace" fill={C.sub}>Weight · kg</text>
-          <text x={px0} y={eTop - 8} fontSize="9" fontFamily="monospace" fill={C.sub}>Energy · kcal/day</text>
 
-          {gridAxis(wTicks, wY, "kg", wTop)}
+          <text x={px0} y={wTop - 3} fontSize="9" fontFamily="monospace" fill={C.sub}>Weight · {weightLabel(unit)}</text>
+          <text x={px0} y={eTop - 8} fontSize="9" fontFamily="monospace" fill={C.sub}>Energy · kcal/day</text>
+          {gridAxis(wTicks, wY, weightLabel(unit), wTop)}
           {gridAxis(eTicks, eY, "kcal", eTop)}
 
-          {/* weight line */}
-          <path d={linePath(frame, (p) => p.w, xAt, wY)} fill="none" stroke={CHART.weight} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          {/* weight */}
+          <path d={linePath(frame, wOf, xAt, wY)} fill="none" stroke={CHART.weight} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
 
-          {/* energy: band, then the two lines (clipped to the panel) */}
-          <g clipPath="url(#energyClip)">
-            {bandPath && <path d={bandPath} fill={CHART.expenditure} opacity="0.12" />}
+          {/* energy (band + two lines, clipped) */}
+          <g clipPath="url(#eClip)">
+            <path d={bandPolygon(frame, (p) => p.e, xAt, eY)} fill={CHART.expenditure} opacity="0.12" />
             <path d={linePath(frame, (p) => p.kin, xAt, eY)} fill="none" stroke={CHART.intake} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
             {hasExp && <path d={linePath(frame, (p) => p.e, xAt, eY)} fill="none" stroke={CHART.expenditure} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
           </g>
 
-          {/* data-end markers (selective direct labels: last value only) */}
-          <EndDot x={xAt(n - 1)} y={wY(lastW.w)} color={CHART.weight} label={`${r1(lastW.w)} kg`} />
-          {hasExp && lastW.e != null && <EndDot x={xAt(n - 1)} y={eY(lastW.e)} color={CHART.expenditure} label={`${r0(lastW.e)}`} />}
+          {/* balance panel (optional) */}
+          {showBalance && (
+            <>
+              <text x={px0} y={bTop - 8} fontSize="9" fontFamily="monospace" fill={C.sub}>Balance · kcal/day (deficit −)</text>
+              {gridAxis(bTicks, bY, "kcal", bTop)}
+              <g clipPath="url(#bClip)">
+                <path d={bandPolygon(frame, defOf, xAt, bY)} fill={C.ink} opacity="0.08" />
+                <path d={linePath(frame, defOf, xAt, bY)} fill="none" stroke={C.ink} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              </g>
+              <line x1={px0} x2={px1} y1={bY(0)} y2={bY(0)} stroke={C.sub} strokeWidth="1" strokeDasharray="2 2" />
+            </>
+          )}
 
-          {/* x-axis date labels */}
+          {/* end-of-line direct labels */}
+          <EndDot x={xAt(n - 1)} y={wY(wOf(last))} color={CHART.weight} label={`${r1(wOf(last))} ${weightLabel(unit)}`} />
+          {hasExp && last.e != null && <EndDot x={xAt(n - 1)} y={eY(last.e)} color={CHART.expenditure} label={`${r0(last.e)}`} />}
+
+          {/* x-axis */}
           {xLabels.map((i) => (
             <text key={i} x={clamp(xAt(i), px0 + 8, px1 - 8)} y={xAxisY + 14} textAnchor="middle" fontSize="9" fontFamily="monospace" fill={C.faint}>{fmtDate(frame[i].date)}</text>
           ))}
@@ -136,9 +157,10 @@ export default function TimelineChart({ frame, range, onRange, ranges }) {
           {hp && (
             <g pointerEvents="none">
               <line x1={hx} x2={hx} y1={wTop} y2={xAxisY} stroke={C.sub} strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
-              {hp.w != null && <circle cx={hx} cy={wY(hp.w)} r="3.5" fill={CHART.weight} stroke="#fff" strokeWidth="1.5" />}
+              {wOf(hp) != null && <circle cx={hx} cy={wY(wOf(hp))} r="3.5" fill={CHART.weight} stroke="#fff" strokeWidth="1.5" />}
               {hp.kin != null && <circle cx={hx} cy={eY(hp.kin)} r="3.5" fill={CHART.intake} stroke="#fff" strokeWidth="1.5" />}
               {hasExp && hp.e != null && <circle cx={hx} cy={eY(hp.e)} r="3.5" fill={CHART.expenditure} stroke="#fff" strokeWidth="1.5" />}
+              {showBalance && hDef != null && <circle cx={hx} cy={bY(hDef)} r="3.5" fill={C.ink} stroke="#fff" strokeWidth="1.5" />}
             </g>
           )}
         </svg>
@@ -148,18 +170,19 @@ export default function TimelineChart({ frame, range, onRange, ranges }) {
             transform: `translateX(${hover / (n - 1) > 0.6 ? "-105%" : "8px"})`, background: C.card, borderColor: C.line, pointerEvents: "none" }}
             className="border rounded-lg px-2 py-1.5 text-xs shadow-sm font-mono whitespace-nowrap">
             <div style={{ color: C.sub }} className="mb-0.5">{fmtDate(hp.date)}</div>
-            <TipRow color={CHART.weight} label="weight" value={hp.w != null ? `${r1(hp.w)} kg` : "—"} />
+            <TipRow color={CHART.weight} label="weight" value={wOf(hp) != null ? `${r1(wOf(hp))} ${weightLabel(unit)}` : "—"} />
             <TipRow color={CHART.intake} label="in" value={hp.kin != null ? `${r0(hp.kin)} kcal` : "—"} />
             {hasExp && <TipRow color={CHART.expenditure} label="burns" value={hp.e != null ? `${r0(hp.e)} kcal` : "—"} />}
+            {showBalance && <TipRow color={C.ink} label="balance" value={hDef != null ? `${hDef > 0 ? "+" : ""}${r0(hDef)} kcal · ${r0(hRate.value)} ${hRate.unit}` : "—"} />}
           </div>
         )}
       </div>
 
-      {/* legend (energy panel has 2 series) */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs" style={{ color: C.sub }}>
         <LegendChip color={CHART.weight} label="weight" />
         <LegendChip color={CHART.intake} label="calories in" />
         {hasExp && <LegendChip color={CHART.expenditure} label="est. expenditure" band />}
+        {showBalance && <LegendChip color={C.ink} label="balance (in − burns)" />}
       </div>
     </div>
   );

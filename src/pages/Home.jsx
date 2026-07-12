@@ -1,15 +1,18 @@
-import { Scale, Activity, ChevronRight } from "lucide-react";
+import { Scale, Activity, NotebookPen, ChevronRight } from "lucide-react";
 import { C } from "../theme.js";
 import { useApp } from "../state/AppState.jsx";
 import { r0, r1 } from "../lib/util.js";
+import { toDisplayWeight, weightLabel } from "../lib/units.js";
 
 // Landing page: pick a tool. Shows a one-line status from each so the home screen is useful,
 // not just a menu.
 export default function Home() {
-  const { p, t, expenditure } = useApp();
+  const { p, t, expenditure, weightLog, intakeLog, expSettings } = useApp();
+  const unit = expSettings.unit || "kg";
   const expStatus = expenditure.enoughData
-    ? `measured ${r0(expenditure.kcal)} kcal · ${r1(expenditure.trendWeightKg)} kg`
+    ? `measured ${r0(expenditure.kcal)} kcal · ${r1(toDisplayWeight(expenditure.trendWeightKg, unit))} ${weightLabel(unit)}`
     : "log weight + intake to estimate";
+  const logStatus = `${weightLog.items.length} weigh-in${weightLog.items.length === 1 ? "" : "s"} · ${intakeLog.items.length} meal${intakeLog.items.length === 1 ? "" : "s"} logged`;
 
   const tools = [
     { href: "#/ration", icon: Scale, title: "Ration planner",
@@ -18,6 +21,9 @@ export default function Home() {
     { href: "#/expenditure", icon: Activity, title: "Energy expenditure",
       desc: "Measure the real maintenance requirement from weight trend + intake, and plan a safe deficit.",
       status: expStatus },
+    { href: "#/log", icon: NotebookPen, title: "Log",
+      desc: "Record weigh-ins and what you dispensed. These feed the expenditure estimate.",
+      status: logStatus },
   ];
 
   return (
@@ -25,7 +31,7 @@ export default function Home() {
       <div className="max-w-xl mx-auto px-4 py-8 sm:py-12">
         <div style={{ color: C.spruce }} className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest mb-1"><Scale size={13} /> cat feeding</div>
         <h1 className="text-2xl font-semibold leading-tight" style={{ letterSpacing: "-0.01em" }}>{p.name}'s kitchen</h1>
-        <p style={{ color: C.sub }} className="text-sm mt-1 mb-6">Two tools that share one profile, food library, and history.</p>
+        <p style={{ color: C.sub }} className="text-sm mt-1 mb-6">Tools that share one profile, food library, and history.</p>
 
         <div className="space-y-3">
           {tools.map((tool) => (

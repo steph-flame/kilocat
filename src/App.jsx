@@ -4,8 +4,9 @@ import { useHashRoute } from "./hooks/useHashRoute.js";
 import Home from "./pages/Home.jsx";
 import RationPlanner from "./pages/RationPlanner.jsx";
 import Expenditure from "./pages/Expenditure.jsx";
+import Log from "./pages/Log.jsx";
 
-const PAGES = { home: Home, ration: RationPlanner, expenditure: Expenditure };
+const PAGES = { home: Home, ration: RationPlanner, expenditure: Expenditure, log: Log };
 
 function Router() {
   const { loaded } = useApp();

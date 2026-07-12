@@ -9,7 +9,7 @@ import { useFoodLibrary } from "../hooks/useFoodLibrary.js";
 import { useLog } from "../hooks/useLog.js";
 
 const defaultTr = () => ({ on: false, days: 7, timelineUnit: "g" });
-const defaultExpSettings = () => ({ pctPerWeek: 1, energyBasis: "formula", algo: "v3" });
+const defaultExpSettings = () => ({ pctPerWeek: 1, energyBasis: "formula", algo: "v3", unit: "kg" });
 
 const Ctx = createContext(null);
 export const useApp = () => useContext(Ctx);
