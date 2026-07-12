@@ -11,7 +11,7 @@ const hintFor = (f) =>
 
 // Name field with live search over the saved-food library. Typing filters saved
 // foods by name; picking one prefills the row's macros. Typing a brand-new name is
-// fine too — it just sets the name and (once complete) gets auto-saved elsewhere.
+// fine too — it just sets the name; the bookmark button on the row saves it to the library.
 export default function FoodSearch({ value, onChangeName, onPick, search }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);

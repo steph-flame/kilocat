@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   distribute, waterfall, transitionAmount, kcalPerG,
   upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed, dedupeFoods, canonicalFoodName,
+  migrateLegacyFood, ensureBuiltins,
 } from "./foods.js";
 
 const sum = (a) => a.reduce((s, x) => s + x, 0);
@@ -127,6 +128,36 @@ describe("canonicalFoodName", () => {
   });
   it("doesn't touch a food that already matches a built-in name", () => {
     expect(canonicalFoodName({ name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941, gramsPerCup: 111 })).toBe("Fromm Kitten Gold");
+  });
+});
+
+describe("migrateLegacyFood (retire the generic Tiki)", () => {
+  it("maps a generic Tiki to the whole-food Chicken & Quail Egg of the matching size", () => {
+    const small = migrateLegacyFood({ id: "1", name: "Tiki Cat After Dark", mode: "perUnit", kcalPerUnit: 70, gramsPerUnit: 79, pct: 17 });
+    expect(small.name).toBe("Tiki Cat After Dark Chicken & Quail Egg — 2.8 oz can");
+    expect(small.kcalPerUnit).toBe(66);
+    expect(small.pct).toBe(17); // ration % preserved
+    const big = migrateLegacyFood({ name: "Tiki Cat After Dark — 5.5 oz can", mode: "perUnit", kcalPerUnit: 130, gramsPerUnit: 156 });
+    expect(big.name).toBe("Tiki Cat After Dark Chicken & Quail Egg — 5.5 oz can");
+    expect(big.kcalPerUnit).toBe(129);
+  });
+  it("leaves a real flavor and non-Tiki foods untouched", () => {
+    const real = { name: "Tiki Cat After Dark Chicken & Beef — 2.8 oz can", mode: "perUnit", kcalPerUnit: 59 };
+    expect(migrateLegacyFood(real)).toBe(real);
+    const other = { name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941 };
+    expect(migrateLegacyFood(other)).toBe(other);
+  });
+});
+
+describe("ensureBuiltins", () => {
+  it("adds missing built-ins and keeps the user's own foods", () => {
+    const out = ensureBuiltins([{ id: "u", name: "My Homemade Mix", mode: "perKg", kcalPerKg: 1500 }]);
+    expect(out.some((f) => f.name === "My Homemade Mix")).toBe(true);
+    expect(out.some((f) => f.name === "Fromm Kitten Gold")).toBe(true); // built-in added
+    expect(out.length).toBeGreaterThan(makeLibrarySeed().length);
+  });
+  it("is a no-op when all built-ins are already present", () => {
+    expect(ensureBuiltins(makeLibrarySeed())).toHaveLength(makeLibrarySeed().length);
   });
 });
 

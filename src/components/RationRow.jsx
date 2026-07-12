@@ -1,4 +1,4 @@
-import { Info, X } from "lucide-react";
+import { Info, X, BookmarkPlus, BookmarkCheck } from "lucide-react";
 import { C } from "../theme.js";
 import { num } from "../lib/util.js";
 import { kcalPerG, libEntry } from "../lib/foods.js";
@@ -6,7 +6,7 @@ import { Field, NumInput } from "./primitives.jsx";
 import FoodSearch from "./FoodSearch.jsx";
 
 /* ---------- one food row, used by every list ---------- */
-export default function RationRow({ f, target, onSet, onSlidePct, onPrefill, onRemove, fridgeDays, searchFoods }) {
+export default function RationRow({ f, target, onSet, onSlidePct, onPrefill, onRemove, fridgeDays, searchFoods, onSave, saved, canSave }) {
   const kpg = kcalPerG(f);
   const kcal = target * num(f.pct) / 100;
   const grams = kpg > 0 ? kcal / kpg : 0;
@@ -33,6 +33,13 @@ export default function RationRow({ f, target, onSet, onSlidePct, onPrefill, onR
             <button key={m} onClick={() => onSet(f.id, "mode", m)} style={{ background: f.mode === m ? C.spruce : "transparent", color: f.mode === m ? "#fff" : C.sub }} className="text-xs px-2 py-1 font-mono">{lbl}</button>
           ))}
         </div>
+        {onSave && (
+          <button onClick={() => canSave && onSave(f)} disabled={!canSave}
+            title={saved ? "Saved to your foods" : canSave ? "Save to your foods" : "Add a name and calories first"}
+            style={{ color: saved ? C.spruce : canSave ? C.sub : C.line }} className="p-1">
+            {saved ? <BookmarkCheck size={16} /> : <BookmarkPlus size={16} />}
+          </button>
+        )}
         {onRemove && <button onClick={() => onRemove(f.id)} style={{ color: C.faint }} className="p-1"><X size={15} /></button>}
       </div>
       <div className="grid grid-cols-2 gap-2">

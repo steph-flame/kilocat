@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { num, r1 } from "../lib/util.js";
 import { computeTargets, seedProfile, bcsToPct, pctToBcs } from "../lib/nutrition.js";
-import { makeRationSeed, makeStartSeed, makeLibrarySeed, isCompleteFood, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName } from "../lib/foods.js";
+import { makeRationSeed, makeStartSeed, makeLibrarySeed, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName, migrateLegacyFood, ensureBuiltins } from "../lib/foods.js";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure } from "../lib/expenditure.js";
 import { usePersistence, store } from "../lib/storage.js";
 import { useFoodList } from "../hooks/useFoodList.js";
@@ -31,33 +31,25 @@ export function AppProvider({ children }) {
     { profile: p, ration: ration.items, start: start.items, library: library.foods,
       weightLog: weightLog.items, intakeLog: intakeLog.items, tr, fridgeDays, expSettings },
     (d) => {
-      // Clean up legacy food names on load: strip "(dry)"/"(wet)" and snap macro-identical
-      // near-duplicates to their canonical built-in name, so auto-save can't re-inject them.
-      const clean = (f) => {
-        if (f.name == null) return f;
-        const s = { ...f, name: stripKind(f.name) };
-        return { ...s, name: canonicalFoodName(s) };
-      };
+      // Clean up legacy food data on load: strip "(dry)"/"(wet)", snap macro-identical
+      // near-duplicates to their canonical built-in name, and retire the generic Tiki.
+      const cleanName = (f) => (f.name == null ? f : { ...f, name: stripKind(f.name) });
+      const cleanFood = (f) => { const s = cleanName(f); return s.name == null ? s : migrateLegacyFood({ ...s, name: canonicalFoodName(s) }); };
       if (d.profile) setP(d.profile);
-      if (d.ration) ration.setItems(d.ration.map(clean));
-      if (d.start) start.setItems(d.start.map(clean));
-      if (d.library) library.setFoods(dedupeFoods(d.library.map(clean))); // merge legacy duplicates
+      if (d.ration) ration.setItems(d.ration.map(cleanFood));
+      if (d.start) start.setItems(d.start.map(cleanFood));
+      if (d.library) library.setFoods(dedupeFoods(ensureBuiltins(d.library.map(cleanFood)))); // merge dupes + pick up new built-ins
       if (d.weightLog) weightLog.setItems(d.weightLog);
-      if (d.intakeLog) intakeLog.setItems(d.intakeLog.map(clean));
+      if (d.intakeLog) intakeLog.setItems(d.intakeLog.map(cleanName));
       if (d.tr) setTr(d.tr);
       if (typeof d.fridgeDays === "number") setFridgeDays(d.fridgeDays);
       if (d.expSettings) setExpSettingsRaw({ ...defaultExpSettings(), ...d.expSettings });
     }
   );
 
-  // Auto-save foods: once a ration/start row has a name + energy, remember it (debounced).
-  useEffect(() => {
-    if (!loaded) return;
-    const complete = [...ration.items, ...start.items].filter(isCompleteFood).map(toLibraryEntry);
-    if (!complete.length) return;
-    const id = setTimeout(() => library.upsertMany(complete), 800);
-    return () => clearTimeout(id);
-  }, [loaded, ration.items, start.items]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Foods enter the library only on an explicit save click (see saveFood) — never
+  // automatically, so typing a food doesn't silently accumulate library entries.
+  const saveFood = (f) => library.upsert(toLibraryEntry(f));
 
   const t = useMemo(() => computeTargets(p), [p]);
   const expenditure = useMemo(() => {
@@ -87,7 +79,7 @@ export function AppProvider({ children }) {
 
   const value = {
     loaded, p, set, setFactor, ageUnit, ageDisplay, setAgeDisplay, setBcs, setPct, reset,
-    ration, start, library, weightLog, intakeLog,
+    ration, start, library, weightLog, intakeLog, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
     t, expenditure,
   };

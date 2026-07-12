@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Plus, Scale, Info, ChevronDown, ChevronRight, ChevronLeft, RotateCcw, ArrowRight, Activity, NotebookPen } from "lucide-react";
 import { C } from "../theme.js";
 import { num, r0, r1 } from "../lib/util.js";
-import { transitionAmount } from "../lib/foods.js";
+import { transitionAmount, isCompleteFood } from "../lib/foods.js";
 import { planWeightChange, autoDirection } from "../lib/weightPlan.js";
 import { toDisplayWeight, fromDisplayWeight, weightLabel, round5 } from "../lib/units.js";
 import { useApp } from "../state/AppState.jsx";
@@ -13,9 +13,10 @@ import { Field, NumInput, Toggle, Row, RefRow, Note } from "../components/primit
 export default function RationPlanner() {
   const {
     p, set, setFactor, ageUnit, ageDisplay, setAgeDisplay, setBcs, setPct, reset,
-    t, ration, start, library, tr, setTr, fridgeDays, setFridgeDays,
+    t, ration, start, library, saveFood, tr, setTr, fridgeDays, setFridgeDays,
     expenditure, expSettings, setExpSettings,
   } = useApp();
+  const savedNames = new Set(library.foods.map((x) => x.name.trim().toLowerCase()));
   const [showMath, setShowMath] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -63,6 +64,7 @@ export default function RationPlanner() {
           <RationRow key={f.id} f={f} target={target} fridgeDays={fridgeDays}
             searchFoods={library.search}
             onSet={list.setField} onSlidePct={list.slide} onPrefill={list.patch}
+            onSave={saveFood} saved={savedNames.has(f.name.trim().toLowerCase())} canSave={isCompleteFood(f)}
             onRemove={opts.keepOne && list.items.length <= 1 ? null : list.remove} />
         ))}
       </div>

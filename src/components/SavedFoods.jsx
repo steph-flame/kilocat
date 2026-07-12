@@ -3,9 +3,9 @@ import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { C } from "../theme.js";
 import { Field, NumInput } from "./primitives.jsx";
 
-// The library manager: every food you've entered is auto-saved here, and every
-// field stays editable. Editing a saved food changes what future searches prefill;
-// it doesn't retroactively touch rations you've already built.
+// The library manager: foods you explicitly save (the bookmark on a food row) live here,
+// starter foods included, and every field stays editable. Editing a saved food changes what
+// future searches prefill; it doesn't retroactively touch rations you've already built.
 export default function SavedFoods({ library }) {
   const [open, setOpen] = useState(false);
   const foods = library.foods;
@@ -20,7 +20,7 @@ export default function SavedFoods({ library }) {
         <span style={{ color: C.faint }} className="text-xs font-mono">{foods.length}</span>
       </button>
       {!open && (
-        <p style={{ color: C.faint }} className="text-xs mt-1">Foods you enter are remembered here and offered when you search. Open to edit or remove them.</p>
+        <p style={{ color: C.faint }} className="text-xs mt-1">Save a food with the bookmark on its row; saved foods are offered when you search. Open to edit or remove them.</p>
       )}
       {open && (
         <div className="mt-3 space-y-3">

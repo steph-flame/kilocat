@@ -170,6 +170,32 @@ export function canonicalFoodName(f) {
   return hit ? hit.name : f.name;
 }
 
+// Legacy generic "Tiki Cat After Dark" with no flavor — every real flavor contains "Chicken",
+// so the absence of it marks the old placeholder entries/seed.
+const isLegacyGenericTiki = (name) => {
+  const n = String(name || "").trim();
+  return /^tiki cat after dark\b/i.test(n) && !/chicken/i.test(n);
+};
+
+// Retire the legacy generic Tiki: map it to the whole-food Chicken & Quail Egg of the matching
+// can size — a sensible, editable default now that specific flavors exist. Others pass through.
+export function migrateLegacyFood(f) {
+  if (!f || !isLegacyGenericTiki(f.name)) return f;
+  const big = /5\.5/.test(String(f.name)) || num(f.gramsPerUnit) >= 120;
+  const b = BUILTIN_FOODS.find((x) => x.name === `Tiki Cat After Dark Chicken & Quail Egg — ${big ? "5.5" : "2.8"} oz can`);
+  return b ? { ...f, name: b.name, mode: b.mode, ...macrosOf(b) } : f;
+}
+
+// Ensure every current built-in is present in a saved library (adds only what's missing,
+// leaves the user's own foods), so existing users pick up food-list changes on load.
+export function ensureBuiltins(list) {
+  const out = list.slice();
+  for (const b of BUILTIN_FOODS) {
+    if (!out.some((f) => keyOf(f.name) === keyOf(b.name))) out.push({ id: uid(), name: b.name, mode: b.mode, ...macrosOf(b) });
+  }
+  return out;
+}
+
 // One-time cleanup for a saved library: merge entries that are the same food once the
 // "(dry)"/"(wet)" suffix is ignored, keeping the clean name and filling in any missing
 // macros from the duplicate. Order-preserving and idempotent.
