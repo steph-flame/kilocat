@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   distribute, waterfall, transitionAmount, kcalPerG,
-  upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed,
+  upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed, dedupeFoods,
 } from "./foods.js";
 
 const sum = (a) => a.reduce((s, x) => s + x, 0);
@@ -86,6 +86,33 @@ describe("food library", () => {
     expect(searchFoods(seed, "orijen")).toHaveLength(3);
     expect(searchFoods(seed, "")).toHaveLength(seed.length);
     expect(searchFoods(seed, "zzz")).toHaveLength(0);
+  });
+  it("built-in names carry no (dry)/(wet) suffix", () => {
+    expect(makeLibrarySeed().some((f) => /\((?:dry|wet)\)/i.test(f.name))).toBe(false);
+  });
+});
+
+describe("dedupeFoods", () => {
+  it("merges a food and its (dry)-suffixed twin, keeping the clean name + macros", () => {
+    const out = dedupeFoods([
+      { id: "a", name: "Fromm Kitten Gold (dry)", mode: "perKg", kcalPerKg: 3941, gramsPerCup: "" },
+      { id: "b", name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: "", gramsPerCup: 111 },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("Fromm Kitten Gold");
+    expect(out[0].kcalPerKg).toBe(3941); // filled from the twin
+    expect(out[0].gramsPerCup).toBe(111);
+  });
+  it("keeps genuinely different foods and preserves order", () => {
+    const out = dedupeFoods([
+      { id: "1", name: "Orijen Original Cat", mode: "perKg", kcalPerKg: 4150 },
+      { id: "2", name: "Orijen Fit & Trim", mode: "perKg", kcalPerKg: 3700 },
+    ]);
+    expect(out.map((f) => f.name)).toEqual(["Orijen Original Cat", "Orijen Fit & Trim"]);
+  });
+  it("is idempotent", () => {
+    const once = dedupeFoods(makeLibrarySeed());
+    expect(dedupeFoods(once)).toEqual(once);
   });
 });
 

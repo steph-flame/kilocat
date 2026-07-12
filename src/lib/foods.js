@@ -65,24 +65,27 @@ export function transitionAmount(f, blendFrac, listSum, target, unit) {
 }
 
 /* ---------- seeds ---------- */
+// Names/macros match a BUILTIN_FOODS entry exactly, so auto-save merges them into the same
+// library entry rather than creating a near-duplicate.
 export const makeRationSeed = () => [
-  { ...blankFood(), name: "Tiki Cat After Dark", mode: "perUnit", kcalPerUnit: 70, gramsPerUnit: 79.4, pct: 17 },
-  { ...blankFood(), name: "Instinct Ultimate Protein (dry)", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110, pct: 83 },
+  { ...blankFood(), name: "Tiki Cat After Dark — 2.8 oz can", mode: "perUnit", kcalPerUnit: 70, gramsPerUnit: 79, pct: 17 },
+  { ...blankFood(), name: "Instinct Ultimate Protein Chicken", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110, pct: 83 },
 ];
 export const makeStartSeed = () => [{ ...blankFood(), name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941, gramsPerCup: 111, pct: 100 }];
 
 /* ---------- food library ---------- */
-// Curated starter foods — verified kcal/kg (or kcal/can) and grams/cup from labels.
+// Curated starter foods — verified kcal/kg (or kcal/can) and grams/cup from labels. No
+// "(dry)"/"(wet)" in names: the mode already carries that, and it only bred duplicates.
 // Own the list rather than depend on a sparse external DB; the user's saved foods extend it.
 export const BUILTIN_FOODS = [
   { name: "Tiki Cat After Dark — 2.8 oz can", mode: "perUnit", kcalPerUnit: 70, gramsPerUnit: 79 },
   { name: "Tiki Cat After Dark — 5.5 oz can", mode: "perUnit", kcalPerUnit: 130, gramsPerUnit: 156 },
-  { name: "Instinct Ultimate Protein Chicken (dry)", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110 },
-  { name: "Orijen Original Cat (dry)", mode: "perKg", kcalPerKg: 4150, gramsPerCup: 124 },
-  { name: "Orijen Fit & Trim (dry)", mode: "perKg", kcalPerKg: 3700, gramsPerCup: 120 },
-  { name: "Orijen Guardian 8 (dry)", mode: "perKg", kcalPerKg: 3980, gramsPerCup: 127 },
-  { name: "Fromm Kitten Gold (dry)", mode: "perKg", kcalPerKg: 3941, gramsPerCup: 111 },
-  { name: "Fromm Adult Gold (dry)", mode: "perKg", kcalPerKg: 3820, gramsPerCup: 103 },
+  { name: "Instinct Ultimate Protein Chicken", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110 },
+  { name: "Orijen Original Cat", mode: "perKg", kcalPerKg: 4150, gramsPerCup: 124 },
+  { name: "Orijen Fit & Trim", mode: "perKg", kcalPerKg: 3700, gramsPerCup: 120 },
+  { name: "Orijen Guardian 8", mode: "perKg", kcalPerKg: 3980, gramsPerCup: 127 },
+  { name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941, gramsPerCup: 111 },
+  { name: "Fromm Adult Gold", mode: "perKg", kcalPerKg: 3820, gramsPerCup: 103 },
 ];
 
 // The macro fields that define a food, independent of any ration (%, id excluded).
@@ -129,4 +132,28 @@ export function searchFoods(list, query) {
   const q = keyOf(query);
   if (!q) return list;
   return list.filter((f) => f.name.toLowerCase().includes(q));
+}
+
+// Drop a trailing "(dry)"/"(wet)" — noise, since the mode already says which.
+export const stripKind = (name) => String(name || "").replace(/\s*\((?:dry|wet)\)\s*$/i, "").trim();
+
+// One-time cleanup for a saved library: merge entries that are the same food once the
+// "(dry)"/"(wet)" suffix is ignored, keeping the clean name and filling in any missing
+// macros from the duplicate. Order-preserving and idempotent.
+export function dedupeFoods(list) {
+  const byKey = new Map();
+  const out = [];
+  for (const f of list) {
+    const key = keyOf(stripKind(f.name));
+    if (!key) { out.push(f); continue; }
+    if (byKey.has(key)) {
+      const cur = byKey.get(key);
+      for (const k of MACRO_KEYS) if (!num(cur[k]) && num(f[k])) cur[k] = f[k];
+    } else {
+      const clean = { ...f, name: stripKind(f.name) };
+      byKey.set(key, clean);
+      out.push(clean);
+    }
+  }
+  return out;
 }

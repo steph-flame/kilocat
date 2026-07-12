@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { num, r1 } from "../lib/util.js";
 import { computeTargets, seedProfile, bcsToPct, pctToBcs } from "../lib/nutrition.js";
-import { makeRationSeed, makeStartSeed, makeLibrarySeed, isCompleteFood, toLibraryEntry } from "../lib/foods.js";
+import { makeRationSeed, makeStartSeed, makeLibrarySeed, isCompleteFood, toLibraryEntry, dedupeFoods } from "../lib/foods.js";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure } from "../lib/expenditure.js";
 import { usePersistence, store } from "../lib/storage.js";
 import { useFoodList } from "../hooks/useFoodList.js";
@@ -34,7 +34,7 @@ export function AppProvider({ children }) {
       if (d.profile) setP(d.profile);
       if (d.ration) ration.setItems(d.ration);
       if (d.start) start.setItems(d.start);
-      if (d.library) library.setFoods(d.library);
+      if (d.library) library.setFoods(dedupeFoods(d.library)); // clean up legacy duplicates
       if (d.weightLog) weightLog.setItems(d.weightLog);
       if (d.intakeLog) intakeLog.setItems(d.intakeLog);
       if (d.tr) setTr(d.tr);
