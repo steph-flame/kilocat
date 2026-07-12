@@ -17,10 +17,13 @@ import { matmul, transpose, matadd, symmetrize, diag, identity } from "./mat.js"
 // from DEXA body-composition studies (feline weight loss is ~73–86% fat: Opetz 2023,
 // German 2008) × per-tissue energy densities (fat ~9,440, lean ~1,816 kcal/kg; Hall 2008),
 // giving ~7,400–8,350 kcal/kg. That brackets the human figure and leans slightly higher,
-// because clinical (high-protein) feline loss is more fat-dominated. 7800 sits near the
-// centre of that inferred range and is chosen to bias toward gentler (safer) deficits — a
-// lower ρ means a smaller deficit for a given loss rate, i.e. a higher calorie target.
-// (8000 is also defensible for strongly fat-sparing high-protein diets.) NB: gaining weight
+// because clinical (high-protein) feline loss is more fat-dominated. 7800 is chosen simply
+// because it's near the CENTRE of that inferred range (8000 is also defensible for strongly
+// fat-sparing diets). Note ρ's effect on a measured-basis loss target nearly cancels: a
+// lower ρ shrinks the prescribed deficit (raises the target) but also lowers the *estimated*
+// maintenance (lowers it) — net target ≈ mean intake + ρ·(observed − target rate), so ρ
+// barely moves it. The "lower ρ = gentler target" shortcut only holds for a FIXED (vet-
+// formula) maintenance, i.e. the cold start. NB: gaining weight
 // costs MORE per kg (tissue synthesis is only ~60–80% efficient), but that extra heat lands
 // in the ESTIMATED expenditure via the energy balance, so ρ stays the tissue density for
 // both directions. Citations in the README. Tunable.
