@@ -1,13 +1,6 @@
 import { useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { C } from "../theme.js";
-import { num } from "../lib/util.js";
-
-// A short human hint of a saved food's energy, for the dropdown row.
-const hintFor = (f) =>
-  f.mode === "perKg"
-    ? (num(f.kcalPerKg) > 0 ? `${num(f.kcalPerKg)} kcal/kg` : "dry")
-    : (num(f.kcalPerUnit) > 0 ? `${num(f.kcalPerUnit)} kcal/can` : "wet");
 
 // Name field with live search over the saved-food library. Typing filters saved
 // foods by name; picking one prefills the row's macros. Typing a brand-new name is
@@ -65,11 +58,10 @@ export default function FoodSearch({ value, onChangeName, onPick, search }) {
                 type="button"
                 onClick={() => choose(f)}
                 onMouseEnter={() => setActive(i)}
-                style={{ background: i === active ? C.spruceSoft : "transparent" }}
-                className="w-full text-left px-3 py-2 flex items-baseline justify-between gap-3"
+                style={{ background: i === active ? C.spruceSoft : "transparent", color: C.ink }}
+                className="w-full text-left px-3 py-2 text-sm break-words leading-snug"
               >
-                <span style={{ color: C.ink }} className="text-sm truncate">{f.name}</span>
-                <span style={{ color: C.faint }} className="text-xs font-mono shrink-0">{hintFor(f)}</span>
+                {f.name}
               </button>
             </li>
           ))}
