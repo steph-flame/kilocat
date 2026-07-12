@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { num, r1 } from "../lib/util.js";
 import { computeTargets, seedProfile, bcsToPct, pctToBcs } from "../lib/nutrition.js";
-import { makeRationSeed, makeStartSeed, makeLibrarySeed, isCompleteFood, toLibraryEntry, dedupeFoods, stripKind } from "../lib/foods.js";
+import { makeRationSeed, makeStartSeed, makeLibrarySeed, isCompleteFood, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName } from "../lib/foods.js";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure } from "../lib/expenditure.js";
 import { usePersistence, store } from "../lib/storage.js";
 import { useFoodList } from "../hooks/useFoodList.js";
@@ -31,13 +31,17 @@ export function AppProvider({ children }) {
     { profile: p, ration: ration.items, start: start.items, library: library.foods,
       weightLog: weightLog.items, intakeLog: intakeLog.items, tr, fridgeDays, expSettings },
     (d) => {
-      // Strip legacy "(dry)"/"(wet)" from saved food names on load, so auto-save can't
-      // re-inject a suffixed name back into the (deduped) library.
-      const clean = (f) => ({ ...f, name: f.name == null ? f.name : stripKind(f.name) });
+      // Clean up legacy food names on load: strip "(dry)"/"(wet)" and snap macro-identical
+      // near-duplicates to their canonical built-in name, so auto-save can't re-inject them.
+      const clean = (f) => {
+        if (f.name == null) return f;
+        const s = { ...f, name: stripKind(f.name) };
+        return { ...s, name: canonicalFoodName(s) };
+      };
       if (d.profile) setP(d.profile);
       if (d.ration) ration.setItems(d.ration.map(clean));
       if (d.start) start.setItems(d.start.map(clean));
-      if (d.library) library.setFoods(dedupeFoods(d.library)); // merge legacy duplicates
+      if (d.library) library.setFoods(dedupeFoods(d.library.map(clean))); // merge legacy duplicates
       if (d.weightLog) weightLog.setItems(d.weightLog);
       if (d.intakeLog) intakeLog.setItems(d.intakeLog.map(clean));
       if (d.tr) setTr(d.tr);

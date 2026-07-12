@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   distribute, waterfall, transitionAmount, kcalPerG,
-  upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed, dedupeFoods,
+  upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed, dedupeFoods, canonicalFoodName,
 } from "./foods.js";
 
 const sum = (a) => a.reduce((s, x) => s + x, 0);
@@ -113,6 +113,20 @@ describe("dedupeFoods", () => {
   it("is idempotent", () => {
     const once = dedupeFoods(makeLibrarySeed());
     expect(dedupeFoods(once)).toEqual(once);
+  });
+});
+
+describe("canonicalFoodName", () => {
+  it("snaps a macro-identical name-prefix to the built-in (Instinct generic → Chicken)", () => {
+    const f = { name: "Instinct Ultimate Protein", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110, kcalPerUnit: "", gramsPerUnit: "" };
+    expect(canonicalFoodName(f)).toBe("Instinct Ultimate Protein Chicken");
+  });
+  it("leaves a food alone when macros differ", () => {
+    const f = { name: "Instinct Ultimate Protein", mode: "perKg", kcalPerKg: 4000, gramsPerCup: 110 };
+    expect(canonicalFoodName(f)).toBe("Instinct Ultimate Protein");
+  });
+  it("doesn't touch a food that already matches a built-in name", () => {
+    expect(canonicalFoodName({ name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941, gramsPerCup: 111 })).toBe("Fromm Kitten Gold");
   });
 });
 

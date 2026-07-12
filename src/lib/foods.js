@@ -137,6 +137,22 @@ export function searchFoods(list, query) {
 // Drop a trailing "(dry)"/"(wet)" — noise, since the mode already says which.
 export const stripKind = (name) => String(name || "").replace(/\s*\((?:dry|wet)\)\s*$/i, "").trim();
 
+// Snap a food to a built-in's canonical name when they're macro-identical and the built-in
+// name merely extends this one (e.g. legacy "Instinct Ultimate Protein" → the built-in
+// "Instinct Ultimate Protein Chicken"). Only ever renames toward a built-in, and only on an
+// exact macro + mode match with a name-prefix relationship, so it can't merge genuinely
+// different foods. Returns the (possibly renamed) food's name.
+export function canonicalFoodName(f) {
+  const nm = keyOf(f.name);
+  if (!nm) return f.name;
+  const hit = BUILTIN_FOODS.find((b) =>
+    b.mode === f.mode &&
+    keyOf(b.name) !== nm &&
+    MACRO_KEYS.every((k) => num(b[k]) === num(f[k])) &&
+    (keyOf(b.name).startsWith(nm) || nm.startsWith(keyOf(b.name))));
+  return hit ? hit.name : f.name;
+}
+
 // One-time cleanup for a saved library: merge entries that are the same food once the
 // "(dry)"/"(wet)" suffix is ignored, keeping the clean name and filling in any missing
 // macros from the duplicate. Order-preserving and idempotent.
