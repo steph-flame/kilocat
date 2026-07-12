@@ -68,7 +68,7 @@ export function transitionAmount(f, blendFrac, listSum, target, unit) {
 // Names/macros match a BUILTIN_FOODS entry exactly, so auto-save merges them into the same
 // library entry rather than creating a near-duplicate.
 export const makeRationSeed = () => [
-  { ...blankFood(), name: "Tiki Cat After Dark — 2.8 oz can", mode: "perUnit", kcalPerUnit: 70, gramsPerUnit: 79, pct: 17 },
+  { ...blankFood(), name: "Tiki Cat After Dark Chicken & Quail Egg — 2.8 oz can", mode: "perUnit", kcalPerUnit: 66, gramsPerUnit: 79, pct: 17 },
   { ...blankFood(), name: "Instinct Ultimate Protein Chicken", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110, pct: 83 },
 ];
 export const makeStartSeed = () => [{ ...blankFood(), name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941, gramsPerCup: 111, pct: 100 }];
@@ -77,9 +77,26 @@ export const makeStartSeed = () => [{ ...blankFood(), name: "Fromm Kitten Gold",
 // Curated starter foods — verified kcal/kg (or kcal/can) and grams/cup from labels. No
 // "(dry)"/"(wet)" in names: the mode already carries that, and it only bred duplicates.
 // Own the list rather than depend on a sparse external DB; the user's saved foods extend it.
+// Tiki Cat After Dark — whole-food ("in broth") line, all 6 flavors × both can sizes.
+// kcal/can are the official tikipets.com values (2026); the pâté and mousse lines share
+// flavor names but run higher, and are intentionally excluded. Cans: 2.8 oz ≈ 79 g,
+// 5.5 oz ≈ 156 g (oz→g; Tiki labels by ounce).
+const TIKI_AFTER_DARK = [
+  // flavor, 2.8 oz kcal, 5.5 oz kcal
+  ["Chicken", 66, 128],
+  ["Chicken & Quail Egg", 66, 129],
+  ["Chicken & Beef", 59, 116],
+  ["Chicken & Duck", 59, 114],
+  ["Chicken & Lamb", 61, 120],
+  ["Chicken & Pork", 59, 116],
+];
+const tikiAfterDark = TIKI_AFTER_DARK.flatMap(([flavor, k28, k55]) => [
+  { name: `Tiki Cat After Dark ${flavor} — 2.8 oz can`, mode: "perUnit", kcalPerUnit: k28, gramsPerUnit: 79 },
+  { name: `Tiki Cat After Dark ${flavor} — 5.5 oz can`, mode: "perUnit", kcalPerUnit: k55, gramsPerUnit: 156 },
+]);
+
 export const BUILTIN_FOODS = [
-  { name: "Tiki Cat After Dark — 2.8 oz can", mode: "perUnit", kcalPerUnit: 70, gramsPerUnit: 79 },
-  { name: "Tiki Cat After Dark — 5.5 oz can", mode: "perUnit", kcalPerUnit: 130, gramsPerUnit: 156 },
+  ...tikiAfterDark,
   { name: "Instinct Ultimate Protein Chicken", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110 },
   { name: "Orijen Original Cat", mode: "perKg", kcalPerKg: 4150, gramsPerCup: 124 },
   { name: "Orijen Fit & Trim", mode: "perKg", kcalPerKg: 3700, gramsPerCup: 120 },
