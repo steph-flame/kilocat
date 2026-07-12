@@ -35,6 +35,18 @@ export function dailyReduce(entries, reduce) {
     .map(([date, vals]) => ({ date, value: reduce(vals) }));
 }
 
+// Group dated entries by day → [{ date, items }], newest day first. Generic (the
+// intake-log display and the chart's daily totals both use it).
+export function groupByDay(entries) {
+  const byDay = new Map();
+  for (const e of entries) {
+    if (!e || e.date == null) continue;
+    if (!byDay.has(e.date)) byDay.set(e.date, []);
+    byDay.get(e.date).push(e);
+  }
+  return [...byDay.entries()].sort((a, b) => (a[0] > b[0] ? -1 : 1)).map(([date, items]) => ({ date, items }));
+}
+
 // Expand a sparse daily series to every day in its span, filling gaps.
 // method "interp": linear interpolation between known points (right for weight).
 // method "hold": carry the previous value forward (right for a step-like signal).

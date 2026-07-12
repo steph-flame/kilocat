@@ -1,0 +1,67 @@
+import { describe, it, expect } from "vitest";
+import { extent, niceTicks, linScale } from "./scale.js";
+import { buildDailyFrame, historySpanDays } from "./timeline.js";
+import { groupByDay } from "./series.js";
+
+describe("scale", () => {
+  it("extent ignores nulls/NaN", () => {
+    expect(extent([3, null, 1, NaN, 2])).toEqual([1, 3]);
+    expect(extent([])).toEqual([0, 1]);
+  });
+  it("niceTicks returns round, spanning values", () => {
+    const t = niceTicks(2, 97, 5);
+    expect(t[0]).toBeLessThanOrEqual(2);
+    expect(t[t.length - 1]).toBeGreaterThanOrEqual(97);
+    expect(t).toContain(40); // evenly spaced round steps (0,20,40,…)
+    const gaps = t.slice(1).map((v, i) => v - t[i]);
+    expect(new Set(gaps).size).toBe(1); // uniform spacing
+  });
+  it("linScale maps domain endpoints to range endpoints", () => {
+    const s = linScale([0, 10], [0, 100]);
+    expect(s(0)).toBe(0); expect(s(5)).toBe(50); expect(s(10)).toBe(100);
+  });
+  it("linScale guards a zero-width domain", () => {
+    expect(() => linScale([5, 5], [0, 100])(5)).not.toThrow();
+  });
+});
+
+describe("groupByDay", () => {
+  it("groups entries by day, newest first", () => {
+    const g = groupByDay([
+      { date: "2026-01-01", kcal: 60 },
+      { date: "2026-01-02", kcal: 40 },
+      { date: "2026-01-01", kcal: 30 },
+    ]);
+    expect(g.map((d) => d.date)).toEqual(["2026-01-02", "2026-01-01"]);
+    expect(g[1].items).toHaveLength(2);
+  });
+});
+
+describe("buildDailyFrame", () => {
+  const trend = [
+    { date: "2026-06-01", kg: 5.0, e: 250, sd: 40 },
+    { date: "2026-06-02", kg: 4.99, e: 252, sd: 35 },
+    { date: "2026-06-03", kg: 4.98, e: 255, sd: 30 },
+  ];
+  const intake = [
+    { date: "2026-06-01", value: 200 },
+    { date: "2026-06-01", value: 20 }, // summed → 220
+    { date: "2026-06-03", value: 210 },
+  ];
+  it("aligns weight, intake, expenditure by date; missing intake is null", () => {
+    const frame = buildDailyFrame(trend, intake, 365);
+    expect(frame).toHaveLength(3);
+    expect(frame[0]).toMatchObject({ date: "2026-06-01", w: 5.0, e: 250, kin: 220 });
+    expect(frame[1].kin).toBeNull(); // no intake logged that day
+    expect(frame[2].kin).toBe(210);
+  });
+  it("clips to the range ending at the most recent day", () => {
+    const frame = buildDailyFrame(trend, intake, 1); // just the last day
+    expect(frame).toHaveLength(1);
+    expect(frame[0].date).toBe("2026-06-03");
+  });
+  it("historySpanDays counts inclusive days", () => {
+    expect(historySpanDays(trend)).toBe(3);
+    expect(historySpanDays([])).toBe(0);
+  });
+});

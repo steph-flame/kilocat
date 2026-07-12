@@ -1,12 +1,15 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { ChevronLeft, Scale, Activity, Plus, X, Info, TrendingDown } from "lucide-react";
-import { C } from "../theme.js";
+import { C, CHART } from "../theme.js";
 import { num, r0, r1 } from "../lib/util.js";
 import { kcalPerG } from "../lib/foods.js";
+import { groupByDay } from "../lib/series.js";
 import { planWeightLoss, RATE } from "../lib/weightPlan.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
+import { buildDailyFrame, RANGES } from "../lib/timeline.js";
 import { useApp } from "../state/AppState.jsx";
 import FoodSearch from "../components/FoodSearch.jsx";
+import TimelineChart from "../components/TimelineChart.jsx";
 import { Field, NumInput, Note } from "../components/primitives.jsx";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -21,6 +24,13 @@ export default function Expenditure() {
   // Maintenance: measured if we have enough data, else the vet-formula fallback.
   const maintenance = e.enoughData ? e.kcal : t.refs.maintain;
   const plan = planWeightLoss({ maintenanceKcal: maintenance, currentKg: t.w, idealKg: t.idealWeight, pctPerWeek: expSettings.pctPerWeek });
+
+  const [range, setRange] = useState("3m");
+  const rangeDays = RANGES.find((r) => r.key === range)?.days;
+  const frame = useMemo(
+    () => buildDailyFrame(e.trend, intakeLog.items.map((x) => ({ date: x.date, value: x.kcal })), rangeDays),
+    [e.trend, intakeLog.items, rangeDays],
+  );
 
   return (
     <div style={{ background: C.paper, color: C.ink, minHeight: "100%" }} className="w-full">
@@ -78,6 +88,14 @@ export default function Expenditure() {
             </>
           )}
         </section>
+
+        {/* timeline */}
+        {e.trend.length >= 2 && (
+          <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
+            <TimelineChart frame={frame} range={range} onRange={setRange} ranges={RANGES} />
+            <p style={{ color: C.faint }} className="text-xs mt-2 leading-snug">Where <span style={{ color: CHART.intake }}>calories in</span> sits below <span style={{ color: CHART.expenditure }}>estimated expenditure</span>, she's in a deficit and the weight above trends down. The shaded band is the estimate's 95% confidence, narrowing as data builds.</p>
+          </section>
+        )}
 
         {/* safe deficit planner — adults only; kittens grow into their frame instead */}
         {t.pctOver > 0 && !kitten && (
@@ -202,7 +220,7 @@ function IntakeLog({ log, library }) {
   const [kcal, setKcal] = useState("");
   const computed = num(grams) > 0 && kcalG > 0 ? num(grams) * kcalG : null;
   const effectiveKcal = computed != null ? computed : num(kcal);
-  const recent = [...log.items].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 8);
+  const days = groupByDay(log.items).slice(0, 10); // grouped by day, newest first
   const addEntry = () => {
     if (effectiveKcal > 0) {
       log.add({ date, kcal: r0(effectiveKcal), grams: num(grams) || null, name: name || null });
@@ -229,15 +247,28 @@ function IntakeLog({ log, library }) {
         </div>
         {kcalG > 0 && <p style={{ color: C.faint }} className="text-xs">{name} ≈ {r0(kcalG * 1000)} kcal/kg — grams × that fills kcal automatically.</p>}
       </div>
-      {recent.length > 0 && (
-        <div className="mt-3 space-y-1">
-          {recent.map((en) => (
-            <div key={en.id} className="flex items-center justify-between text-sm font-mono py-1 border-b last:border-0" style={{ borderColor: C.line }}>
-              <span style={{ color: C.sub }}>{en.date} <span style={{ color: C.faint }}>{en.name ? `· ${en.name.split(" ")[0]}` : ""}{en.grams ? ` · ${r0(en.grams)}g` : ""}</span></span>
-              <span className="flex items-center gap-3"><span style={{ color: C.ink }} className="tabular-nums">{r0(en.kcal)} kcal</span>
-                <button onClick={() => log.remove(en.id)} style={{ color: C.faint }}><X size={14} /></button></span>
-            </div>
-          ))}
+      {days.length > 0 && (
+        <div className="mt-3 space-y-3">
+          {days.map(({ date: d, items }) => {
+            const total = items.reduce((s, en) => s + num(en.kcal), 0);
+            return (
+              <div key={d}>
+                <div className="flex items-baseline justify-between border-b pb-1 mb-1" style={{ borderColor: C.line }}>
+                  <span style={{ color: C.ink }} className="text-xs font-mono font-medium">{d}</span>
+                  <span style={{ color: C.spruce }} className="text-xs font-mono tabular-nums">{r0(total)} kcal · {items.length} item{items.length === 1 ? "" : "s"}</span>
+                </div>
+                <div className="space-y-0.5">
+                  {items.map((en) => (
+                    <div key={en.id} className="flex items-center justify-between text-sm font-mono pl-2">
+                      <span style={{ color: C.sub }}>{en.name ? en.name.split(" ").slice(0, 2).join(" ") : "—"}<span style={{ color: C.faint }}>{en.grams ? ` · ${r0(en.grams)}g` : ""}</span></span>
+                      <span className="flex items-center gap-3"><span style={{ color: C.ink }} className="tabular-nums">{r0(en.kcal)} kcal</span>
+                        <button onClick={() => log.remove(en.id)} style={{ color: C.faint }}><X size={14} /></button></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

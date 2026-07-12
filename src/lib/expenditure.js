@@ -143,7 +143,7 @@ export function kalmanEstimateExpenditure(weightEntries = [], intakeEntries = []
   const Q = [[P.qW, 0], [0, P.qE]];
   let x = [wByDay.get(first).z, P.priorKcal];
   let Pcov = [[wByDay.get(first).R, 0], [0, P.priorSdKcal * P.priorSdKcal]];
-  const trend = [{ date: first, kg: x[0], e: x[1] }];
+  const trend = [{ date: first, kg: x[0], e: x[1], sd: Math.sqrt(Pcov[1][1]) }];
 
   for (let k = 1; k < days.length; k++) {
     const d = days[k];
@@ -166,7 +166,7 @@ export function kalmanEstimateExpenditure(weightEntries = [], intakeEntries = []
     } else {
       x = xPred; Pcov = Ppred; // no reading, or a rejected outlier → prediction only
     }
-    trend.push({ date: d, kg: x[0], e: x[1] });
+    trend.push({ date: d, kg: x[0], e: x[1], sd: Math.sqrt(Pcov[1][1]) });
   }
 
   const kcal = x[1];
@@ -222,7 +222,7 @@ export function ucEstimateExpenditure(weightEntries = [], intakeEntries = [], op
   const H = [1, 0, 1];
   let x = [wByDay.get(first).z, P.priorKcal, 0];
   let Pcov = diag([wByDay.get(first).R, P.priorSdKcal * P.priorSdKcal, P.transientSd0 * P.transientSd0]);
-  const trend = [{ date: first, kg: x[0], e: x[1] }];
+  const trend = [{ date: first, kg: x[0], e: x[1], sd: Math.sqrt(Pcov[1][1]) }];
 
   for (let k = 1; k < days.length; k++) {
     const d = days[k];
@@ -244,7 +244,7 @@ export function ucEstimateExpenditure(weightEntries = [], intakeEntries = [], op
     } else {
       x = xPred; Pcov = Ppred;
     }
-    trend.push({ date: d, kg: x[0], e: x[1] }); // report the de-transiented trend weight
+    trend.push({ date: d, kg: x[0], e: x[1], sd: Math.sqrt(Pcov[1][1]) }); // report the de-transiented trend weight
   }
 
   const kcal = x[1];

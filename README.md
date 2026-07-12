@@ -37,6 +37,10 @@ tools that share one profile, food library, and history.
 - **Safe weight-loss plan** — a *calorie* deficit off maintenance, sized to a vet-safe
   rate (0.5–2%/week, default 1%), with a nutritional floor, an honest projected rate,
   and a weeks-to-ideal estimate. Disabled for kittens (growth confounds the balance).
+- **Timeline** — weight and energy (calories in vs. estimated expenditure, with its
+  confidence band) on two x-aligned panels over a selectable range (1W–1Y), with a
+  hover crosshair. The intake-below-expenditure gap visibly drives the weight trend.
+- Intake log **grouped by day** with per-day totals.
 
 - Everything **saves automatically** on your device (localStorage).
 
@@ -90,10 +94,12 @@ src/
   lib/            pure logic — no React, no I/O (so it's all unit-tested)
     nutrition.js    energy model — RER, MER, BCS↔%, life-stage goals, targets
     foods.js        food math (splits, transitions, energy density) + library
-    series.js       generic time-series math (median, daily-reduce, gap-fill, ewma, linreg)
+    series.js       generic time-series math (median, daily-reduce, group-by-day, ewma, linreg)
     mat.js          small dense linear algebra (for the Kalman / state-space filters)
     expenditure.js  adaptive back-calc of maintenance (v1 EWMA, v2 Kalman, v3 UC)
     weightPlan.js   safe-deficit prescription (rate → calorie target, floor, timeline)
+    scale.js        chart scale math (extent, nice ticks, linear scale)
+    timeline.js     assembles the weight/intake/expenditure frame + range clipping
     storage.js      persistence only — one JSON blob in localStorage
     util.js         tiny shared number/id helpers
   state/
@@ -106,7 +112,7 @@ src/
   pages/
     Home.jsx        landing → the two tools
     RationPlanner.jsx / Expenditure.jsx   UI only, read shared state via useApp()
-  components/       RationRow, FoodSearch, SavedFoods, primitives
+  components/       RationRow, FoodSearch, SavedFoods, TimelineChart, primitives
   App.jsx           provider + router shell
   theme.js          palette
 research/
