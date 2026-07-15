@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Flat cat-and-bowl mark, app palette (see src/theme.js). Source of truth for the
+       rasterized PNG icons — scripts/gen_icons.py (run once, output committed to public/). -->
+  <rect width="512" height="512" rx="92" fill="#3E5C50"/>
+  <ellipse cx="256" cy="400" rx="160" ry="48" fill="#F6F7F4"/>
+  <ellipse cx="256" cy="388" rx="124" ry="28" fill="#B7791F"/>
+  <circle cx="256" cy="196" r="104" fill="#F6F7F4"/>
+  <polygon points="152,150 170,60 222,142" fill="#F6F7F4"/>
+  <polygon points="360,150 342,60 290,142" fill="#F6F7F4"/>
+  <circle cx="222" cy="196" r="10" fill="#3E5C50"/>
+  <circle cx="290" cy="196" r="10" fill="#3E5C50"/>
+  <polygon points="246,224 266,224 256,236" fill="#B7791F"/>
+</svg>

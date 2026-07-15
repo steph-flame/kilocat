@@ -47,6 +47,10 @@ tools that share one profile, food library, and history.
   daily average and expandable detail; food grouped by day).
 
 - Everything **saves automatically** on your device (localStorage).
+- **Install (PWA)** — Add to Home Screen for an offline-capable, standalone app icon.
+  iOS Safari evicts localStorage after 7 days unused in a browser tab; installed apps
+  are exempt, so this is data-loss protection for your weigh-in history, not just
+  convenience. iOS Safari users get a one-time in-app nudge if not yet installed.
 
 > A planning aid, not veterinary advice. Re-weigh every 3–4 weeks and adjust.
 
