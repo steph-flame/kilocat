@@ -240,7 +240,7 @@ export default function RationPlanner() {
                   );
                 })}
               </div>
-              <p style={{ color: C.faint }} className="text-xs mt-1.5 leading-snug">Resting-at-current (the default) is the firmer, more reliable hold on intake. Growth-at-ideal is gentler — it funds development at her target size and lets frame growth dilute the fat — but it assumes she'll actually grow into that frame, which you can't confirm from a single weigh-in. Start with resting-at-current and re-weigh before loosening to growth-at-ideal.</p>
+              <p style={{ color: C.faint }} className="text-xs mt-1.5 leading-snug">Resting-at-current (the default) is the firmer, more reliable hold on intake. Growth-at-ideal is gentler — it funds development at the target size and lets frame growth dilute the fat — but it assumes the kitten will actually grow into that frame, which you can't confirm from a single weigh-in. Start with resting-at-current and re-weigh before loosening to growth-at-ideal.</p>
             </div>
           )}
           <button onClick={() => setShowMath((s) => !s)} style={{ color: C.spruce }} className="mt-3 inline-flex items-center gap-1 text-xs font-mono">{showMath ? <ChevronDown size={13} /> : <ChevronRight size={13} />} show the math</button>
@@ -344,7 +344,7 @@ export default function RationPlanner() {
         <div style={{ color: C.faint }} className="text-xs leading-relaxed space-y-2 px-1 pb-4">
           <p className="flex gap-1.5"><Info size={13} className="shrink-0 mt-0.5" /><span>Volume readouts (cups, cans) are approximate — kibble density drifts as a hopper empties, so weigh a few dispenses and divide to calibrate. Grams are the honest unit.</span></p>
           <p>Formula: RER = 70 × kg^0.75 (ACVN-endorsed); MER = feline factor × RER (AAHA / Pet Nutrition Alliance). Goal options and factors adapt to life stage. Opened-can life ~3 days is a conservative default; check your food's label.</p>
-          <p>A planning aid, not veterinary advice. Re-weigh every 3–4 weeks and adjust — for a growing kitten, holding steady while she gains frame is a win.</p>
+          <p>A planning aid, not veterinary advice. Re-weigh every 3–4 weeks and adjust — for a growing kitten, holding steady while gaining frame is a win.</p>
         </div>
       </div>
     </div>
