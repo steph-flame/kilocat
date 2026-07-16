@@ -1,5 +1,6 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { num, r1, uid, clamp } from "../lib/util.js";
+import { applySkin, DEFAULT_SKIN, SKINS } from "../theme.js";
 import { computeTargets, seedProfile, bcsToPct, pctToBcs, ageMonthsFromDob, effectiveAgeMonths } from "../lib/nutrition.js";
 import {
   makeRationSeed, makeStartSeed, makeLibrarySeed, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName,
@@ -71,6 +72,12 @@ export function AppProvider({ children }) {
   const [fridgeDays, setFridgeDays] = useState(3);
   const [hydrated, setHydrated] = useState(false); // did we load real saved data (vs. seed defaults)?
   const [storageOk] = useState(probeStorage);
+  // Appearance skin: shared across every cat (like fridgeDays), not per-cat data. Defaults
+  // to "original" and is tolerant of missing/unknown values on load/import (see hydrate,
+  // importData) — an older export simply keeps whatever's already active.
+  const [skin, setSkinState] = useState(DEFAULT_SKIN);
+  const setSkin = (name) => { if (SKINS[name]) setSkinState(name); };
+  useEffect(() => { applySkin(skin); }, [skin]);
 
   const activeCat = catsState.cats[catsState.activeCatId];
   const updateActiveCat = (fn) =>
@@ -89,6 +96,7 @@ export function AppProvider({ children }) {
     }
     if (d.library) library.setFoods(dedupeFoods(ensureBuiltins(d.library.map(cleanFood))));
     if (typeof d.fridgeDays === "number") setFridgeDays(d.fridgeDays);
+    if (typeof d.skin === "string" && SKINS[d.skin]) setSkinState(d.skin);
   };
 
   // Import (user-picked file, Settings → Data): a v2 file is a full backup, so it replaces
@@ -116,9 +124,10 @@ export function AppProvider({ children }) {
     }
     if (raw.library) library.setFoods(dedupeFoods(ensureBuiltins(raw.library.map(cleanFood))));
     if (typeof raw.fridgeDays === "number") setFridgeDays(raw.fridgeDays);
+    if (typeof raw.skin === "string" && SKINS[raw.skin]) setSkinState(raw.skin);
   };
 
-  const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays };
+  const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays, skin };
   const loaded = usePersistence(persistData, hydrate);
   const firstRun = loaded && !hydrated; // showing seed defaults, no saved data yet
 
@@ -239,6 +248,7 @@ export function AppProvider({ children }) {
     today, currentWeight, logWeight,
     ration, start, library, weightLog, intakeLog, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
+    skin, setSkin,
     t, expenditure,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, eraseAll,
     exportData: () => JSON.stringify(persistData, null, 2),

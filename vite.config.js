@@ -24,9 +24,9 @@ export default defineConfig({
         start_url: base,
         scope: base,
         display: "standalone",
-        // Palette from src/theme.js: spruce (primary) / paper (page background).
-        theme_color: "#3E5C50",
-        background_color: "#F6F7F4",
+        // Palette from src/theme.js SKINS.original: accent (clay) / ground (page background).
+        theme_color: "#B05A36",
+        background_color: "#FAF6EE",
         icons: [
           { src: "icon-192.png", sizes: "192x192", type: "image/png" },
           { src: "icon-512.png", sizes: "512x512", type: "image/png" },
