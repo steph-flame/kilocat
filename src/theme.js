@@ -67,6 +67,9 @@ function deriveSkin(base) {
     ...base,
     accentSoft: mix(base.accent, "#FFFFFF", 0.13),
     secondSoft: mix(base.second, "#FFFFFF", 0.13),
+    // Its own soft tint (not just reused from secondSoft) because in the spruce skin ok
+    // diverges from second — a safe-zone fill must stay green-tinted there too.
+    okSoft: mix(base.ok, "#FFFFFF", 0.13),
     faint: mix(base.soft, base.ground, 0.55),
     warn: WARN,
     warnSoft: WARN_SOFT,
@@ -75,7 +78,7 @@ function deriveSkin(base) {
 
 const VAR_NAMES = [
   "ground", "card", "line", "ink", "soft", "faint",
-  "accent", "accentSoft", "second", "secondSoft", "ok",
+  "accent", "accentSoft", "second", "secondSoft", "ok", "okSoft",
   "data1", "data2", "warn", "warnSoft",
 ];
 
@@ -103,7 +106,7 @@ export const C = {
   sub: "var(--soft)", faint: "var(--faint)", line: "var(--line)",
   spruce: "var(--second)", spruceSoft: "var(--secondSoft)",
   amber: "var(--accent)", amberSoft: "var(--accentSoft)",
-  ok: "var(--ok)",
+  ok: "var(--ok)", okSoft: "var(--okSoft)",
   warn: "var(--warn)", warnSoft: "var(--warnSoft)",
 };
 
