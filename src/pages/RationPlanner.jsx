@@ -101,7 +101,7 @@ export default function RationPlanner() {
         <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
           <div className="flex items-baseline justify-between mb-4">
             <h2 className="font-medium">The cat</h2>
-            <input value={p.name} onChange={(e) => set("name", e.target.value)} style={{ color: C.spruce }} className="text-right text-sm font-mono bg-transparent outline-none w-32" aria-label="name" />
+            <input value={p.name} onChange={(e) => set("name", e.target.value)} autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" style={{ color: C.spruce }} className="text-right text-sm font-mono bg-transparent outline-none w-32" aria-label="Cat's name" />
           </div>
           {/* permanent attributes — set once */}
           <div className="grid grid-cols-2 gap-3">

@@ -40,6 +40,7 @@ export default function FoodSearch({ value, onChangeName, onPick, search }) {
           onFocus={() => setOpen(true)}
           onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 120); }}
           onKeyDown={onKeyDown}
+          autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
           placeholder="Food name — type to search saved foods"
           className="flex-1 text-sm font-medium bg-transparent outline-none w-full"
           aria-label="Food name" aria-autocomplete="list" aria-expanded={show}
