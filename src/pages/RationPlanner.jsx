@@ -258,7 +258,7 @@ export default function RationPlanner() {
                   <Field key={k} label={lbl} suffix={suf}><NumInput value={p.factors[k]} onChange={(v) => setFactor(k, v)} step="0.05" /></Field>
                 ))}
               </div>
-              <p style={{ color: C.faint }} className="text-xs mt-2 leading-snug">Feline defaults (AAHA / Pet Nutrition Alliance). The kitten factor tapers from its peak down to the adult factor by 12 months. vetcalculators.com lists 1.6 / 1.8 for neutered / intact; those are <span style={{ color: C.amber }}>canine</span> and overestimate for a cat.</p>
+              <p style={{ color: C.faint }} className="text-xs mt-2 leading-snug">Feline defaults (AAHA / Pet Nutrition Alliance). The kitten factor tapers from its peak down to the adult factor by 12 months.</p>
             </div>
           )}
         </section>

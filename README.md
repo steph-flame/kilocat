@@ -62,8 +62,6 @@ tools that share one profile, food library, and history.
 - `MER = feline factor × RER`: neutered adult 1.2, intact 1.4, inactive 1.0, weight
   loss 0.8–1.0 (at target weight), gain ~1.6, kitten peak 2.5 tapering to the adult
   factor by 12 months.
-- Note: `vetcalculators.com` lists 1.6 / 1.8 for neutered / intact — those are
-  **canine** factors and overestimate for a cat.
 
 **Adaptive expenditure** (the energy-expenditure tool):
 - Energy balance: `expenditure ≈ mean intake − ρ × (rate of weight change)`, over a

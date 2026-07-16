@@ -5,8 +5,8 @@
 //     neutered adult 1.2 | intact adult 1.4 | inactive/obese-prone 1.0 |
 //     weight loss 0.8-1.0 (at target wt) | weight gain ~1.6 (at target wt) |
 //     kitten peak 2.5, tapering to the adult factor by 12 months.
-//   (AAHA Nutrition Toolkit; Pet Nutrition Alliance MER table.)
-//   vetcalculators.com lists neutered 1.6 / intact 1.8 — those are CANINE.
+//   (AAHA Nutrition Toolkit; Pet Nutrition Alliance MER table. Beware canine
+//   MER factors — 1.6/1.8 — which some calculators list and overfeed a cat.)
 
 import { num, clamp } from "./util.js";
 
