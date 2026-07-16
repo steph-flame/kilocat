@@ -8,7 +8,7 @@ const catLabel = (c) => c.name || "unnamed cat";
 const SKIN_NAMES = { original: "Original", blossom: "Blossom", tidepool: "Tidepool", spruce: "Spruce" };
 
 export default function Settings() {
-  const { p, catsSummary, activeCatId, switchCat, addCat, deleteCat, clearCatHistory, eraseAll, fridgeDays, exportData, importData, skin, setSkin } = useApp();
+  const { p, catsSummary, activeCatId, switchCat, addCat, deleteCat, clearCatHistory, eraseAll, fridgeDays, exportData, importData, skin, setSkin, unit, setUnit } = useApp();
 
   const doExport = () => {
     const blob = new Blob([exportData()], { type: "application/json" });
@@ -66,6 +66,19 @@ export default function Settings() {
               <SkinSwatch key={name} name={name} tokens={SKINS[name]} active={skin === name} onClick={() => setSkin(name)} />
             ))}
           </div>
+        </section>
+
+        {/* units */}
+        <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="font-medium">Units</h2>
+            <div className="flex rounded-full overflow-hidden border" style={{ borderColor: C.line }}>
+              {["kg", "lb"].map((u) => (
+                <button key={u} onClick={() => setUnit(u)} aria-pressed={unit === u} style={{ background: unit === u ? C.spruce : "transparent", color: unit === u ? "#fff" : C.sub }} className="text-xs px-2.5 py-1.5 font-mono">{u}</button>
+              ))}
+            </div>
+          </div>
+          <p style={{ color: C.faint }} className="text-xs">How weight is shown, everywhere — shared across every cat.</p>
         </section>
 
         {/* cats */}

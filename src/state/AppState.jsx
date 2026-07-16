@@ -12,7 +12,7 @@ import { usePersistence, store, probeStorage } from "../lib/storage.js";
 import { useFoodLibrary } from "../hooks/useFoodLibrary.js";
 import {
   addCat as addCatPure, deleteCat as deleteCatPure, clearCatHistory as clearCatHistoryPure, switchCat as switchCatPure,
-  freshCatState, freshProfile, defaultTr, defaultExpSettings,
+  freshCatState, freshProfile, defaultTr, defaultExpSettings, nextCatId, resolveUnit,
 } from "../lib/catStore.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
 
@@ -78,6 +78,10 @@ export function AppProvider({ children }) {
   const [skin, setSkinState] = useState(DEFAULT_SKIN);
   const setSkin = (name) => { if (SKINS[name]) setSkinState(name); };
   useEffect(() => { applySkin(skin); }, [skin]);
+  // Weight display unit (kg/lb): shared across every cat (like skin/fridgeDays), not per-cat
+  // data — used to live in each cat's expSettings. Defaults to "kg".
+  const [unit, setUnitState] = useState("kg");
+  const setUnit = (u) => { if (u === "kg" || u === "lb") setUnitState(u); };
 
   const activeCat = catsState.cats[catsState.activeCatId];
   const updateActiveCat = (fn) =>
@@ -90,13 +94,16 @@ export function AppProvider({ children }) {
     setHydrated(true);
     const d = toV2(raw);
     const cats = catsFromV2(d);
+    let activeCatId;
     if (Object.keys(cats).length) {
-      const activeCatId = d.activeCatId && cats[d.activeCatId] ? d.activeCatId : Object.keys(cats)[0];
+      activeCatId = d.activeCatId && cats[d.activeCatId] ? d.activeCatId : Object.keys(cats)[0];
       setCatsState({ activeCatId, cats });
     }
     if (d.library) library.setFoods(dedupeFoods(ensureBuiltins(d.library.map(cleanFood))));
     if (typeof d.fridgeDays === "number") setFridgeDays(d.fridgeDays);
     if (typeof d.skin === "string" && SKINS[d.skin]) setSkinState(d.skin);
+    const resolved = resolveUnit(d.unit, activeCatId && cats[activeCatId]?.expSettings?.unit);
+    if (resolved) setUnitState(resolved);
   };
 
   // Import (user-picked file, Settings → Data): a v2 file is a full backup, so it replaces
@@ -107,11 +114,13 @@ export function AppProvider({ children }) {
   const importData = (raw) => {
     if (!raw || typeof raw !== "object") return;
     setHydrated(true);
+    let newActiveCat; // the cat that becomes active by this import, if any — for the unit fallback below
     if (raw.v === 2) {
       const cats = catsFromV2(raw);
       if (Object.keys(cats).length) {
         const activeCatId = raw.activeCatId && cats[raw.activeCatId] ? raw.activeCatId : Object.keys(cats)[0];
         setCatsState({ activeCatId, cats });
+        newActiveCat = cats[activeCatId];
       }
     } else {
       const migrated = migrateV1(raw);
@@ -120,14 +129,17 @@ export function AppProvider({ children }) {
       if (Object.keys(rawCat).length) { // a wholly-empty import has nothing to adopt
         const cat = sanitizeCat(rawCat);
         setCatsState((s) => ({ activeCatId: newId, cats: { ...s.cats, [newId]: cat } }));
+        newActiveCat = cat;
       }
     }
     if (raw.library) library.setFoods(dedupeFoods(ensureBuiltins(raw.library.map(cleanFood))));
     if (typeof raw.fridgeDays === "number") setFridgeDays(raw.fridgeDays);
     if (typeof raw.skin === "string" && SKINS[raw.skin]) setSkinState(raw.skin);
+    const resolved = resolveUnit(raw.unit, newActiveCat?.expSettings?.unit);
+    if (resolved) setUnitState(resolved);
   };
 
-  const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays, skin };
+  const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays, skin, unit };
   const loaded = usePersistence(persistData, hydrate);
   const firstRun = loaded && !hydrated; // showing seed defaults, no saved data yet
 
@@ -248,7 +260,7 @@ export function AppProvider({ children }) {
     today, currentWeight, logWeight,
     ration, start, library, weightLog, intakeLog, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
-    skin, setSkin,
+    skin, setSkin, unit, setUnit,
     t, expenditure,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, eraseAll,
     exportData: () => JSON.stringify(persistData, null, 2),

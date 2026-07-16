@@ -7,7 +7,25 @@ import { defaultFactors } from "./nutrition.js";
 import { blankFood } from "./foods.js";
 
 export const defaultTr = () => ({ on: false, days: 7, timelineUnit: "g" });
-export const defaultExpSettings = () => ({ pctPerWeek: 1, energyBasis: "formula", algo: "v3", unit: "kg", direction: "auto", lastMethod: "petScale" });
+// weight unit used to live here (per-cat); it's now a shared top-level field (see AppState.jsx).
+export const defaultExpSettings = () => ({ pctPerWeek: 1, energyBasis: "formula", algo: "v3", direction: "auto", lastMethod: "petScale" });
+
+// The active cat, cycled to the next in catsSummary order — same behavior for the header's
+// tap-to-cycle switcher and the Home masthead's tappable name.
+export const nextCatId = (catsSummary, activeCatId) => {
+  const idx = catsSummary.findIndex((c) => c.id === activeCatId);
+  return catsSummary[(idx + 1) % catsSummary.length].id;
+};
+
+// Resolve the shared weight unit on load/import: the blob's own top-level field if it's a
+// valid unit, else (an older export from before `unit` was promoted out of per-cat
+// expSettings) the given cat's old value. Undefined if neither — caller keeps whatever's
+// already there (the "kg" default on first run, or the current value on import).
+export function resolveUnit(topUnit, legacyUnit) {
+  if (topUnit === "kg" || topUnit === "lb") return topUnit;
+  if (legacyUnit === "kg" || legacyUnit === "lb") return legacyUnit;
+  return undefined;
+}
 
 // A brand-new cat's profile — blank, never a copy of the seed demo cat (Mithril). "maintain"
 // is the first adult goal; goalsForAge falls back to it if the cat turns out to be a kitten

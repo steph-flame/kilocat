@@ -16,7 +16,7 @@ export default function RationPlanner() {
     p, set, setFactor, ageUnit, ageDisplay, dobMissing, setBcs, setPct,
     today, currentWeight, logWeight,
     t, ration, start, library, saveFood, tr, setTr, fridgeDays, setFridgeDays,
-    expenditure, expSettings, setExpSettings,
+    expenditure, expSettings, setExpSettings, unit,
   } = useApp();
   const savedNames = new Set(library.foods.map((x) => x.name.trim().toLowerCase()));
   const [showMath, setShowMath] = useState(true);
@@ -24,7 +24,6 @@ export default function RationPlanner() {
   const [wInput, setWInput] = useState("");
 
   const { age, w: wkg, goalId } = t;
-  const unit = expSettings.unit || "kg";
   const wLbl = weightLabel(unit);
   const showW = (kg) => `${r1(toDisplayWeight(kg, unit))} ${wLbl}`;
   const submitWeight = () => { if (num(wInput) > 0) { logWeight({ kg: fromDisplayWeight(num(wInput), unit) }); setWInput(""); } };
@@ -126,10 +125,7 @@ export default function RationPlanner() {
 
           {/* current state — read from the weight log */}
           <div style={{ borderColor: C.line }} className="mt-4 border-t pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <span style={{ color: C.sub }} className="text-xs">Current weight</span>
-              <button onClick={() => setExpSettings({ unit: unit === "lb" ? "kg" : "lb" })} title="Switch weight unit" style={{ color: C.spruce }} className="text-xs font-mono underline decoration-dotted underline-offset-2">{wLbl}</button>
-            </div>
+            <div className="mb-2"><span style={{ color: C.sub }} className="text-xs">Current weight</span></div>
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="text-2xl font-mono font-semibold tabular-nums" style={{ color: C.ink }}>{showW(currentWeight.kg)}</span>
               <span style={{ color: currentWeight.fromLog ? C.faint : C.warn }} className="text-xs font-mono">{currentWeight.fromLog ? `latest weigh-in · ${currentWeight.date}` : "starting estimate — no weigh-ins yet, log one ↓"}</span>

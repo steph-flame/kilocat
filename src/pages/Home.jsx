@@ -5,6 +5,7 @@ import { r0, r1, clamp } from "../lib/util.js";
 import { toDisplayWeight, weightLabel, weeklyRate } from "../lib/units.js";
 import { resolveTarget } from "../lib/targeting.js";
 import { RATE } from "../lib/weightPlan.js";
+import { nextCatId } from "../lib/catStore.js";
 import CatMark from "../components/CatMark.jsx";
 
 const greeting = () => {
@@ -19,8 +20,7 @@ const greeting = () => {
 // Every tile degrades honestly — first-run demo, no weigh-ins yet, a growing kitten, or not
 // enough data for a measured estimate all get their own truthful copy, never a guessed number.
 export default function Home() {
-  const { p, t, expenditure, weightLog, intakeLog, expSettings, currentWeight, ration } = useApp();
-  const unit = expSettings.unit || "kg";
+  const { p, t, expenditure, weightLog, intakeLog, expSettings, currentWeight, ration, unit, catsSummary, activeCatId, switchCat } = useApp();
   const wLbl = weightLabel(unit);
   const showW = (kg, d = 1) => `${(d === 1 ? r1 : r0)(toDisplayWeight(kg, unit))} ${wLbl}`;
   const name = p.name || "Your cat";
@@ -39,25 +39,27 @@ export default function Home() {
     : "from the vet formula";
 
   // Masthead headline + one-line status — every branch reads only real, already-computed
-  // values (currentWeight, expenditure, t), never a fabricated number.
-  let headline, sub;
+  // values (currentWeight, expenditure, t), never a fabricated number. The name always leads
+  // the headline, so `headlineTail` is just what follows it — see <CatName> below for the
+  // one place that turns the name into a cat-switcher when there's more than one cat.
+  let headlineTail, sub;
   if (!hasWeighIns) {
-    headline = `${name}'s kitchen`;
+    headlineTail = "'s kitchen";
     sub = "No weigh-ins logged yet — add one on the ration planner to start tracking the trend.";
   } else if (kitten) {
-    headline = `${name} is growing`;
+    headlineTail = " is growing";
     sub = `${showW(currentWeight.kg)} today. Kittens gain steadily — the ration planner has growth-aware targets, not a weight-loss one.`;
   } else if (!expenditure.enoughData) {
-    headline = `${name}'s kitchen`;
+    headlineTail = "'s kitchen";
     sub = `${showW(currentWeight.kg)} today — a couple more weeks of weigh-ins and the measured trend fills in.`;
   } else if (tooFast) {
-    headline = `${name}'s weight is moving fast`;
+    headlineTail = "'s weight is moving fast";
     sub = `${ratePct < 0 ? "Down" : "Up"} ${r1(rateMag)}% this week — faster than the safe ${RATE.min}–${RATE.max}%/wk range. Worth a re-check on the ration.`;
   } else if (rateMag < 0.15) {
-    headline = `${name} is holding steady`;
+    headlineTail = " is holding steady";
     sub = `Barely moving this week — right where maintenance should sit. Tonight's target is ${r0(target)} kcal.`;
   } else {
-    headline = `${name} is doing great`;
+    headlineTail = " is doing great";
     sub = `${ratePct < 0 ? "Down" : "Up"} a gentle ${r1(rateMag)}% this week — right in the safe zone. Tonight's target is ${r0(target)} kcal.`;
   }
 
@@ -81,7 +83,9 @@ export default function Home() {
           <CatMark size={92} />
           <div className="min-w-0">
             <div style={{ color: C.amber }} className="font-mono text-[10.5px] tracking-[0.2em] uppercase">{greeting()}</div>
-            <h1 className="text-[28px] sm:text-[32px] font-extrabold leading-tight mt-0.5" style={{ letterSpacing: "-0.02em" }}>{headline}</h1>
+            <h1 className="text-[28px] sm:text-[32px] font-extrabold leading-tight mt-0.5" style={{ letterSpacing: "-0.02em" }}>
+              <CatName name={name} catsSummary={catsSummary} activeCatId={activeCatId} switchCat={switchCat} />{headlineTail}
+            </h1>
             <p style={{ color: C.sub }} className="text-[15px] mt-0.5 leading-snug">{sub}</p>
           </div>
         </div>
@@ -122,6 +126,21 @@ export default function Home() {
         </p>
       </div>
     </div>
+  );
+}
+
+// The cat's name inside the masthead headline. With 2+ cats it's a tappable control (same
+// cycle-to-next behavior as the app-shell header switcher, see catStore.nextCatId) with a ▾
+// affordance so it reads interactive; with just one cat it's plain text. One wrap point for
+// every headline variant, rather than each branch rolling its own.
+function CatName({ name, catsSummary, activeCatId, switchCat }) {
+  if (catsSummary.length <= 1) return name;
+  const cycle = () => switchCat(nextCatId(catsSummary, activeCatId));
+  return (
+    <button onClick={cycle} aria-label={`Switch cat (current: ${name})`}
+      style={{ color: C.spruce, font: "inherit", letterSpacing: "inherit" }} className="align-baseline">
+      {name}<span style={{ color: C.faint }} className="text-[0.7em] align-middle"> ▾</span>
+    </button>
   );
 }
 

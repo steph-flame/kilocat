@@ -16,8 +16,7 @@ const methodLabel = (m) => (WEIGH_METHODS[m] || WEIGH_METHODS[DEFAULT_METHOD]).l
 const INITIAL_DAYS = 5;
 
 export default function Log() {
-  const { p, weightLog, intakeLog, library, expSettings, setExpSettings } = useApp();
-  const unit = expSettings.unit || "kg";
+  const { p, weightLog, intakeLog, library, expSettings, setExpSettings, unit } = useApp();
 
   return (
     <div style={{ background: C.paper, color: C.ink, minHeight: "100%" }} className="w-full">
@@ -30,19 +29,12 @@ export default function Log() {
           </span>
         </nav>
 
-        <div className="flex items-start justify-between gap-3 mb-6">
-          <div className="flex items-end gap-4 min-w-0">
-            <CatMark size={60} />
-            <div className="min-w-0">
-              <div style={{ color: C.amber }} className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest mb-1"><NotebookPen size={13} /> log</div>
-              <h1 className="text-[26px] font-extrabold leading-tight" style={{ letterSpacing: "-0.02em" }}>Track {p.name}</h1>
-              <p style={{ color: C.sub }} className="text-sm mt-1">Weigh-ins and what you dispensed. These feed the expenditure estimate.</p>
-            </div>
-          </div>
-          <div className="flex rounded-full overflow-hidden border shrink-0 mt-1" style={{ borderColor: C.line }}>
-            {["kg", "lb"].map((u) => (
-              <button key={u} onClick={() => setExpSettings({ unit: u })} aria-pressed={unit === u} style={{ background: unit === u ? C.spruce : "transparent", color: unit === u ? "#fff" : C.sub }} className="text-xs px-2.5 py-1.5 font-mono">{u}</button>
-            ))}
+        <div className="flex items-end gap-4 mb-6">
+          <CatMark size={60} />
+          <div className="min-w-0">
+            <div style={{ color: C.amber }} className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest mb-1"><NotebookPen size={13} /> log</div>
+            <h1 className="text-[26px] font-extrabold leading-tight" style={{ letterSpacing: "-0.02em" }}>Track {p.name}</h1>
+            <p style={{ color: C.sub }} className="text-sm mt-1">Weigh-ins and what you dispensed. These feed the expenditure estimate.</p>
           </div>
         </div>
 

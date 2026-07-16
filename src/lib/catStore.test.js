@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addCat, deleteCat, clearCatHistory, switchCat, freshCatState, freshProfile } from "./catStore.js";
+import { addCat, deleteCat, clearCatHistory, switchCat, freshCatState, freshProfile, defaultExpSettings, nextCatId, resolveUnit } from "./catStore.js";
 
 const stateWith = (ids) => ({
   activeCatId: ids[0],
@@ -108,5 +108,37 @@ describe("switchCat", () => {
   it("no-ops for an id that doesn't exist", () => {
     const s0 = stateWith(["a", "b"]);
     expect(switchCat(s0, "nope")).toBe(s0);
+  });
+});
+
+describe("defaultExpSettings", () => {
+  it("no longer carries a unit — that's a shared top-level field now, not per-cat", () => {
+    expect(defaultExpSettings().unit).toBeUndefined();
+  });
+});
+
+describe("nextCatId", () => {
+  const summary = (ids) => ids.map((id) => ({ id }));
+  it("cycles to the next cat in order", () => {
+    expect(nextCatId(summary(["a", "b", "c"]), "a")).toBe("b");
+    expect(nextCatId(summary(["a", "b", "c"]), "b")).toBe("c");
+  });
+  it("wraps from the last cat back to the first", () => {
+    expect(nextCatId(summary(["a", "b", "c"]), "c")).toBe("a");
+  });
+});
+
+describe("resolveUnit", () => {
+  it("uses the shared top-level unit when it's valid", () => {
+    expect(resolveUnit("lb", "kg")).toBe("lb");
+    expect(resolveUnit("kg", "lb")).toBe("kg");
+  });
+  it("falls back to the legacy per-cat value when the top-level field is absent/invalid", () => {
+    expect(resolveUnit(undefined, "lb")).toBe("lb");
+    expect(resolveUnit("bogus", "lb")).toBe("lb");
+  });
+  it("is undefined when neither is a valid unit — caller keeps the kg default", () => {
+    expect(resolveUnit(undefined, undefined)).toBeUndefined();
+    expect(resolveUnit(null, "bogus")).toBeUndefined();
   });
 });

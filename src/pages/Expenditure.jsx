@@ -13,9 +13,8 @@ import CatMark from "../components/CatMark.jsx";
 const fmtKcal = (n) => (n == null ? "—" : r0(n));
 
 export default function Expenditure() {
-  const { p, t, expenditure, intakeLog, expSettings, setExpSettings } = useApp();
+  const { p, t, expenditure, intakeLog, expSettings, setExpSettings, unit } = useApp();
   const e = expenditure;
-  const unit = expSettings.unit || "kg";
   const kitten = t.stage !== "adult"; // stage, not a raw age check — catches a newborn (dob = today, age 0) too
   const algoName = { v3: "unobserved-components", v2: "Kalman filter", v1: "EWMA + regression" }[expSettings.algo];
   const wLbl = weightLabel(unit);
