@@ -3,7 +3,7 @@ import { Info, X, Settings as SettingsIcon } from "lucide-react";
 import { C } from "./theme.js";
 import { AppProvider, useApp } from "./state/AppState.jsx";
 import { useHashRoute } from "./hooks/useHashRoute.js";
-import { isIOSSafari, isStandalone, isBannerDismissed, dismissBanner } from "./lib/pwa.js";
+import { platformInstallHint, isStandalone, isBannerDismissed, dismissBanner } from "./lib/pwa.js";
 import CatMenu from "./components/CatMenu.jsx";
 import Home from "./pages/Home.jsx";
 import RationPlanner from "./pages/RationPlanner.jsx";
@@ -41,13 +41,20 @@ function Banner({ children, tone, onClose }) {
   );
 }
 
-// iOS Safari only (not installed) and not already dismissed — computed once per mount,
-// same as storageOk above, since none of these change during a session.
-const showInstallNudge = () =>
-  typeof navigator !== "undefined" &&
-  isIOSSafari(navigator.userAgent, navigator.maxTouchPoints) &&
-  !isStandalone() &&
-  !isBannerDismissed();
+// iOS Safari or desktop Safari (both hit the same 7-day ITP eviction), not installed, not
+// already dismissed — computed once per mount, same as storageOk above, since none of these
+// change during a session. Chromium/other browsers surface their own install affordance and
+// don't evict at 7 days, so they get no banner.
+const installNudgePlatform = () => {
+  if (typeof navigator === "undefined" || isStandalone() || isBannerDismissed()) return null;
+  const hint = platformInstallHint(navigator.userAgent, navigator.maxTouchPoints);
+  return hint === "ios" || hint === "macSafari" ? hint : null;
+};
+
+const INSTALL_NUDGE_COPY = {
+  ios: "Add to Home Screen to keep your data safe — iOS clears browser data for sites unused 7 days.",
+  macSafari: "Add to Dock (File menu) to keep your data safe — Safari clears data for sites unused 7 days.",
+};
 
 function Router() {
   const { loaded, firstRun, storageOk, catsSummary, activeCatId, switchCat, addCat } = useApp();
@@ -56,6 +63,7 @@ function Router() {
   const [installNudgeClosed, setInstallNudgeClosed] = useState(false);
   if (!loaded) return <div style={{ background: C.paper, minHeight: "100%" }} className="w-full" />;
   const Page = PAGES[route] || Home;
+  const installPlatform = installNudgePlatform();
   return (
     <>
       <Header catsSummary={catsSummary} activeCatId={activeCatId} switchCat={switchCat} addCat={addCat} />
@@ -65,9 +73,9 @@ function Router() {
       {firstRun && !introClosed && (
         <Banner onClose={() => setIntroClosed(true)}>Showing example data (a sample cat). Set the cat's profile in Settings and log a weigh-in on the ration planner to make it yours — or head to Settings to start fresh or add another cat.</Banner>
       )}
-      {!installNudgeClosed && showInstallNudge() && (
+      {!installNudgeClosed && installPlatform && (
         <Banner onClose={() => { dismissBanner(); setInstallNudgeClosed(true); }}>
-          Add to Home Screen to keep your data safe — iOS clears browser data for sites unused 7 days.
+          {INSTALL_NUDGE_COPY[installPlatform]}
         </Banner>
       )}
       <Page />

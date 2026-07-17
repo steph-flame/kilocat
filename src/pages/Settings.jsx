@@ -3,15 +3,29 @@ import { ChevronLeft, ChevronRight, ChevronDown, Settings as SettingsIcon, Plus,
 import { C, SKINS } from "../theme.js";
 import { useApp } from "../state/AppState.jsx";
 import { validateImport } from "../lib/validate.js";
+import { platformInstallHint, isStandalone } from "../lib/pwa.js";
 import { Field, Toggle } from "../components/primitives.jsx";
 import CatMark from "../components/CatMark.jsx";
 
 const catLabel = (c) => c.name || "unnamed cat";
 const SKIN_NAMES = { original: "Original", blossom: "Blossom", tidepool: "Tidepool", spruce: "Spruce" };
 
+// The three install gestures we know how to describe — keyed the same as pwa.js's
+// platformInstallHint so the detected platform's row can be picked out and shown first.
+const INSTALL_GESTURES = [
+  { key: "ios", label: "iPhone / iPad (Safari)", gesture: "Share → Add to Home Screen" },
+  { key: "macSafari", label: "Mac (Safari)", gesture: "File menu → Add to Dock" },
+  { key: "chromium", label: "Chrome / Edge", gesture: "install icon in the address bar (or menu) → Install" },
+];
+
 export default function Settings() {
   const { p, today, catsSummary, activeCatId, switchCat, addCat, updateCatProfile, deleteCat, clearCatHistory, eraseAll, fridgeDays, exportData, importData, skin, setSkin, unit, setUnit } = useApp();
   const [expandedId, setExpandedId] = useState(null);
+  const [installExpanded, setInstallExpanded] = useState(false);
+  const installed = isStandalone();
+  const platform = typeof navigator !== "undefined" ? platformInstallHint(navigator.userAgent, navigator.maxTouchPoints) : "other";
+  const detectedGesture = INSTALL_GESTURES.find((g) => g.key === platform);
+  const otherGestures = INSTALL_GESTURES.filter((g) => g.key !== platform);
 
   const doExport = () => {
     const blob = new Blob([exportData()], { type: "application/json" });
@@ -82,6 +96,39 @@ export default function Settings() {
             </div>
           </div>
           <p style={{ color: C.faint }} className="text-xs">How weight is shown, everywhere — shared across every cat.</p>
+        </section>
+
+        {/* install */}
+        <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
+          <h2 className="font-medium mb-1">Install as an app</h2>
+          {installed ? (
+            <p style={{ color: C.spruce }} className="text-xs flex items-center gap-1"><Check size={13} /> Installed — running as its own app.</p>
+          ) : (
+            <>
+              <p style={{ color: C.faint }} className="text-xs mb-3">Works offline — and on Safari, installing is what protects your data from the 7-day inactive-site cleanup.</p>
+              <div className="space-y-1.5">
+                {detectedGesture && (
+                  <div style={{ borderColor: C.spruce, background: C.spruceSoft, color: C.ink }} className="border rounded-xl px-3 py-2 text-sm">
+                    <span className="font-medium">{detectedGesture.label}: </span>{detectedGesture.gesture}
+                  </div>
+                )}
+                {otherGestures.length > 0 && (
+                  <button onClick={() => setInstallExpanded((v) => !v)} aria-expanded={installExpanded} style={{ color: C.sub }} className="inline-flex items-center gap-0.5 text-xs hover:underline">
+                    other platforms {installExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  </button>
+                )}
+                {installExpanded && (
+                  <div className="space-y-1 pt-1">
+                    {otherGestures.map((g) => (
+                      <div key={g.key} style={{ color: C.faint }} className="text-xs px-1">
+                        <span style={{ color: C.sub }} className="font-medium">{g.label}: </span>{g.gesture}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </section>
 
         {/* cats */}
