@@ -200,8 +200,8 @@ describe("network request shaping (mocked)", () => {
     expect(body.query).toMatch(/getLitterRobot4Activity/);
     expect(body.variables).toEqual({
       serial: "LR4-123",
-      startTimestamp: new Date(sinceMs).toISOString(),
-      endTimestamp: new Date(untilMs).toISOString(),
+      startTimestamp: new Date(sinceMs).toISOString().replace(/\.(\d{3})Z$/, ".$1000Z"),
+      endTimestamp: new Date(untilMs).toISOString().replace(/\.(\d{3})Z$/, ".$1000Z"),
       activityTypes: ["catWeight"],
     });
   });

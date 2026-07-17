@@ -190,7 +190,10 @@ const ACTIVITY_QUERY = `
 // supports server-side filtering (activityTypes) — parseWeightEvents still filters
 // defensively in case that argument is ignored or shaped differently than expected.
 export async function fetchWeightActivity(idToken, serial, { sinceMs, untilMs } = {}) {
-  const iso = (ms) => (ms == null ? undefined : new Date(ms).toISOString());
+  // The server rejects JS's 3-digit-millisecond ISO strings ("Invalid Timestamp string",
+  // observed live). pylitterbot's working call formats with Python's %f — six fractional
+  // digits (litterrobot4.py, strftime("%Y-%m-%dT%H:%M:%S.%fZ")) — so pad ms → µs.
+  const iso = (ms) => (ms == null ? undefined : new Date(ms).toISOString().replace(/\.(\d{3})Z$/, ".$1000Z"));
   const data = await graphqlRequest(idToken, ACTIVITY_QUERY, {
     serial, startTimestamp: iso(sinceMs), endTimestamp: iso(untilMs), activityTypes: ["catWeight"],
   });
