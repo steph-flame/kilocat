@@ -15,7 +15,7 @@ import {
   updateCatProfile as updateCatProfilePure, freshCatState, freshProfile, defaultTr, defaultExpSettings, resolveUnit,
 } from "../lib/catStore.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
-import { login as lrLogin, listRobots as lrListRobots, syncWeights as lrSyncWeights, FIRST_SYNC_DAYS } from "../lib/litterRobot.js";
+import { login as lrLogin, listAllRobots as lrListAllRobots, syncWeights as lrSyncWeights, FIRST_SYNC_DAYS } from "../lib/litterRobot.js";
 
 // Clean up legacy food data: strip "(dry)"/"(wet)", snap macro-identical near-dupes to their
 // canonical built-in name, and retire the generic Tiki. Pure — used on load and on import.
@@ -288,9 +288,14 @@ export function AppProvider({ children }) {
     if (!cat) return { ok: false, error: new Error("The cat this connection feeds no longer exists.") };
     const sinceMs = conn.lastSyncTs || Date.now() - FIRST_SYNC_DAYS * 86400000;
     try {
-      const { entries, syncedAt } = await lrSyncWeights({ refreshToken: conn.refreshToken, serial: conn.serial, sinceMs, existingEntries: cat.weightLog });
+      const { entries, syncedAt, weightScale } = await lrSyncWeights({
+        refreshToken: conn.refreshToken, serial: conn.serial, sinceMs, existingEntries: cat.weightLog, model: conn.model,
+      });
       appendWeightsToCat(conn.catId, entries);
-      setLitterRobotState((s) => (s ? { ...s, lastSyncTs: syncedAt } : s));
+      // weightScale is only ever present for an LR5 sync (which unit interpretation won — see
+      // parseWeightEventsLR5); once it sticks the first time, keep it even on a sync that
+      // returns nothing new (an empty page shouldn't blank out an already-determined scale).
+      setLitterRobotState((s) => (s ? { ...s, lastSyncTs: syncedAt, weightScale: weightScale ?? s.weightScale } : s));
       return { ok: true, count: entries.length };
     } catch (error) {
       return { ok: false, error };
@@ -298,17 +303,19 @@ export function AppProvider({ children }) {
   };
 
   // Step 1 of Connect: log in with the owner's own credentials (used ONLY for this one
-  // request — never stored) and list their robots. Returns the pieces Settings needs to
-  // show a robot picker; doesn't touch state yet (nothing is "connected" until finish()).
+  // request — never stored) and list their robots, across BOTH generations (LR4 + LR5 — see
+  // lib/litterRobot.js listAllRobots; either generation may legitimately be absent on a given
+  // account). Returns the pieces Settings needs to show a robot picker; doesn't touch state
+  // yet (nothing is "connected" until finish()).
   const connectLitterRobotStart = async (email, password) => {
     const { idToken, refreshToken, userId } = await lrLogin(email, password);
-    const robots = await lrListRobots(idToken, userId);
+    const robots = await lrListAllRobots(idToken, userId);
     return { refreshToken, robots };
   };
-  // Step 2: commit the connection (refresh token + chosen serial + target cat) and kick off
-  // the first sync immediately. Returns that first sync's result so the UI can show it.
-  const connectLitterRobotFinish = (refreshToken, serial, catId) => {
-    const conn = { refreshToken, serial, catId, lastSyncTs: null };
+  // Step 2: commit the connection (refresh token + chosen serial/model + target cat) and kick
+  // off the first sync immediately. Returns that first sync's result so the UI can show it.
+  const connectLitterRobotFinish = (refreshToken, serial, catId, model) => {
+    const conn = { refreshToken, serial, catId, model, lastSyncTs: null };
     setLitterRobotState(conn);
     return runLitterRobotSync(conn);
   };

@@ -4,12 +4,19 @@ import { C, SKINS } from "../theme.js";
 import { useApp } from "../state/AppState.jsx";
 import { validateImport } from "../lib/validate.js";
 import { platformInstallHint, isStandalone } from "../lib/pwa.js";
-import { FIRST_SYNC_DAYS } from "../lib/litterRobot.js";
+import { FIRST_SYNC_DAYS, LR5_WEIGHT_SCALES } from "../lib/litterRobot.js";
 import { Field, Toggle, Note } from "../components/primitives.jsx";
 import CatMark from "../components/CatMark.jsx";
 
 const catLabel = (c) => c.name || "unnamed cat";
 const SKIN_NAMES = { original: "Original", blossom: "Blossom", tidepool: "Tidepool", spruce: "Spruce" };
+// LR5's petWeight unit isn't confirmed in source (see lib/litterRobot.js) — surfaced here so
+// whichever interpretation the plausibility check settled on is visible, not just inferred.
+const WEIGHT_SCALE_LABELS = {
+  [LR5_WEIGHT_SCALES.LB_HUNDREDTHS]: "lb (×100 raw)",
+  [LR5_WEIGHT_SCALES.LB]: "lb",
+  [LR5_WEIGHT_SCALES.GRAMS]: "g",
+};
 
 // The three install gestures we know how to describe — keyed the same as pwa.js's
 // platformInstallHint so the detected platform's row can be picked out and shown first.
@@ -307,7 +314,8 @@ function LRDisconnected({ catsSummary, activeCatId, connectStart, connectFinish 
   };
   const doFinish = async () => {
     setFinishing(true);
-    setFinishResult(await connectFinish(picking.refreshToken, serial, catId));
+    const model = picking.robots.find((r) => r.serial === serial)?.model;
+    setFinishResult(await connectFinish(picking.refreshToken, serial, catId, model));
     setFinishing(false);
   };
 
@@ -320,7 +328,7 @@ function LRDisconnected({ catsSummary, activeCatId, connectStart, connectFinish 
         {picking.robots.length > 1 && (
           <Field label="Robot">
             <select value={serial} onChange={(e) => setSerial(e.target.value)} className="w-full bg-transparent outline-none text-sm" style={{ color: C.ink }}>
-              {picking.robots.map((r) => <option key={r.serial} value={r.serial}>{r.name} ({r.serial})</option>)}
+              {picking.robots.map((r) => <option key={r.serial} value={r.serial}>{r.name} · {r.model} ({r.serial})</option>)}
             </select>
           </Field>
         )}
@@ -385,8 +393,9 @@ function LRConnected({ connection, catsSummary, disconnect, syncNow }) {
     <div className="space-y-2">
       <p style={{ color: C.spruce }} className="text-xs flex items-center gap-1"><Check size={13} /> Connected — feeding {catName}</p>
       <div style={{ color: C.faint }} className="text-xs font-mono">
-        <div>Robot: {connection.serial}</div>
+        <div>Robot: {connection.serial} ({connection.model || "LR4"})</div>
         <div>Last sync: {connection.lastSyncTs ? new Date(connection.lastSyncTs).toLocaleString() : "not yet"}</div>
+        {connection.weightScale && <div>Weight units: {WEIGHT_SCALE_LABELS[connection.weightScale] || connection.weightScale}</div>}
       </div>
       <div className="flex items-center gap-2">
         <button onClick={doSync} disabled={busy} style={{ borderColor: C.line, color: C.sub }}

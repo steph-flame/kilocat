@@ -31,6 +31,7 @@
 
 import { LB_PER_KG } from "./units.js";
 import { WEIGH_SOURCES } from "./expenditure.js";
+import { median } from "./series.js";
 
 export const COGNITO_REGION = "us-east-1";
 export const COGNITO_USER_POOL_ID = "us-east-1_rjhNnZVAm";
@@ -167,7 +168,7 @@ export async function listRobots(idToken, userId) {
   const data = await graphqlRequest(idToken, ROBOTS_BY_USER_QUERY, { userId });
   const robots = (data?.getLitterRobot4ByUser || []).filter((r) => r?.isOnboarded);
   if (!robots.length) throw new LitterRobotError("no_robots", "No onboarded Litter-Robot found on that account.");
-  return robots.map((r) => ({ name: r.name || "Litter-Robot", serial: r.serial, unitId: r.unitId }));
+  return robots.map((r) => ({ name: r.name || "Litter-Robot", serial: r.serial, unitId: r.unitId, model: "LR4" }));
 }
 
 // Query signature + LR4ActivityTimestreamRowOutput fields borrowed from
@@ -194,6 +195,146 @@ export async function fetchWeightActivity(idToken, serial, { sinceMs, untilMs } 
     serial, startTimestamp: iso(sinceMs), endTimestamp: iso(untilMs), activityTypes: ["catWeight"],
   });
   return data?.getLitterRobot4Activity || [];
+}
+
+/* ==================== Litter-Robot 5 (REST, not GraphQL) ====================
+ *
+ * The LR4 GraphQL API (above) does not list or serve activity for LR5 units — pylitterbot
+ * (github.com/natekspencer/pylitterbot, account.py) fetches each generation from its own
+ * endpoint and merges client-side; listAllRobots() below does the same thing for this app.
+ * Auth is identical to LR4 (same Cognito pool/client, same Bearer id token) — no changes there.
+ *
+ * Base host and the /robots, /robots/{serial}/activities?type=PET_VISIT shapes are per prior
+ * research against pylitterbot main; CORS on this host is wildcard on both preflight and
+ * response (empirically probed), so it's browser-callable like the LR4 endpoint. The exact
+ * field names on the /robots list response and the outer /activities response envelope were
+ * NOT pinned down in that research (only the PET_VISIT event fixture from
+ * tests/test_litterrobot5.py was) — listRobotsLR5 and the pagination body-unwrapping below are
+ * written defensively (tolerate either a bare array or a wrapped object) rather than assumed
+ * exact; see the report for what stays unverified until a real account round-trips this.
+ */
+export const LR5_BASE = "https://ub.prod.iothings.site";
+const LR5_PAGE_LIMIT = 100;
+const LR5_MAX_PAGES = 10; // defensive cap — never page forever against a misbehaving API
+
+async function lr5Request(idToken, path) {
+  let res;
+  try {
+    res = await fetch(`${LR5_BASE}${path}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+  } catch (err) {
+    throw new LitterRobotError("network", "Couldn't reach the Litter-Robot cloud.", err);
+  }
+  let body;
+  try { body = await res.json(); } catch { body = null; }
+  if (!res.ok) {
+    if (res.status === 401) throw new LitterRobotError("auth", "Your Litter-Robot session expired.", body);
+    throw new LitterRobotError("unknown", body?.message || `Request failed (${res.status}).`, body);
+  }
+  return body;
+}
+
+// List every Litter-Robot 5 on the account. Unlike the LR4 GraphQL query, this endpoint takes
+// no userId argument — it's scoped by the bearer token alone (per research notes).
+export async function listRobotsLR5(idToken) {
+  const body = await lr5Request(idToken, "/robots");
+  const robots = Array.isArray(body) ? body : body?.robots || [];
+  if (!robots.length) throw new LitterRobotError("no_robots", "No Litter-Robot 5 found on that account.");
+  return robots.map((r) => ({ name: r.name || r.nickname || "Litter-Robot 5", serial: r.serial, model: "LR5" }));
+}
+
+// Page backward through one LR5's activity feed until either a page comes back older than
+// sinceTs, a short/empty page signals the end, or LR5_MAX_PAGES is hit. Returns the raw
+// PET_VISIT-typed (and possibly other-typed — filtered downstream) event objects, oldest
+// cutoff not yet trimmed to sinceTs (parseWeightEventsLR5 + the sync orchestration filter that
+// last mile) since a page can straddle the boundary.
+export async function fetchWeightActivityLR5(idToken, serial, sinceTs) {
+  const events = [];
+  let offset = 0;
+  for (let page = 0; page < LR5_MAX_PAGES; page++) {
+    const qs = new URLSearchParams({ limit: String(LR5_PAGE_LIMIT), offset: String(offset), type: "PET_VISIT" });
+    const body = await lr5Request(idToken, `/robots/${encodeURIComponent(serial)}/activities?${qs}`);
+    const batch = Array.isArray(body) ? body : body?.activities || body?.items || [];
+    if (!batch.length) break;
+    events.push(...batch);
+    const oldestInPage = batch.reduce((min, e) => {
+      const ms = parseEventMs(e?.timestamp);
+      return ms == null ? min : Math.min(min, ms);
+    }, Infinity);
+    if (sinceTs != null && oldestInPage <= sinceTs) break; // this page already reaches far enough back
+    if (batch.length < LR5_PAGE_LIMIT) break; // short page — no more to fetch
+    offset += LR5_PAGE_LIMIT;
+  }
+  return events;
+}
+
+// Candidate unit interpretations for a raw LR5 petWeight number, each converting to kg.
+// Keyed by a short label that's surfaced as `weightScale` once one wins (see
+// parseWeightEventsLR5) so the app can show/remember which interpretation was used.
+export const LR5_WEIGHT_SCALES = { LB_HUNDREDTHS: "lb100", LB: "lb", GRAMS: "g" };
+const LR5_SCALE_TO_KG = {
+  [LR5_WEIGHT_SCALES.LB_HUNDREDTHS]: (v) => v / 100 / LB_PER_KG,
+  [LR5_WEIGHT_SCALES.LB]: (v) => v / LB_PER_KG,
+  [LR5_WEIGHT_SCALES.GRAMS]: (v) => v / 1000,
+};
+const PLAUSIBLE_CAT_MIN_KG = 1.0;
+const PLAUSIBLE_CAT_MAX_KG = 15;
+
+// Raw LR5 activity events → { entries, weightScale }, oldest first. `petWeight`'s unit is not
+// confirmed anywhere in source (see file banner + report) — most likely hundredths-of-a-pound
+// by analogy with the state field weightSensor/100, but that's an analogy, not a citation. So:
+// try every candidate interpretation, convert the WHOLE BATCH's median through each, and accept
+// only the single interpretation whose median lands in a plausible cat weight range. If zero or
+// more than one interpretation clears that bar, the batch is genuinely ambiguous — import
+// NOTHING rather than risk silently mis-scaled weights (fail empty, never wrong). `weightScale`
+// tells the caller (and eventually the UI) which interpretation won, or null if none did.
+export function parseWeightEventsLR5(events = []) {
+  const raw = [];
+  for (const e of events || []) {
+    if (!e || e.type !== "PET_VISIT") continue;
+    const w = Number(e.petWeight);
+    const ts = parseEventMs(e.timestamp);
+    if (!Number.isFinite(w) || w <= 0 || ts == null) continue;
+    raw.push({ w, ts });
+  }
+  if (!raw.length) return { entries: [], weightScale: null };
+
+  const winners = Object.entries(LR5_SCALE_TO_KG).filter(([, toKg]) => {
+    const med = median(raw.map((r) => toKg(r.w)));
+    return med >= PLAUSIBLE_CAT_MIN_KG && med <= PLAUSIBLE_CAT_MAX_KG;
+  });
+  if (winners.length !== 1) return { entries: [], weightScale: null }; // ambiguous or none — see banner above
+
+  const [weightScale, toKg] = winners[0];
+  const entries = raw
+    .map((r) => ({
+      date: new Date(r.ts).toISOString().slice(0, 10),
+      kg: toKg(r.w),
+      method: "litterRobot",
+      source: WEIGH_SOURCES.litterRobot,
+      ts: r.ts,
+    }))
+    .sort((a, b) => a.ts - b.ts);
+  return { entries, weightScale };
+}
+
+// List both generations concurrently and merge. A Whisker account may genuinely have only
+// one generation of robot, so either call is allowed to fail (or come back empty) on its own —
+// this only throws if BOTH generations produced nothing usable, preferring to surface whichever
+// failure is more specific than a bare "no robots" (e.g. an auth/network problem on the
+// generation that's actually present).
+export async function listAllRobots(idToken, userId) {
+  const [lr4, lr5] = await Promise.allSettled([listRobots(idToken, userId), listRobotsLR5(idToken)]);
+  const robots = [];
+  if (lr4.status === "fulfilled") robots.push(...lr4.value);
+  if (lr5.status === "fulfilled") robots.push(...lr5.value);
+  if (robots.length) return robots;
+
+  const errors = [lr4, lr5].filter((r) => r.status === "rejected").map((r) => r.reason);
+  const specific = errors.find((e) => e instanceof LitterRobotError && e.code !== "no_robots");
+  throw specific || new LitterRobotError("no_robots", "No onboarded Litter-Robot found on that account.");
 }
 
 /* ==================== pure parsing / dedupe (no network — fully testable) ==================== */
@@ -242,12 +383,23 @@ export function dedupeWeightEntries(newEntries, existingEntries = []) {
 
 /* ==================== orchestration ==================== */
 
-// One full sync pass: refresh the session, list robots only if the caller doesn't already
-// know the serial (first connect), fetch + parse activity since `sinceMs`, dedupe against
-// what's already logged. Returns the pieces AppState needs to fold into state; does not
-// touch storage itself (kept here pure-ish / testable, storage stays AppState's job).
-export async function syncWeights({ refreshToken, serial, sinceMs, existingEntries }) {
+// One full sync pass: refresh the session, fetch + parse activity since `sinceMs` (routed by
+// the stored connection's `model` — "LR4" is the default so older-saved connections, which
+// predate this field, keep working unchanged), dedupe against what's already logged. Returns
+// the pieces AppState needs to fold into state; does not touch storage itself (kept here
+// pure-ish / testable, storage stays AppState's job).
+//
+// `weightScale` is only ever present for an LR5 sync (which interpretation of petWeight won —
+// see parseWeightEventsLR5); it's undefined for LR4, where no such ambiguity exists.
+export async function syncWeights({ refreshToken, serial, sinceMs, existingEntries, model = "LR4" }) {
   const { idToken } = await refreshIdToken(refreshToken);
+  if (model === "LR5") {
+    const events = await fetchWeightActivityLR5(idToken, serial, sinceMs);
+    const { entries: allParsed, weightScale } = parseWeightEventsLR5(events);
+    const parsed = allParsed.filter((e) => e.ts >= sinceMs);
+    const fresh = dedupeWeightEntries(parsed, existingEntries);
+    return { entries: fresh, syncedAt: Date.now(), weightScale };
+  }
   const events = await fetchWeightActivity(idToken, serial, { sinceMs, untilMs: Date.now() });
   const parsed = parseWeightEvents(events);
   const fresh = dedupeWeightEntries(parsed, existingEntries);

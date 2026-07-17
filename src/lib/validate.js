@@ -32,6 +32,10 @@ function validateCatShape(d) {
 // The Litter-Robot connection: shared, top-level, like skin/unit — tolerated when absent
 // (an older export simply has no connection) and only loosely shape-checked here (this
 // module deliberately isn't a full schema — see the file banner).
+//
+// `model` ("LR4"/"LR5") and `weightScale` (LR5 only — which petWeight unit interpretation won,
+// see lib/litterRobot.js) are both newer, optional fields — an export from before LR5 support
+// simply lacks them, which validates fine.
 function isLRConnection(v) {
   if (v === null) return true; // explicitly disconnected
   if (!isPlainObject(v)) return false;
@@ -39,6 +43,8 @@ function isLRConnection(v) {
   if (typeof v.serial !== "string") return false;
   if (v.catId !== undefined && typeof v.catId !== "string") return false;
   if (v.lastSyncTs !== undefined && v.lastSyncTs !== null && typeof v.lastSyncTs !== "number") return false;
+  if (v.model !== undefined && v.model !== "LR4" && v.model !== "LR5") return false;
+  if (v.weightScale !== undefined && v.weightScale !== null && typeof v.weightScale !== "string") return false;
   return true;
 }
 
