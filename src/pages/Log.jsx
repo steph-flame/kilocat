@@ -105,7 +105,7 @@ function WeightLog({ log, unit, lastMethod, onMethod }) {
   return (
     <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
       <h2 className="font-medium mb-1">Weight log</h2>
-      <p style={{ color: C.faint }} className="text-xs mb-3">One or more weigh-ins per day — the day's reads are median-averaged. Manual now; Litter-Robot sync appends here later.</p>
+      <p style={{ color: C.faint }} className="text-xs mb-3">One or more weigh-ins per day — the day's reads are median-averaged. Log manually below, or connect a Litter-Robot in Settings to have it appended automatically (tagged "auto").</p>
 
       <div className="mb-2">
         <div style={{ color: C.sub }} className="text-xs mb-1">Measured with</div>

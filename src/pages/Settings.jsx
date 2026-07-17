@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, Settings as SettingsIcon, Plus, Download, Upload, AlertTriangle, Trash2, RotateCcw, Check } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Settings as SettingsIcon, Plus, Download, Upload, AlertTriangle, Trash2, RotateCcw, Check, Link2, Unlink, RefreshCw, Loader2, ShieldCheck } from "lucide-react";
 import { C, SKINS } from "../theme.js";
 import { useApp } from "../state/AppState.jsx";
 import { validateImport } from "../lib/validate.js";
 import { platformInstallHint, isStandalone } from "../lib/pwa.js";
-import { Field, Toggle } from "../components/primitives.jsx";
+import { FIRST_SYNC_DAYS } from "../lib/litterRobot.js";
+import { Field, Toggle, Note } from "../components/primitives.jsx";
 import CatMark from "../components/CatMark.jsx";
 
 const catLabel = (c) => c.name || "unnamed cat";
@@ -19,7 +20,11 @@ const INSTALL_GESTURES = [
 ];
 
 export default function Settings() {
-  const { p, today, catsSummary, activeCatId, switchCat, addCat, updateCatProfile, deleteCat, clearCatHistory, eraseAll, fridgeDays, exportData, importData, skin, setSkin, unit, setUnit } = useApp();
+  const {
+    p, today, catsSummary, activeCatId, switchCat, addCat, updateCatProfile, deleteCat, clearCatHistory, eraseAll,
+    fridgeDays, exportData, importData, skin, setSkin, unit, setUnit,
+    litterRobot, connectLitterRobotStart, connectLitterRobotFinish, disconnectLitterRobot, syncLitterRobotNow,
+  } = useApp();
   const [expandedId, setExpandedId] = useState(null);
   const [installExpanded, setInstallExpanded] = useState(false);
   const installed = isStandalone();
@@ -130,6 +135,17 @@ export default function Settings() {
             </>
           )}
         </section>
+
+        {/* litter-robot */}
+        <LitterRobotCard
+          connection={litterRobot}
+          catsSummary={catsSummary}
+          activeCatId={activeCatId}
+          connectStart={connectLitterRobotStart}
+          connectFinish={connectLitterRobotFinish}
+          disconnect={disconnectLitterRobot}
+          syncNow={syncLitterRobotNow}
+        />
 
         {/* cats */}
         <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
@@ -246,5 +262,144 @@ function SkinSwatch({ name, tokens, active, onClick }) {
       </span>
       <span className="text-xs font-medium" style={{ color: active ? C.ink : C.sub }}>{SKIN_NAMES[name] || name}</span>
     </button>
+  );
+}
+
+/* ---------- Litter-Robot connect card ---------- */
+// Disconnected: an explainer + email/password form, a trust note, then (after a successful
+// login) a robot picker (only shown if the account has more than one) and a cat picker.
+// Connected: serial, last sync, sync-now, disconnect. Errors surface as their own .message
+// (LitterRobotError from lib/litterRobot.js already turns raw Cognito/AppSync failures into
+// something legible — see that file).
+function LitterRobotCard({ connection, catsSummary, activeCatId, connectStart, connectFinish, disconnect, syncNow }) {
+  return (
+    <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
+      <h2 className="font-medium mb-1 flex items-center gap-1.5"><Link2 size={15} /> Litter-Robot</h2>
+      {connection
+        ? <LRConnected connection={connection} catsSummary={catsSummary} disconnect={disconnect} syncNow={syncNow} />
+        : <LRDisconnected catsSummary={catsSummary} activeCatId={activeCatId} connectStart={connectStart} connectFinish={connectFinish} />}
+    </section>
+  );
+}
+
+function LRDisconnected({ catsSummary, activeCatId, connectStart, connectFinish }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [picking, setPicking] = useState(null); // { refreshToken, robots } once login succeeds
+  const [serial, setSerial] = useState("");
+  const [catId, setCatId] = useState(activeCatId);
+  const [finishing, setFinishing] = useState(false);
+  const [finishResult, setFinishResult] = useState(null);
+
+  const doConnect = async () => {
+    setError(""); setBusy(true);
+    try {
+      const { refreshToken, robots } = await connectStart(email.trim(), password);
+      setPicking({ refreshToken, robots });
+      setSerial(robots[0]?.serial || "");
+    } catch (e) {
+      setError(e?.message || "Couldn't connect — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const doFinish = async () => {
+    setFinishing(true);
+    setFinishResult(await connectFinish(picking.refreshToken, serial, catId));
+    setFinishing(false);
+  };
+
+  if (picking) {
+    return (
+      <div className="space-y-3">
+        <p style={{ color: C.faint }} className="text-xs">
+          Signed in. {picking.robots.length > 1 ? "Pick a robot and which cat its weigh-ins go to." : "Pick which cat its weigh-ins go to."}
+        </p>
+        {picking.robots.length > 1 && (
+          <Field label="Robot">
+            <select value={serial} onChange={(e) => setSerial(e.target.value)} className="w-full bg-transparent outline-none text-sm" style={{ color: C.ink }}>
+              {picking.robots.map((r) => <option key={r.serial} value={r.serial}>{r.name} ({r.serial})</option>)}
+            </select>
+          </Field>
+        )}
+        <Field label="Feeds weigh-ins to">
+          <select value={catId} onChange={(e) => setCatId(e.target.value)} className="w-full bg-transparent outline-none text-sm" style={{ color: C.ink }}>
+            {catsSummary.map((c) => <option key={c.id} value={c.id}>{c.name || "unnamed cat"}</option>)}
+          </select>
+        </Field>
+        <button onClick={doFinish} disabled={finishing || !serial} style={{ background: C.spruce }}
+          className="w-full rounded-xl py-2 text-sm text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-60">
+          {finishing ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} {finishing ? "Connecting…" : "Finish connecting"}
+        </button>
+        {finishResult && !finishResult.ok && (
+          <Note tone="warn">Connected, but the first sync failed: {finishResult.error?.message || "unknown error"}. It'll retry next time the app loads, or use "sync now" below.</Note>
+        )}
+        {finishResult?.ok && (
+          <Note>Connected — pulled {finishResult.count} weigh-in{finishResult.count === 1 ? "" : "s"} from the last {FIRST_SYNC_DAYS} days.</Note>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p style={{ color: C.faint }} className="text-xs">Sign in with your Whisker account to pull your cat's weigh-ins from the Litter-Robot automatically.</p>
+      <Field label="Email">
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" data-lpignore="true" data-1p-ignore
+          className="w-full bg-transparent outline-none text-sm" style={{ color: C.ink }} />
+      </Field>
+      <Field label="Password">
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" data-lpignore="true" data-1p-ignore
+          className="w-full bg-transparent outline-none text-sm" style={{ color: C.ink }} />
+      </Field>
+      {error && <Note tone="warn">{error}</Note>}
+      <button onClick={doConnect} disabled={busy || !email || !password} style={{ background: C.spruce }}
+        className="w-full rounded-xl py-2 text-sm text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-60">
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} {busy ? "Connecting…" : "Connect"}
+      </button>
+      <p style={{ color: C.faint }} className="text-xs flex gap-1.5">
+        <ShieldCheck size={13} className="shrink-0 mt-0.5" />
+        Your password goes only to Whisker's login service (Amazon Cognito) — Kilocat stores just a revocable token. Open source: check the Network tab.
+      </p>
+    </div>
+  );
+}
+
+function LRConnected({ connection, catsSummary, disconnect, syncNow }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const catName = catsSummary.find((c) => c.id === connection.catId)?.name || "unnamed cat";
+
+  const doSync = async () => {
+    setBusy(true); setResult(null);
+    setResult(await syncNow());
+    setBusy(false);
+  };
+  const doDisconnect = () => {
+    if (window.confirm("Disconnect the Litter-Robot? Already-synced weigh-ins stay in the log; new ones will stop appearing until you reconnect.")) disconnect();
+  };
+
+  return (
+    <div className="space-y-2">
+      <p style={{ color: C.spruce }} className="text-xs flex items-center gap-1"><Check size={13} /> Connected — feeding {catName}</p>
+      <div style={{ color: C.faint }} className="text-xs font-mono">
+        <div>Robot: {connection.serial}</div>
+        <div>Last sync: {connection.lastSyncTs ? new Date(connection.lastSyncTs).toLocaleString() : "not yet"}</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={doSync} disabled={busy} style={{ borderColor: C.line, color: C.sub }}
+          className="inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1.5 hover:bg-white disabled:opacity-60">
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} sync now
+        </button>
+        <button onClick={doDisconnect} style={{ borderColor: C.line, color: C.warn }} className="inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1.5 hover:bg-white">
+          <Unlink size={13} /> disconnect
+        </button>
+      </div>
+      {result && (result.ok
+        ? <Note>Synced — {result.count} new weigh-in{result.count === 1 ? "" : "s"}.</Note>
+        : <Note tone="warn">Sync failed: {result.error?.message || "unknown error"}</Note>)}
+    </div>
   );
 }
