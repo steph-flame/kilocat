@@ -29,10 +29,24 @@ function validateCatShape(d) {
   return true;
 }
 
+// The Litter-Robot connection: shared, top-level, like skin/unit — tolerated when absent
+// (an older export simply has no connection) and only loosely shape-checked here (this
+// module deliberately isn't a full schema — see the file banner).
+function isLRConnection(v) {
+  if (v === null) return true; // explicitly disconnected
+  if (!isPlainObject(v)) return false;
+  if (typeof v.refreshToken !== "string") return false;
+  if (typeof v.serial !== "string") return false;
+  if (v.catId !== undefined && typeof v.catId !== "string") return false;
+  if (v.lastSyncTs !== undefined && v.lastSyncTs !== null && typeof v.lastSyncTs !== "number") return false;
+  return true;
+}
+
 // Fields shared across every cat, common to both v1 (top-level) and v2 (top-level too).
 function validateSharedShape(d) {
   if (d.library !== undefined && !arrOf(d.library, isFoodEntry)) return false;
   if (d.fridgeDays !== undefined && typeof d.fridgeDays !== "number") return false;
+  if (d.litterRobot !== undefined && !isLRConnection(d.litterRobot)) return false;
   return true;
 }
 

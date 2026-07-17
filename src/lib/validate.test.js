@@ -102,3 +102,25 @@ describe("validateImport rejects malformed v2 shapes", () => {
     expect(validateImport({ ...validV2Export(), fridgeDays: "3" })).toBe(false);
   });
 });
+
+describe("validateImport tolerates/checks the litterRobot connection field", () => {
+  it("accepts a blob with no litterRobot field at all (older export)", () => {
+    expect(validateImport(validV2Export())).toBe(true);
+  });
+  it("accepts an explicit null (disconnected)", () => {
+    expect(validateImport({ ...validV2Export(), litterRobot: null })).toBe(true);
+  });
+  it("accepts a well-formed connection", () => {
+    const lr = { refreshToken: "rt-1", serial: "LR4-123", catId: "cat-1", lastSyncTs: 1234567890 };
+    expect(validateImport({ ...validV2Export(), litterRobot: lr })).toBe(true);
+  });
+  it("accepts a well-formed connection missing the optional catId/lastSyncTs", () => {
+    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: "rt-1", serial: "LR4-123" } })).toBe(true);
+  });
+  it("rejects a malformed connection", () => {
+    expect(validateImport({ ...validV2Export(), litterRobot: { serial: "LR4-123" } })).toBe(false); // no refreshToken
+    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: "rt-1" } })).toBe(false); // no serial
+    expect(validateImport({ ...validV2Export(), litterRobot: "nope" })).toBe(false);
+    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: 1, serial: "LR4-123" } })).toBe(false);
+  });
+});
