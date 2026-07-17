@@ -1,13 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Flat cat-and-bowl mark, app palette (see src/theme.js). Source of truth for the
-       rasterized PNG icons — scripts/gen_icons.py (run once, output committed to public/). -->
-  <rect width="512" height="512" rx="92" fill="#3E5C50"/>
-  <ellipse cx="256" cy="400" rx="160" ry="48" fill="#F6F7F4"/>
-  <ellipse cx="256" cy="388" rx="124" ry="28" fill="#B7791F"/>
-  <circle cx="256" cy="196" r="104" fill="#F6F7F4"/>
-  <polygon points="152,150 170,60 222,142" fill="#F6F7F4"/>
-  <polygon points="360,150 342,60 290,142" fill="#F6F7F4"/>
-  <circle cx="222" cy="196" r="10" fill="#3E5C50"/>
-  <circle cx="290" cy="196" r="10" fill="#3E5C50"/>
-  <polygon points="246,224 266,224 256,236" fill="#B7791F"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Tab favicon: the CatMark's face only — full-body line art is illegible at 16px,
+       so the smallest surface gets the tightest crop and the heaviest stroke. The PNG
+       icons (full-body cat, rendered from the CatMark paths via headless Chrome) live
+       alongside; Original-skin cream/ink palette. -->
+  <rect width="100" height="100" rx="21" fill="#FAF6EE"/>
+  <g transform="translate(-17.2,10.3) scale(0.672)" fill="none" stroke="#33302A" stroke-width="6.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M64,74 C60,62 64,50 72,44 L74,26 L90,36 C96,33 104,33 110,36 L126,26 L128,44 C136,52 138,64 134,74 C130,86 118,92 100,92 C82,92 68,86 64,74 Z"/>
+    <path d="M84,64 C87,68 91,68 94,64"/><path d="M106,64 C109,68 113,68 116,64"/>
+    <path d="M98,76 L102,76 L100,79 Z" fill="#33302A"/>
+    <line x1="58" y1="70" x2="42" y2="66"/><line x1="58" y1="76" x2="42" y2="78"/>
+    <line x1="142" y1="70" x2="158" y2="66"/><line x1="142" y1="76" x2="158" y2="78"/>
+  </g>
 </svg>
