@@ -3,13 +3,22 @@ import { C, CHART } from "../theme.js";
 import { r0, r1 } from "../lib/util.js";
 import { extent, niceTicks, linScale } from "../lib/scale.js";
 import { diffDays } from "../lib/series.js";
-import { weightChangeRate, pickEndLabelBelow } from "../lib/timeline.js";
+import { weightChangeRate, pickEndLabelBelow, energyDomain } from "../lib/timeline.js";
 import { RATE, safeRateBand, MAINTAIN_BAND } from "../lib/weightPlan.js";
 import { toDisplayWeight, weightLabel, weeklyRate } from "../lib/units.js";
 
 // x-aligned panels sharing one time axis: weight on top, energy (calories in vs. estimated
 // expenditure) below, and optionally an energy-balance (deficit/surplus) panel. NOT a
 // dual-axis overlay — each unit gets its own panel.
+//
+// Each panel is its own <svg> "subsection": an HTML header row (title left, that panel's own
+// mini-legend chips right) sits above it, with real vertical whitespace between subsections —
+// the single shared canvas from pass 1 crowded a panel's title against the one above it. All
+// panels still share the same viewBox width and left/right padding (px0/px1 below), so the
+// date→x mapping lines up across subsections even though each draws into its own SVG; hover
+// state (below) is tracked once on the wrapping div and fanned out to every panel's own
+// crosshair. x-axis date labels are drawn only inside the LAST visible panel's svg. The single
+// bottom legend from pass 1 is gone — its entries now live in each panel's own header.
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const fmtDate = (d, withYear) => { const t = new Date(`${d}T00:00:00Z`); return `${MON[t.getUTCMonth()]} ${t.getUTCDate()}${withYear ? ` '${d.slice(2, 4)}` : ""}`; };
@@ -36,6 +45,12 @@ function bandPolygon(frame, center, xAt, yScale, k = 1.96) {
   return `${top}${bot}Z`;
 }
 
+// Per-panel internal top/bottom padding (headroom for tick labels and end-of-line labels so
+// they never crowd that panel's OWN top/bottom edge — a separate concern from the whitespace
+// BETWEEN panels, which is real DOM margin on the header rows below).
+const PAD = 8;
+const AXIS_H = 22; // x-axis date row, appended only to whichever panel is drawn last
+
 export default function TimelineChart({ frame, range, onRange, ranges, unit = "kg", analysisMode = null, rho = 7800, planDirection = "maintain" }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
@@ -55,11 +70,7 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
     return () => ro.disconnect();
   }, []);
   const fs = clamp(W / Math.max(width || W, 220), 1, 2);
-  const wTop = 12, wH = 74;
-  const eTop = wTop + wH + 30, eH = 96;
-  const bTop = eTop + eH + 30, bH = 74;
-  const xAxisY = showAnalysis ? bTop + bH : eTop + eH;
-  const H = xAxisY + 22;
+  const wH = 74, eH = 96, bH = 74;
 
   const hasExp = frame.some((p) => p.e != null);
   const xAt = (i) => (n <= 1 ? (px0 + px1) / 2 : px0 + (i / (n - 1)) * (px1 - px0));
@@ -80,16 +91,26 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
     );
   }
 
+  // Which panel is drawn last (gets the x-axis date row).
+  const lastPanel = showAnalysis ? "rate" : "energy";
+  // Full viewBox height for a panel of body-height H: internal top+bottom padding, plus the
+  // x-axis strip if (and only if) this is the last visible panel.
+  const panelViewH = (H, isLast) => (isLast ? PAD + H + AXIS_H : PAD + H + PAD);
+  const axisLabelY = (H) => PAD + H + 14;
+
   // weight scale
   const [wLo, wHi] = extent(frame.map(wOf));
   const wPad = (wHi - wLo) * 0.15 || 0.15;
   const wTicks = niceTicks(wLo - wPad, wHi + wPad, 4);
-  const wY = linScale([wTicks[0], wTicks[wTicks.length - 1]], [wTop + wH, wTop]);
+  const wY = linScale([wTicks[0], wTicks[wTicks.length - 1]], [PAD + wH, PAD]);
 
-  // energy scale — to the lines, not the band (see the band comment below)
-  const [eLo, eHi] = extent(frame.flatMap((p) => [p.kin, p.e]));
+  // energy scale — the domain must cover the confidence band's full extent, not just the two
+  // lines (see energyDomain in timeline.js): a wide early-history band must never clip at the
+  // panel edge, even though the lines compress toward the middle as a result — that compression
+  // IS the honest picture of low confidence, and it visibly "zooms in" as the band narrows.
+  const [eLo, eHi] = energyDomain(frame);
   const eTicks = niceTicks(eLo, eHi, 4);
-  const eY = linScale([eTicks[0], eTicks[eTicks.length - 1]], [eTop + eH, eTop]);
+  const eY = linScale([eTicks[0], eTicks[eTicks.length - 1]], [PAD + eH, PAD]);
 
   // analysis scale (includes 0 so the reference line is on-chart; in rate mode also the
   // active safe-zone's bounds, so the shaded zone is always fully visible even when the
@@ -99,17 +120,21 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
   if (rateZone) aVals.push(rateZone.lo, rateZone.hi);
   const [bLo, bHi] = extent(aVals);
   const bTicks = niceTicks(bLo, bHi, 4);
-  const bY = linScale([bTicks[0], bTicks[bTicks.length - 1]], [bTop + bH, bTop]);
+  const bY = linScale([bTicks[0], bTicks[bTicks.length - 1]], [PAD + bH, PAD]);
 
   const nLabels = Math.min(5, n);
   const xLabels = Array.from({ length: nLabels }, (_, k) => (nLabels <= 1 ? 0 : Math.round((k / (nLabels - 1)) * (n - 1))));
   // show the year on long spans / when the window crosses a year boundary
   const showYear = frame[0].date.slice(0, 4) !== frame[n - 1].date.slice(0, 4) || diffDays(frame[0].date, frame[n - 1].date) > 300;
 
+  // Hover tracking lives on the wrapping div (not any one panel's svg) — every panel's own
+  // crosshair reads the same `hover` index, so they move together across subsections even
+  // though each is a separate SVG element.
   const onMove = (ev) => {
     const rect = ref.current.getBoundingClientRect();
     setHover(clamp(Math.round(((ev.clientX - rect.left) / rect.width) * (n - 1)), 0, n - 1));
   };
+  const onTouch = (ev) => { const t = ev.touches && ev.touches[0]; if (t) onMove(t); };
 
   const hp = hover != null ? frame[hover] : null;
   const hx = hover != null ? xAt(hover) : 0;
@@ -128,9 +153,8 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
   const hA = hp ? aOf(hp, hover) : null;
   const hRateW = hp && rateSeries[hover] ? weeklyRate(rateSeries[hover].kgPerWeek, unit) : null;
 
-  // Tick numbers only — the unit ("lb"/"kcal"/"%/wk") lives solely in the panel title text
-  // above each panel (e.g. "Weight · lb"), so it never overprints the topmost tick number the
-  // way a duplicate axis-corner label did.
+  // Tick numbers only — the unit ("lb"/"kcal"/"%/wk") lives solely in each panel's own HTML
+  // header (e.g. "Weight · lb"), so it never overprints the topmost tick number.
   const gridAxis = (ticks, yScale) => (
     <g>
       {ticks.map((tv) => (
@@ -142,32 +166,56 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
     </g>
   );
 
-  const onTouch = (ev) => { const t = ev.touches && ev.touches[0]; if (t) onMove(t); };
+  const crosshairLine = (top, bottom) => hp && (
+    <line x1={hx} x2={hx} y1={top} y2={bottom} stroke={C.sub} strokeWidth="1" strokeDasharray="3 3" opacity="0.6" pointerEvents="none" />
+  );
+
+  const xAxisRow = (H) => (
+    <>
+      {xLabels.map((i) => (
+        <text key={i} x={clamp(xAt(i), px0 + 8, px1 - 8)} y={axisLabelY(H)} textAnchor="middle" fontSize={9 * fs} fontFamily="monospace" fill={C.faint}>{fmtDate(frame[i].date, showYear)}</text>
+      ))}
+    </>
+  );
+
   const summary = `Timeline over ${range}. Latest weight ${r1(wOf(last))} ${weightLabel(unit)}`
     + (hasExp && last.e != null ? `, estimated expenditure ${r0(last.e)} kcal/day` : "")
     + (last.kin != null ? `, ${r0(last.kin)} kcal in` : "") + ".";
 
+  const hasImputed = frame.some((p) => p.kinImputed && p.kin != null);
+
   return (
     <div>
       <RangeRow range={range} onRange={onRange} ranges={ranges} />
-      <div style={{ position: "relative" }} className="mt-2">
-        <svg ref={ref} viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", touchAction: "none" }}
-          role="img" aria-label={summary}
-          onMouseMove={onMove} onMouseLeave={() => setHover(null)} onTouchStart={onTouch} onTouchMove={onTouch}>
-          <defs>
-            <clipPath id="eClip"><rect x={px0} y={eTop} width={px1 - px0} height={eH} /></clipPath>
-            <clipPath id="bClip"><rect x={px0} y={bTop} width={px1 - px0} height={bH} /></clipPath>
-          </defs>
+      <div ref={ref} style={{ position: "relative" }} className="mt-2" role="img" aria-label={summary}
+        onMouseMove={onMove} onMouseLeave={() => setHover(null)} onTouchStart={onTouch} onTouchMove={onTouch}>
 
-          <text x={px0} y={wTop - 3} fontSize={9 * fs} fontFamily="monospace" fill={C.sub}>Weight · {weightLabel(unit)}</text>
-          <text x={px0} y={eTop - 8} fontSize={9 * fs} fontFamily="monospace" fill={C.sub}>Energy · kcal/day</text>
+        {/* Weight subsection */}
+        <PanelHeader W={W} px0={px0} px1={px1} title={`Weight · ${weightLabel(unit)}`}
+          chips={<LegendChip color={CHART.weight} label="weight" />} />
+        <svg viewBox={`0 0 ${W} ${panelViewH(wH, lastPanel === "weight")}`} width="100%" style={{ display: "block", touchAction: "none" }} aria-hidden="true">
           {gridAxis(wTicks, wY)}
-          {gridAxis(eTicks, eY)}
-
-          {/* weight */}
           <path d={linePath(frame, wOf, xAt, wY)} fill="none" stroke={CHART.weight} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          <EndDot x={xAt(n - 1)} y={wY(wOf(last))} color={CHART.weight} label={`${r1(wOf(last))} ${weightLabel(unit)}`} fs={fs} />
+          {hp && (
+            <g pointerEvents="none">
+              {crosshairLine(PAD, PAD + wH)}
+              {wOf(hp) != null && <circle cx={hx} cy={wY(wOf(hp))} r="3.5" fill={CHART.weight} stroke="#fff" strokeWidth="1.5" />}
+            </g>
+          )}
+        </svg>
 
-          {/* energy (band + two lines, clipped) */}
+        {/* Energy subsection */}
+        <PanelHeader W={W} px0={px0} px1={px1} title="Energy · kcal/day" separator
+          chips={<>
+            <LegendChip color={CHART.intake} label="calories in" />
+            {hasExp && <LegendChip color={CHART.expenditure} label="est. expenditure" />}
+            {hasExp && <LegendChip color={CHART.expenditure} label="shaded = 95% confidence" band />}
+            {hasImputed && <LegendChip color={CHART.intake} label="imputed / excluded" hollow />}
+          </>} />
+        <svg viewBox={`0 0 ${W} ${panelViewH(eH, lastPanel === "energy")}`} width="100%" style={{ display: "block", touchAction: "none" }} aria-hidden="true">
+          <defs><clipPath id="eClip"><rect x={px0} y={PAD} width={px1 - px0} height={eH} /></clipPath></defs>
+          {gridAxis(eTicks, eY)}
           <g clipPath="url(#eClip)">
             <path d={bandPolygon(frame, (p) => p.e, xAt, eY)} fill={CHART.expenditure} opacity="0.2" />
             {/* intake is logged, day-to-day, noisy data (unlike the smoothed trend/expenditure
@@ -184,11 +232,28 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
               <circle key={p.date} cx={xAt(i)} cy={eY(p.kin)} r="2.5" fill="none" stroke={CHART.intake} strokeWidth="1.5" />
             ))}
           </g>
+          {last.kin != null && <EndDot x={xAt(n - 1)} y={kinPx} color={CHART.intake} label={`${r0(last.kin)}`} fs={fs} below={intakeBelow} hollow={last.kinImputed} />}
+          {hasExp && last.e != null && <EndDot x={xAt(n - 1)} y={ePx} color={CHART.expenditure} label={`${r0(last.e)}`} fs={fs} below={expBelow} />}
+          {hp && (
+            <g pointerEvents="none">
+              {crosshairLine(PAD, PAD + eH)}
+              {hp.kin != null && (hp.kinImputed
+                ? <circle cx={hx} cy={eY(hp.kin)} r="3.5" fill="none" stroke={CHART.intake} strokeWidth="2" />
+                : <circle cx={hx} cy={eY(hp.kin)} r="3.5" fill={CHART.intake} stroke="#fff" strokeWidth="1.5" />)}
+              {hasExp && hp.e != null && <circle cx={hx} cy={eY(hp.e)} r="3.5" fill={CHART.expenditure} stroke="#fff" strokeWidth="1.5" />}
+            </g>
+          )}
+          {lastPanel === "energy" && xAxisRow(eH)}
+        </svg>
 
-          {/* analysis panel (optional): weight-change rate or caloric balance */}
-          {showAnalysis && (
-            <>
-              <text x={px0} y={bTop - 8} fontSize={9 * fs} fontFamily="monospace" fill={C.sub}>{isRate ? "Rate · %/week (loss −)" : "Balance · kcal/day (deficit −)"}</text>
+        {/* Rate / balance subsection (optional) */}
+        {showAnalysis && (
+          <>
+            <PanelHeader W={W} px0={px0} px1={px1} separator
+              title={isRate ? "Rate · %/week (loss −)" : "Balance · kcal/day (deficit −)"}
+              chips={<LegendChip color={C.ink} label={isRate ? "weight-change rate" : "balance (in − burns)"} />} />
+            <svg viewBox={`0 0 ${W} ${panelViewH(bH, lastPanel === "rate")}`} width="100%" style={{ display: "block", touchAction: "none" }} aria-hidden="true">
+              <defs><clipPath id="bClip"><rect x={px0} y={PAD} width={px1 - px0} height={bH} /></clipPath></defs>
               {gridAxis(bTicks, bY)}
               {isRate && rateZone && (
                 <g clipPath="url(#bClip)">
@@ -215,32 +280,16 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
                 <path d={linePath(frame, aOf, xAt, bY)} fill="none" stroke={C.ink} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
               </g>
               <line x1={px0} x2={px1} y1={bY(0)} y2={bY(0)} stroke={C.sub} strokeWidth="1" strokeDasharray="2 2" />
-            </>
-          )}
-
-          {/* end-of-line direct labels */}
-          <EndDot x={xAt(n - 1)} y={wY(wOf(last))} color={CHART.weight} label={`${r1(wOf(last))} ${weightLabel(unit)}`} fs={fs} />
-          {last.kin != null && <EndDot x={xAt(n - 1)} y={kinPx} color={CHART.intake} label={`${r0(last.kin)}`} fs={fs} below={intakeBelow} hollow={last.kinImputed} />}
-          {hasExp && last.e != null && <EndDot x={xAt(n - 1)} y={ePx} color={CHART.expenditure} label={`${r0(last.e)}`} fs={fs} below={expBelow} />}
-
-          {/* x-axis */}
-          {xLabels.map((i) => (
-            <text key={i} x={clamp(xAt(i), px0 + 8, px1 - 8)} y={xAxisY + 14} textAnchor="middle" fontSize={9 * fs} fontFamily="monospace" fill={C.faint}>{fmtDate(frame[i].date, showYear)}</text>
-          ))}
-
-          {/* hover crosshair */}
-          {hp && (
-            <g pointerEvents="none">
-              <line x1={hx} x2={hx} y1={wTop} y2={xAxisY} stroke={C.sub} strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
-              {wOf(hp) != null && <circle cx={hx} cy={wY(wOf(hp))} r="3.5" fill={CHART.weight} stroke="#fff" strokeWidth="1.5" />}
-              {hp.kin != null && (hp.kinImputed
-                ? <circle cx={hx} cy={eY(hp.kin)} r="3.5" fill="none" stroke={CHART.intake} strokeWidth="2" />
-                : <circle cx={hx} cy={eY(hp.kin)} r="3.5" fill={CHART.intake} stroke="#fff" strokeWidth="1.5" />)}
-              {hasExp && hp.e != null && <circle cx={hx} cy={eY(hp.e)} r="3.5" fill={CHART.expenditure} stroke="#fff" strokeWidth="1.5" />}
-              {showAnalysis && hA != null && <circle cx={hx} cy={bY(hA)} r="3.5" fill={C.ink} stroke="#fff" strokeWidth="1.5" />}
-            </g>
-          )}
-        </svg>
+              {hp && (
+                <g pointerEvents="none">
+                  {crosshairLine(PAD, PAD + bH)}
+                  {hA != null && <circle cx={hx} cy={bY(hA)} r="3.5" fill={C.ink} stroke="#fff" strokeWidth="1.5" />}
+                </g>
+              )}
+              {lastPanel === "rate" && xAxisRow(bH)}
+            </svg>
+          </>
+        )}
 
         {hp && (
           <div style={{ position: "absolute", top: 0, left: `${clamp(n <= 1 ? 0 : (hover / (n - 1)) * 100, 0, 100)}%`,
@@ -254,20 +303,6 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
             {showAnalysis && !isRate && <TipRow color={C.ink} label="balance" value={hDef != null ? `${hDef > 0 ? "+" : ""}${r0(hDef)} kcal · ${r0(hRate.value)} ${hRate.unit}` : "—"} />}
           </div>
         )}
-      </div>
-
-      {/* Slimmed to the three line entities + one band entry: each line already carries a
-          direct end-label, so the legend just needs to key the color; the confidence band
-          gets a single generic entry rather than piggybacking (pale, easily confused) on the
-          expenditure chip; the safe-zone gets its in-chart label only (no legend row) since
-          it's positional (which side of zero), not a fixed color code to look up. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs" style={{ color: C.sub }}>
-        <LegendChip color={CHART.weight} label="weight" />
-        <LegendChip color={CHART.intake} label="calories in" />
-        {hasExp && <LegendChip color={CHART.expenditure} label="est. expenditure" />}
-        {hasExp && <LegendChip color={CHART.expenditure} label="shaded = 95% confidence" band />}
-        {showAnalysis && <LegendChip color={C.ink} label={isRate ? "weight-change rate" : "balance (in − burns)"} />}
-        {frame.some((p) => p.kinImputed && p.kin != null) && <LegendChip color={CHART.intake} label="imputed / excluded" hollow />}
       </div>
 
       {/* screen-reader / no-pointer data fallback for the SVG */}
@@ -299,6 +334,28 @@ function RangeRow({ range, onRange, ranges }) {
           <button key={r.key} onClick={() => onRange(r.key)} aria-pressed={range === r.key} style={{ background: range === r.key ? C.spruce : "transparent", color: range === r.key ? "#fff" : C.sub }} className="text-xs px-2.5 py-1 font-mono">{r.label}</button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// A panel subsection's header row: title left, that panel's own mini-legend chips right.
+// Horizontal padding mirrors the plot area's own left/right edges (px0/px1 in the svg below,
+// expressed as a % of the shared viewBox width W) so the header visually lines up with the
+// chart it introduces, not with the container's raw edge. `separator` draws a faint hairline
+// above the header — the visual break between this subsection and the one above it — plus
+// the vertical whitespace that comes from ordinary margin.
+function PanelHeader({ W, px0, px1, title, chips, separator = false }) {
+  return (
+    <div
+      style={{
+        paddingLeft: `${(px0 / W) * 100}%`, paddingRight: `${((W - px1) / W) * 100}%`,
+        marginTop: separator ? 20 : 0, paddingTop: separator ? 10 : 0,
+        borderTop: separator ? `1px solid ${C.line}` : "none",
+      }}
+      className="flex items-center justify-between flex-wrap gap-x-3 gap-y-1"
+    >
+      <span style={{ color: C.sub }} className="text-xs font-mono">{title}</span>
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs" style={{ color: C.sub }}>{chips}</div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { extent, niceTicks, linScale } from "./scale.js";
 import { linregXY } from "./series.js";
-import { buildDailyFrame, historySpanDays, weightChangeRate, pickEndLabelBelow } from "./timeline.js";
+import { buildDailyFrame, historySpanDays, weightChangeRate, pickEndLabelBelow, energyDomain } from "./timeline.js";
 import { groupByDay } from "./series.js";
 
 describe("scale", () => {
@@ -124,5 +124,31 @@ describe("pickEndLabelBelow (end-of-line label placement)", () => {
   it("once the two end points are far enough apart, the collision check with its own line applies again", () => {
     expect(pickEndLabelBelow({ prevValue: 200, lastValue: 220, preferBelow: true, ownPx: 100, otherPx: 200, minGapPx: 16 }))
       .toBe(false);
+  });
+});
+
+describe("energyDomain (energy panel y-domain — must never clip the confidence band)", () => {
+  it("a wide band (few days of history) is fully inside the domain, not just the lines", () => {
+    // e = 250, sd = 40 → band spans ~[172.6, 327.4]; a domain derived from lines alone
+    // (kin/e only, both near 250) would clip this badly.
+    const frame = [{ kin: 245, e: 250, sd: 40 }, { kin: 240, e: 248, sd: 42 }];
+    const [lo, hi] = energyDomain(frame);
+    expect(lo).toBeLessThanOrEqual(250 - 1.96 * 40);
+    expect(hi).toBeGreaterThanOrEqual(248 + 1.96 * 42);
+  });
+  it("no band (sd absent) leaves the domain unchanged from the line-only extent", () => {
+    const frame = [{ kin: 200, e: 250 }, { kin: 210, e: 245 }];
+    expect(energyDomain(frame)).toEqual(extent([200, 250, 210, 245]));
+  });
+  it("a degenerate band (non-finite or negative sd) is ignored, not propagated as NaN/Infinity", () => {
+    const frame = [
+      { kin: 200, e: 250, sd: NaN },
+      { kin: 210, e: 245, sd: -5 },
+      { kin: 205, e: 248, sd: Infinity },
+    ];
+    const [lo, hi] = energyDomain(frame);
+    expect(Number.isFinite(lo)).toBe(true);
+    expect(Number.isFinite(hi)).toBe(true);
+    expect([lo, hi]).toEqual(extent([200, 250, 210, 245, 205, 248]));
   });
 });

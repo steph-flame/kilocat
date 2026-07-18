@@ -2,6 +2,7 @@
 // aligned by date and clipped to a selected range. Pure — no SVG, no React.
 
 import { dailyReduce, addDays, diffDays, ewma } from "./series.js";
+import { extent } from "./scale.js";
 
 export const RANGES = [
   { key: "1w", days: 7, label: "1W" },
@@ -58,6 +59,25 @@ export function weightChangeRate(frame, alpha = 0.3) {
     const kgPerWeek = smooth[i] * 7;
     return { kgPerWeek, pctPerWeek: p.w > 0 ? (kgPerWeek / p.w) * 100 : 0 };
   });
+}
+
+// The energy panel's y-domain source values: the two lines (calories in, expenditure) AND the
+// confidence band's full extent (expenditure ± k·sd) — never just the lines. A cat with only a
+// few days of history has a wide band (±40+ kcal on a ~250 kcal prior); if the domain came from
+// the lines alone, that band would clip at the panel's top/bottom edge and the owner would have
+// no way to see how uncertain the estimate actually is. Accepting the domain the band demands
+// means the lines visually compress toward the middle early on — that compression IS the honest
+// picture, and it "zooms in" as more days of data narrow the band. Falls back to the line-only
+// extent when a point's sd is absent, non-finite, or negative (a degenerate band contributes
+// nothing rather than injecting NaN/Infinity into the domain). Returns [lo, hi] via extent()'s
+// own null-safe behavior (empty → [0, 1]).
+export function energyDomain(frame, k = 1.96) {
+  const vals = frame.flatMap((p) => {
+    const v = [p.kin, p.e];
+    if (p.e != null && Number.isFinite(p.sd) && p.sd >= 0) v.push(p.e + k * p.sd, p.e - k * p.sd);
+    return v;
+  });
+  return extent(vals);
 }
 
 // Direct end-of-line label placement (above vs. below the final point) for a chart panel
