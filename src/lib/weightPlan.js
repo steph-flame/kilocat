@@ -15,6 +15,20 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 // Default direction from body condition when the user hasn't picked one.
 export const autoDirection = (pctOver) => (pctOver > 2 ? "lose" : pctOver < -2 ? "gain" : "maintain");
 
+// The %/week zone that counts as "safe" for a given feeding direction — used by the timeline
+// chart's rate-panel shading. Pure data (no pixels, no SVG): for lose/gain it's the
+// RATE.min–RATE.max band on the side of zero the plan is actually aiming for (loss is
+// negative, gain is positive — the rate axis reads "loss −"). For maintain there's no
+// directional target, so it's a thin band centered on zero ("holding steady" reads as safe
+// too, not just active loss/gain). MAINTAIN_BAND is a presentational tolerance for what counts
+// as "basically flat" on the chart, not a measured statistic.
+export const MAINTAIN_BAND = 0.25; // %/week
+export function safeRateBand(direction) {
+  if (direction === "gain") return { lo: RATE.min, hi: RATE.max };
+  if (direction === "lose") return { lo: -RATE.max, hi: -RATE.min };
+  return { lo: -MAINTAIN_BAND, hi: MAINTAIN_BAND };
+}
+
 // direction: "lose" | "maintain" | "gain". currentKg/idealKg from the profile.
 export function planWeightChange({ direction, maintenanceKcal, currentKg, idealKg, pctPerWeek = RATE.default, rho = KCAL_PER_KG }) {
   const requested = pctPerWeek;

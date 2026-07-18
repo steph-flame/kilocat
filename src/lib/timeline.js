@@ -59,3 +59,18 @@ export function weightChangeRate(frame, alpha = 0.3) {
     return { kgPerWeek, pctPerWeek: p.w > 0 ? (kgPerWeek / p.w) * 100 : 0 };
   });
 }
+
+// Direct end-of-line label placement (above vs. below the final point) for a chart panel
+// where two series can end near each other. Two collision risks, checked in priority order:
+// 1. Its OWN incoming line segment: if the series was rising into the last point, that segment
+//    approaches from below, so the label goes above (and vice versa) — otherwise the label
+//    sits right on top of the stroke that draws it.
+// 2. The OTHER series' end label in the same panel: when the two final points land within
+//    `minGapPx` of each other, keeping each label on its assigned default side matters more
+//    than dodging one line, so that wins instead.
+// Pure — takes plain numbers (values + already-scaled pixel y's), no pixel-scale math itself.
+export function pickEndLabelBelow({ prevValue, lastValue, preferBelow, ownPx, otherPx, minGapPx = 16 }) {
+  if (otherPx != null && ownPx != null && Math.abs(ownPx - otherPx) < minGapPx) return preferBelow;
+  if (prevValue == null || lastValue == null || prevValue === lastValue) return preferBelow;
+  return lastValue < prevValue; // falling into the last point → approaches from above → label below
+}

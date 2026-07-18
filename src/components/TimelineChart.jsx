@@ -3,8 +3,8 @@ import { C, CHART } from "../theme.js";
 import { r0, r1 } from "../lib/util.js";
 import { extent, niceTicks, linScale } from "../lib/scale.js";
 import { diffDays } from "../lib/series.js";
-import { weightChangeRate } from "../lib/timeline.js";
-import { RATE } from "../lib/weightPlan.js";
+import { weightChangeRate, pickEndLabelBelow } from "../lib/timeline.js";
+import { RATE, safeRateBand, MAINTAIN_BAND } from "../lib/weightPlan.js";
 import { toDisplayWeight, weightLabel, weeklyRate } from "../lib/units.js";
 
 // x-aligned panels sharing one time axis: weight on top, energy (calories in vs. estimated
@@ -36,7 +36,7 @@ function bandPolygon(frame, center, xAt, yScale, k = 1.96) {
   return `${top}${bot}Z`;
 }
 
-export default function TimelineChart({ frame, range, onRange, ranges, unit = "kg", analysisMode = null, rho = 7800 }) {
+export default function TimelineChart({ frame, range, onRange, ranges, unit = "kg", analysisMode = null, rho = 7800, planDirection = "maintain" }) {
   const ref = useRef(null);
   const [hover, setHover] = useState(null);
   const n = frame.length;
@@ -82,7 +82,7 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
 
   // weight scale
   const [wLo, wHi] = extent(frame.map(wOf));
-  const wPad = (wHi - wLo) * 0.1 || 0.1;
+  const wPad = (wHi - wLo) * 0.15 || 0.15;
   const wTicks = niceTicks(wLo - wPad, wHi + wPad, 4);
   const wY = linScale([wTicks[0], wTicks[wTicks.length - 1]], [wTop + wH, wTop]);
 
@@ -92,9 +92,11 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
   const eY = linScale([eTicks[0], eTicks[eTicks.length - 1]], [eTop + eH, eTop]);
 
   // analysis scale (includes 0 so the reference line is on-chart; in rate mode also the
-  // safe-band extremes so the shaded 0.5–2%/week zone is always visible)
+  // active safe-zone's bounds, so the shaded zone is always fully visible even when the
+  // actual data never reaches it)
+  const rateZone = isRate ? safeRateBand(planDirection) : null;
   const aVals = frame.map((p, i) => aOf(p, i)).concat([0]);
-  if (isRate) aVals.push(RATE.max, -RATE.max);
+  if (rateZone) aVals.push(rateZone.lo, rateZone.hi);
   const [bLo, bHi] = extent(aVals);
   const bTicks = niceTicks(bLo, bHi, 4);
   const bY = linScale([bTicks[0], bTicks[bTicks.length - 1]], [bTop + bH, bTop]);
@@ -112,12 +114,24 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
   const hp = hover != null ? frame[hover] : null;
   const hx = hover != null ? xAt(hover) : 0;
   const last = frame[n - 1];
+  const prev = n >= 2 ? frame[n - 2] : null;
+  // End-of-line label placement for the two energy-panel series (intake defaults below,
+  // expenditure defaults above, so the two are never on the same side by default) — nudged to
+  // dodge each one's own incoming line segment, unless the two end points sit close enough
+  // together that keeping them apart matters more (see pickEndLabelBelow).
+  const kinPx = last.kin != null ? eY(last.kin) : null;
+  const ePx = hasExp && last.e != null ? eY(last.e) : null;
+  const intakeBelow = pickEndLabelBelow({ prevValue: prev?.kin, lastValue: last.kin, preferBelow: true, ownPx: kinPx, otherPx: ePx });
+  const expBelow = pickEndLabelBelow({ prevValue: prev?.e, lastValue: last.e, preferBelow: false, ownPx: ePx, otherPx: kinPx });
   const hDef = hp ? defOf(hp) : null;
   const hRate = hDef != null ? weeklyRate((hDef / rho) * 7, unit) : null;
   const hA = hp ? aOf(hp, hover) : null;
   const hRateW = hp && rateSeries[hover] ? weeklyRate(rateSeries[hover].kgPerWeek, unit) : null;
 
-  const gridAxis = (ticks, yScale, unitLbl, panelTop) => (
+  // Tick numbers only — the unit ("lb"/"kcal"/"%/wk") lives solely in the panel title text
+  // above each panel (e.g. "Weight · lb"), so it never overprints the topmost tick number the
+  // way a duplicate axis-corner label did.
+  const gridAxis = (ticks, yScale) => (
     <g>
       {ticks.map((tv) => (
         <g key={tv}>
@@ -125,7 +139,6 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
           <text x={px0 - 6} y={yScale(tv) + 3} textAnchor="end" fontSize={9 * fs} fontFamily="monospace" fill={C.faint}>{fmtTick(tv)}</text>
         </g>
       ))}
-      <text x={px0 - 6} y={panelTop - 3} textAnchor="end" fontSize={8 * fs} fontFamily="monospace" fill={C.faint}>{unitLbl}</text>
     </g>
   );
 
@@ -148,8 +161,8 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
 
           <text x={px0} y={wTop - 3} fontSize={9 * fs} fontFamily="monospace" fill={C.sub}>Weight · {weightLabel(unit)}</text>
           <text x={px0} y={eTop - 8} fontSize={9 * fs} fontFamily="monospace" fill={C.sub}>Energy · kcal/day</text>
-          {gridAxis(wTicks, wY, weightLabel(unit), wTop)}
-          {gridAxis(eTicks, eY, "kcal", eTop)}
+          {gridAxis(wTicks, wY)}
+          {gridAxis(eTicks, eY)}
 
           {/* weight */}
           <path d={linePath(frame, wOf, xAt, wY)} fill="none" stroke={CHART.weight} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
@@ -157,7 +170,11 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
           {/* energy (band + two lines, clipped) */}
           <g clipPath="url(#eClip)">
             <path d={bandPolygon(frame, (p) => p.e, xAt, eY)} fill={CHART.expenditure} opacity="0.2" />
-            <path d={linePath(frame, (p) => p.kin, xAt, eY)} fill="none" stroke={CHART.intake} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {/* intake is logged, day-to-day, noisy data (unlike the smoothed trend/expenditure
+                lines) — over long ranges the raw zigzag reads as visual noise, so it's drawn
+                thinner and slightly translucent. Still the real per-day numbers, just quieter;
+                the end dot/hover point stay full-strength for precision. */}
+            <path d={linePath(frame, (p) => p.kin, xAt, eY)} fill="none" stroke={CHART.intake} strokeWidth="1.5" opacity="0.85" strokeLinejoin="round" strokeLinecap="round" />
             {hasExp && <path d={linePath(frame, (p) => p.e, xAt, eY)} fill="none" stroke={CHART.expenditure} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
             {/* honesty markers: a day the estimator didn't trust (no entries that day, or
                 flagged incomplete) — hollow so it visually reads as "not counted", not as a
@@ -172,18 +189,25 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
           {showAnalysis && (
             <>
               <text x={px0} y={bTop - 8} fontSize={9 * fs} fontFamily="monospace" fill={C.sub}>{isRate ? "Rate · %/week (loss −)" : "Balance · kcal/day (deficit −)"}</text>
-              {gridAxis(bTicks, bY, isRate ? "%/wk" : "kcal", bTop)}
-              {isRate && (
+              {gridAxis(bTicks, bY)}
+              {isRate && rateZone && (
                 <g clipPath="url(#bClip)">
                   {/* safe-rate zone: C.ok specifically (not CHART.expenditure) — this is a
                       safe-state indicator, not the trend series, and must stay green even in
-                      skins where data1/second diverge from ok. */}
-                  <rect x={px0} width={px1 - px0} y={bY(-RATE.min)} height={Math.max(0, bY(-RATE.max) - bY(-RATE.min))} fill={C.ok} opacity="0.14" />
-                  <rect x={px0} width={px1 - px0} y={bY(RATE.max)} height={Math.max(0, bY(RATE.min) - bY(RATE.max))} fill={C.ok} opacity="0.14" />
-                  {[-RATE.min, -RATE.max, RATE.min, RATE.max].map((v) => (
+                      skins where data1/second diverge from ok. Shades ONLY the side of zero the
+                      feeding plan is actually aiming for (rateZone from safeRateBand) — the
+                      axis reads "loss −", so a losing cat's safe zone is negative, a gaining
+                      cat's is positive, and "maintain" gets a thin band centered on zero. A
+                      single rect spanning rateZone.lo→hi covers whichever case is active. */}
+                  <rect x={px0} width={px1 - px0} y={bY(rateZone.hi)} height={Math.max(0, bY(rateZone.lo) - bY(rateZone.hi))} fill={C.ok} opacity="0.14" />
+                  {[rateZone.lo, rateZone.hi].map((v) => (
                     <line key={v} x1={px0} x2={px1} y1={bY(v)} y2={bY(v)} stroke={C.ok} strokeWidth="1" strokeDasharray="2 3" opacity="0.55" />
                   ))}
-                  <text x={px1 - 2} y={bY(-RATE.max) - 3} textAnchor="end" fontSize={8 * fs} fontFamily="monospace" fill={C.ok}>safe {RATE.min}–{RATE.max}%/wk</text>
+                  {/* label sits inside the band, anchored near whichever edge is farthest from
+                      zero (the "extreme" bound), nudged inward so it never crosses the border */}
+                  <text x={px1 - 2} y={(Math.abs(rateZone.lo) > Math.abs(rateZone.hi) ? bY(rateZone.lo) - 3 : bY(rateZone.hi) + 10 * fs)} textAnchor="end" fontSize={8 * fs} fontFamily="monospace" fill={C.ok}>
+                    {planDirection === "maintain" ? `stable ±${MAINTAIN_BAND}%/wk` : `safe ${RATE.min}–${RATE.max}%/wk`}
+                  </text>
                 </g>
               )}
               <g clipPath="url(#bClip)">
@@ -196,8 +220,8 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
 
           {/* end-of-line direct labels */}
           <EndDot x={xAt(n - 1)} y={wY(wOf(last))} color={CHART.weight} label={`${r1(wOf(last))} ${weightLabel(unit)}`} fs={fs} />
-          {last.kin != null && <EndDot x={xAt(n - 1)} y={eY(last.kin)} color={CHART.intake} label={`${r0(last.kin)}`} fs={fs} below hollow={last.kinImputed} />}
-          {hasExp && last.e != null && <EndDot x={xAt(n - 1)} y={eY(last.e)} color={CHART.expenditure} label={`${r0(last.e)}`} fs={fs} />}
+          {last.kin != null && <EndDot x={xAt(n - 1)} y={kinPx} color={CHART.intake} label={`${r0(last.kin)}`} fs={fs} below={intakeBelow} hollow={last.kinImputed} />}
+          {hasExp && last.e != null && <EndDot x={xAt(n - 1)} y={ePx} color={CHART.expenditure} label={`${r0(last.e)}`} fs={fs} below={expBelow} />}
 
           {/* x-axis */}
           {xLabels.map((i) => (
@@ -232,12 +256,17 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
         )}
       </div>
 
+      {/* Slimmed to the three line entities + one band entry: each line already carries a
+          direct end-label, so the legend just needs to key the color; the confidence band
+          gets a single generic entry rather than piggybacking (pale, easily confused) on the
+          expenditure chip; the safe-zone gets its in-chart label only (no legend row) since
+          it's positional (which side of zero), not a fixed color code to look up. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs" style={{ color: C.sub }}>
         <LegendChip color={CHART.weight} label="weight" />
         <LegendChip color={CHART.intake} label="calories in" />
-        {hasExp && <LegendChip color={CHART.expenditure} label="est. expenditure" band />}
+        {hasExp && <LegendChip color={CHART.expenditure} label="est. expenditure" />}
+        {hasExp && <LegendChip color={CHART.expenditure} label="shaded = 95% confidence" band />}
         {showAnalysis && <LegendChip color={C.ink} label={isRate ? "weight-change rate" : "balance (in − burns)"} />}
-        {showAnalysis && isRate && <LegendChip color={C.ok} label={`safe ${RATE.min}–${RATE.max}%/wk`} band />}
         {frame.some((p) => p.kinImputed && p.kin != null) && <LegendChip color={CHART.intake} label="imputed / excluded" hollow />}
       </div>
 

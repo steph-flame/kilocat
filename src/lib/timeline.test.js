@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { extent, niceTicks, linScale } from "./scale.js";
 import { linregXY } from "./series.js";
-import { buildDailyFrame, historySpanDays, weightChangeRate } from "./timeline.js";
+import { buildDailyFrame, historySpanDays, weightChangeRate, pickEndLabelBelow } from "./timeline.js";
 import { groupByDay } from "./series.js";
 
 describe("scale", () => {
@@ -99,5 +99,30 @@ describe("weightChangeRate", () => {
     expect(last.kgPerWeek).toBeCloseTo(-0.07, 6);
     expect(last.pctPerWeek).toBeLessThan(0);
     expect(rate[0]).toEqual({ kgPerWeek: null, pctPerWeek: null }); // first point has no prior
+  });
+});
+
+describe("pickEndLabelBelow (end-of-line label placement)", () => {
+  it("rising into the last point → label goes above (dodges the incoming-from-below segment)", () => {
+    expect(pickEndLabelBelow({ prevValue: 200, lastValue: 220, preferBelow: true, ownPx: 100, otherPx: null }))
+      .toBe(false);
+  });
+  it("falling into the last point → label goes below (dodges the incoming-from-above segment)", () => {
+    expect(pickEndLabelBelow({ prevValue: 260, lastValue: 220, preferBelow: false, ownPx: 100, otherPx: null }))
+      .toBe(true);
+  });
+  it("flat (no slope) or missing history falls back to the series' preferred default side", () => {
+    expect(pickEndLabelBelow({ prevValue: 220, lastValue: 220, preferBelow: true, ownPx: 100, otherPx: null })).toBe(true);
+    expect(pickEndLabelBelow({ prevValue: null, lastValue: 220, preferBelow: false, ownPx: 100, otherPx: null })).toBe(false);
+  });
+  it("when the other series' end label lands close by, keeping series apart wins over dodging the line", () => {
+    // Would otherwise flip to "above" (rising), but the other label is only 5px away — too
+    // close to risk both landing on the same side.
+    expect(pickEndLabelBelow({ prevValue: 200, lastValue: 220, preferBelow: true, ownPx: 100, otherPx: 105, minGapPx: 16 }))
+      .toBe(true);
+  });
+  it("once the two end points are far enough apart, the collision check with its own line applies again", () => {
+    expect(pickEndLabelBelow({ prevValue: 200, lastValue: 220, preferBelow: true, ownPx: 100, otherPx: 200, minGapPx: 16 }))
+      .toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planWeightChange, autoDirection, RATE } from "./weightPlan.js";
+import { planWeightChange, autoDirection, RATE, MAINTAIN_BAND, safeRateBand } from "./weightPlan.js";
 import { RER } from "./nutrition.js";
 
 const RHO = 8000;
@@ -59,5 +59,36 @@ describe("maintain", () => {
     expect(p.targetKcal).toBe(240);
     expect(p.dailyDelta).toBe(0);
     expect(p.weeksToIdeal).toBeNull();
+  });
+});
+
+// The timeline chart's rate-panel safe-zone shading must land on the side of zero the plan is
+// actually aiming for — the reported bug was the zone rendering on the gain (positive) side
+// for a losing cat, contradicting the axis's own "(loss −)" label.
+describe("safeRateBand (rate-panel safe-zone shading)", () => {
+  it("lose: the whole zone is negative (below zero), bounded by RATE.min/max", () => {
+    const z = safeRateBand("lose");
+    expect(z.lo).toBe(-RATE.max);
+    expect(z.hi).toBe(-RATE.min);
+    expect(z.lo).toBeLessThan(0);
+    expect(z.hi).toBeLessThan(0);
+  });
+  it("gain: the whole zone is positive (above zero), bounded by RATE.min/max", () => {
+    const z = safeRateBand("gain");
+    expect(z.lo).toBe(RATE.min);
+    expect(z.hi).toBe(RATE.max);
+    expect(z.lo).toBeGreaterThan(0);
+    expect(z.hi).toBeGreaterThan(0);
+  });
+  it("maintain: a thin band centered on zero, narrower than the lose/gain zone", () => {
+    const z = safeRateBand("maintain");
+    expect(z.lo).toBe(-MAINTAIN_BAND);
+    expect(z.hi).toBe(MAINTAIN_BAND);
+    expect(z.hi - z.lo).toBeLessThan(RATE.max - RATE.min);
+  });
+  it("lose and gain zones never overlap zero, so they can never be confused for each other", () => {
+    const lose = safeRateBand("lose"), gain = safeRateBand("gain");
+    expect(lose.hi).toBeLessThanOrEqual(0);
+    expect(gain.lo).toBeGreaterThanOrEqual(0);
   });
 });

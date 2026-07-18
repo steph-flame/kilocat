@@ -10,10 +10,13 @@
 // lightest; accent/second = the two brand hues (accent leans warm/CTA-ish, second leans
 // calm/positive); ok = the dedicated "this is a safe state" color — kept separate from
 // `second` because in the spruce skin `second` is amber (used decoratively) while safe
-// states must still read green there. data1/data2 = chart series (data1 = the
-// modeled/trend measure — weight trend AND estimated expenditure share it, same as the
-// approved mockup; data2 = intake). Every skin below defines data1 === ok, so a trend line
-// is never accidentally the same hue as a caution.
+// states must still read green there. data1/data2 = the two raw chart-series hues (data1 =
+// the modeled/trend measure, data2 = intake's base hue before muting — see `mutedIntake`
+// below). Every skin below defines data1 === ok, so a trend line is never accidentally the
+// same hue as a caution. Chart entity → token mapping lives on CHART near the bottom of this
+// file: weight uses `ink` (neutral — it's the observed ground truth, not a modeled series),
+// expenditure uses `data1` alone (no longer shared with weight), intake uses the derived,
+// desaturated `intake` token (see below), and the confidence band is `data1` at low opacity.
 export const SKINS = {
   original: {
     ground: "#FAF6EE", card: "#FFFFFF", line: "#EAE2D3", ink: "#33302A", soft: "#655F50",
@@ -60,6 +63,17 @@ const mix = (hex, towardHex, t) => {
   return rgbToHex(a.map((v, i) => v * t + b[i] * (1 - t)));
 };
 
+// The intake line's actual color: data2, evenly blended with the skin's own `soft` neutral.
+// data2 alone reads as an error/warning color in more than one skin — most acutely in spruce,
+// where `second` (data2's source) is literally the same hex as the universal WARN token (see
+// the spruce note above and WARN below) — and even where it isn't an exact match, a fully
+// saturated brand hue on a routine "calories in" line reads more alarming than intended.
+// Blending toward `soft` roughly halves the saturation while *raising* contrast against the
+// white card (soft is a mid-dark neutral, so mixing toward it only darkens), and because
+// `soft` carries each skin's own neutral cast rather than warn's fixed amber, the result's hue
+// moves away from warn too, not just its saturation — verified in theme.test.js.
+export const mutedIntake = (base) => mix(base.data2, base.soft, 0.5);
+
 // The full resolved token set for one skin: its locked hexes plus the derived soft tints and
 // the tertiary text tone, plus the fixed warning colors.
 function deriveSkin(base) {
@@ -71,6 +85,7 @@ function deriveSkin(base) {
     // diverges from second — a safe-zone fill must stay green-tinted there too.
     okSoft: mix(base.ok, "#FFFFFF", 0.13),
     faint: mix(base.soft, base.ground, 0.55),
+    intake: mutedIntake(base),
     warn: WARN,
     warnSoft: WARN_SOFT,
   };
@@ -79,7 +94,7 @@ function deriveSkin(base) {
 const VAR_NAMES = [
   "ground", "card", "line", "ink", "soft", "faint",
   "accent", "accentSoft", "second", "secondSoft", "ok", "okSoft",
-  "data1", "data2", "warn", "warnSoft",
+  "data1", "data2", "intake", "warn", "warnSoft",
 ];
 
 // Write one skin's resolved hex values onto :root as CSS custom properties. Call once on
@@ -110,11 +125,15 @@ export const C = {
   warn: "var(--warn)", warnSoft: "var(--warnSoft)",
 };
 
-// Chart series colors — data1 is "the modeled/trend measure" (weight trend and estimated
-// expenditure share it, per the approved mockup), data2 is intake. Every skin defines
-// data1 === ok (see SKINS above), so these lines are never mistakable for a caution color.
+// Chart entity → token map, one source for both the SVG marks and the legend swatches (so
+// they can never disagree with each other): weight is the observed ground truth, drawn in the
+// neutral `ink` text color, not a data hue — it shouldn't share a color with a *modeled*
+// series like expenditure, especially stacked in the adjacent panel. expenditure is `data1`
+// (every skin pins data1 === ok, so it's never mistakable for a caution color) and owns that
+// hue alone now. intake is the derived, desaturated `intake` token (see mutedIntake above) —
+// data2's hue, quieted down so a routine "calories in" line doesn't read as an error/warning.
 export const CHART = {
-  weight: "var(--data1)",
-  intake: "var(--data2)",
+  weight: "var(--ink)",
+  intake: "var(--intake)",
   expenditure: "var(--data1)",
 };

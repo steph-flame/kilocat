@@ -144,7 +144,7 @@ export default function Expenditure() {
         <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
           {rawTrend.length > 0 ? (
             <>
-              <TimelineChart frame={frame} range={range} onRange={setRange} ranges={RANGES} unit={unit} analysisMode={analysis === "none" ? null : analysis} />
+              <TimelineChart frame={frame} range={range} onRange={setRange} ranges={RANGES} unit={unit} analysisMode={analysis === "none" ? null : analysis} planDirection={dir} />
               <div className="flex items-center justify-between mt-2 gap-3">
                 <p style={{ color: C.faint }} className="text-xs leading-snug flex-1">Where <span style={{ color: CHART.intake }}>calories in</span> sits below <span style={{ color: CHART.expenditure }}>expenditure</span>, the cat runs a deficit and the weight above trends down. Shaded = 95% confidence{!e.enoughData && " (wide until ~2 weeks of logs)"}.</p>
                 <div className="flex items-center gap-1 shrink-0">
