@@ -283,7 +283,13 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
               {hp && (
                 <g pointerEvents="none">
                   {crosshairLine(PAD, PAD + bH)}
-                  {hA != null && <circle cx={hx} cy={bY(hA)} r="3.5" fill={C.ink} stroke="#fff" strokeWidth="1.5" />}
+                  {/* balance is derived straight from kin (in − burns), so a day the estimate
+                      didn't trust (today's still-running total, or a flagged/imputed day) gets
+                      the same hollow treatment as the energy panel's kin point above — rate
+                      mode is weight-only and untouched by this. */}
+                  {hA != null && (!isRate && hp.kinImputed
+                    ? <circle cx={hx} cy={bY(hA)} r="3.5" fill="none" stroke={C.ink} strokeWidth="2" />
+                    : <circle cx={hx} cy={bY(hA)} r="3.5" fill={C.ink} stroke="#fff" strokeWidth="1.5" />)}
                 </g>
               )}
               {lastPanel === "rate" && xAxisRow(bH)}

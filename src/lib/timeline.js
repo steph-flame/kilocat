@@ -20,8 +20,12 @@ export const RANGES = [
 // `kinImputed` here, never to change what `kin` displays: a flagged day still shows its real
 // logged total (the owner did log something), just flagged as excluded from the estimate, so
 // the chart doesn't quietly imply that number was trusted.
+// excludeDay: the caller's in-progress local "today" (see buildIntakeDayMap) — same treatment:
+// `kin` still shows today's running total (real, logged-so-far data), but `kinImputed` marks
+// it too, so the chart draws it hollow instead of quietly implying a partial day is a
+// complete, trusted one.
 // → [{ date, w, kin, kinImputed, e, sd }] one per day in range (kin/e/sd may be null).
-export function buildDailyFrame(trend, intakeEntries, rangeDays, intakeDayStatus = {}) {
+export function buildDailyFrame(trend, intakeEntries, rangeDays, intakeDayStatus = {}, excludeDay = null) {
   if (!trend || trend.length === 0) return [];
   const intakeByDay = new Map(dailyReduce(intakeEntries, (v) => v.reduce((a, b) => a + b, 0)).map((d) => [d.date, d.value]));
   const last = trend[trend.length - 1].date;
@@ -37,9 +41,10 @@ export function buildDailyFrame(trend, intakeEntries, rangeDays, intakeDayStatus
         sd: p.sd ?? null,
         kin: hasEntries ? intakeByDay.get(p.date) : null,
         // true when the estimator did NOT trust this day's number: either no entries at all
-        // (already null, so nothing to draw hollow) or entries exist but the day is flagged
-        // incomplete (a real point the chart should still show, just not as solid/trusted).
-        kinImputed: !hasEntries || intakeDayStatus?.[p.date] === "incomplete",
+        // (already null, so nothing to draw hollow), entries exist but the day is flagged
+        // incomplete, or it's the in-progress excludeDay (a real point the chart should still
+        // show, just not as solid/trusted).
+        kinImputed: !hasEntries || intakeDayStatus?.[p.date] === "incomplete" || p.date === excludeDay,
       };
     });
 }

@@ -15,7 +15,7 @@ import CatMark from "../components/CatMark.jsx";
 const fmtKcal = (n) => (n == null ? "—" : r0(n));
 
 export default function Expenditure() {
-  const { p, t, expenditure, intakeLog, weightLog, intakeDayStatus, expSettings, setExpSettings, unit } = useApp();
+  const { p, t, expenditure, intakeLog, weightLog, intakeDayStatus, expSettings, setExpSettings, unit, today } = useApp();
   const e = expenditure;
   const kitten = t.stage !== "adult"; // stage, not a raw age check — catches a newborn (dob = today, age 0) too
   const algoName = { v3: "unobserved-components", v2: "Kalman filter", v1: "EWMA + regression" }[expSettings.algo];
@@ -54,8 +54,8 @@ export default function Expenditure() {
   }, [e.trend, weightLog.items, displayKcal, displaySd]);
 
   const frame = useMemo(
-    () => buildDailyFrame(rawTrend, intakeLog.items.map((x) => ({ date: x.date, value: x.kcal })), rangeDays, intakeDayStatus),
-    [rawTrend, intakeLog.items, rangeDays, intakeDayStatus],
+    () => buildDailyFrame(rawTrend, intakeLog.items.map((x) => ({ date: x.date, value: x.kcal })), rangeDays, intakeDayStatus, today),
+    [rawTrend, intakeLog.items, rangeDays, intakeDayStatus, today],
   );
 
   const rate = weeklyRate(e.rateKgPerWeek, unit);

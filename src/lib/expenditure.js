@@ -47,11 +47,21 @@ const V1_WEIGHT_SIGMA = 0.03; // kg, a per-weigh-in noise floor so the v1 band c
 // it's dropped entirely so it's indistinguishable from a day with no entries at all — the
 // existing imputation (mean-fill / exclusion) picks it up exactly like any other missing day.
 // A flag on a day with no entries is harmless: there's nothing in `daily` to drop.
-export function buildIntakeDayMap(intakeEntries, flags = {}) {
+//
+// `excludeDay` (typically the caller's local "today") drops one further day unconditionally —
+// same treatment as a flagged-incomplete day — because a day that's still being logged reads,
+// morning after morning, as a complete low-intake day: partial-so-far totals bias every
+// estimator downward until the day ends, then "recover" overnight, a daily oscillation that's
+// pure artifact, not signal. An explicit 0-kcal "nothing eaten" entry dated `excludeDay` is
+// excluded too (the day could still gain a meal before it's done) — it starts counting the
+// day after. This is orthogonal to `flags`: a past day can be BOTH flagged incomplete and (if
+// somehow also excludeDay) excluded — either reason drops it.
+export function buildIntakeDayMap(intakeEntries, flags = {}, excludeDay = null) {
   const daily = dailyReduce(intakeEntries, (v) => v.reduce((a, b) => a + b, 0));
   const map = new Map();
   for (const { date, value } of daily) {
     if (flags && flags[date] === "incomplete") continue; // treated as missing, not zero
+    if (excludeDay && date === excludeDay) continue; // in-progress day — not a complete day yet
     map.set(date, value);
   }
   return map;
@@ -75,7 +85,7 @@ export const WEIGH_SOURCES = { manual: "manual", litterRobot: "litter-robot" };
 // weightEntries: [{ date, value: kg }]   intakeEntries: [{ date, value: kcal }]
 // (multiple per day are fine — weight is median-reduced, intake summed.)
 export function estimateExpenditure(weightEntries = [], intakeEntries = [], opts = {}) {
-  const { rho, windowDays, minDays, alpha, maxMissing, intakeDayStatus } = { ...DEFAULTS, ...opts };
+  const { rho, windowDays, minDays, alpha, maxMissing, intakeDayStatus, excludeDay } = { ...DEFAULTS, ...opts };
 
   const dailyW = dailyReduce(weightEntries, median);
 
@@ -105,9 +115,14 @@ export function estimateExpenditure(weightEntries = [], intakeEntries = [], opts
 
   // Intake: mean over the days we actually logged in the window; track how sparse it was.
   const winDays = enumerateDays(winStart, last);
-  const iByDay = buildIntakeDayMap(intakeEntries, intakeDayStatus);
-  const present = winDays.filter((d) => iByDay.has(d));
-  const missingIntake = 1 - present.length / winDays.length;
+  const iByDay = buildIntakeDayMap(intakeEntries, intakeDayStatus, excludeDay);
+  // missingIntake counts genuine logging gaps, not the excluded in-progress day (that day is
+  // ALWAYS missing from iByDay by construction, every single calculation — counting it would
+  // permanently inflate the "% of days imputed" the UI shows, for a reason that has nothing to
+  // do with the owner's logging habits).
+  const countedDays = excludeDay ? winDays.filter((d) => d !== excludeDay) : winDays;
+  const present = countedDays.filter((d) => iByDay.has(d));
+  const missingIntake = countedDays.length ? 1 - present.length / countedDays.length : 0;
   const meanIntake = mean(present.map((d) => iByDay.get(d)));
 
   const kcal = meanIntake - rho * slope;            // − because slope<0 during loss raises expenditure
@@ -194,9 +209,12 @@ export function kalmanEstimateExpenditure(weightEntries = [], intakeEntries = []
 
   const first = dW[0].date, last = dW[dW.length - 1].date;
   const days = enumerateDays(first, last);
-  const iByDay = buildIntakeDayMap(intakeEntries, P.intakeDayStatus);
-  const present = days.filter((d) => iByDay.has(d));
-  const missingIntake = 1 - present.length / days.length;
+  const iByDay = buildIntakeDayMap(intakeEntries, P.intakeDayStatus, P.excludeDay);
+  // See the v1 comment above: the excluded in-progress day is dropped from the missingIntake
+  // denominator too, so it never permanently inflates the displayed "% imputed".
+  const countedDays = P.excludeDay ? days.filter((d) => d !== P.excludeDay) : days;
+  const present = countedDays.filter((d) => iByDay.has(d));
+  const missingIntake = countedDays.length ? 1 - present.length / countedDays.length : 0;
   const meanI = present.length ? mean(present.map((d) => iByDay.get(d))) : 0;
   const intakeOn = (d) => (iByDay.has(d) ? iByDay.get(d) : meanI); // impute gaps with the mean
   const wByDay = new Map(dW.map((d) => [d.date, d]));
@@ -280,9 +298,12 @@ export function ucEstimateExpenditure(weightEntries = [], intakeEntries = [], op
 
   const first = dW[0].date, last = dW[dW.length - 1].date;
   const days = enumerateDays(first, last);
-  const iByDay = buildIntakeDayMap(intakeEntries, P.intakeDayStatus);
-  const present = days.filter((d) => iByDay.has(d));
-  const missingIntake = 1 - present.length / days.length;
+  const iByDay = buildIntakeDayMap(intakeEntries, P.intakeDayStatus, P.excludeDay);
+  // See the v1 comment above: the excluded in-progress day is dropped from the missingIntake
+  // denominator too, so it never permanently inflates the displayed "% imputed".
+  const countedDays = P.excludeDay ? days.filter((d) => d !== P.excludeDay) : days;
+  const present = countedDays.filter((d) => iByDay.has(d));
+  const missingIntake = countedDays.length ? 1 - present.length / countedDays.length : 0;
   const meanI = present.length ? mean(present.map((d) => iByDay.get(d))) : 0;
   const intakeOn = (d) => (iByDay.has(d) ? iByDay.get(d) : meanI);
   const wByDay = new Map(dW.map((d) => [d.date, d]));

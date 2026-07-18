@@ -88,6 +88,17 @@ describe("buildDailyFrame", () => {
     expect(frame[0].kinImputed).toBe(true); // but flagged as excluded from the estimate
     expect(frame[2].kinImputed).toBe(false); // unflagged day unaffected
   });
+  it("excludeDay (today) still shows its running kin total, but flags it kinImputed — the same hollow-marker treatment", () => {
+    const frame = buildDailyFrame(trend, intake, 365, {}, "2026-06-03");
+    expect(frame[2].kin).toBe(210); // real running total, not hidden
+    expect(frame[2].kinImputed).toBe(true); // but drawn hollow — not counted in the estimate
+    expect(frame[0].kinImputed).toBe(false); // an earlier day is unaffected by excludeDay
+  });
+  it("excludeDay combines with an incomplete flag without double-counting (still just true)", () => {
+    const frame = buildDailyFrame(trend, intake, 365, { "2026-06-01": "incomplete" }, "2026-06-03");
+    expect(frame[0].kinImputed).toBe(true); // via the flag
+    expect(frame[2].kinImputed).toBe(true); // via excludeDay
+  });
 });
 
 describe("weightChangeRate", () => {

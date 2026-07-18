@@ -247,12 +247,15 @@ export function AppProvider({ children }) {
     const w = weightLog.items.map((e) => ({ date: e.date, value: e.kg, method: e.method }));
     const i = intakeLog.items.map((e) => ({ date: e.date, value: e.kcal }));
     // cold-start the filter prior from the vet formula; intakeDayStatus feeds every estimator
-    // through the same buildIntakeDayMap seam (see lib/expenditure.js).
-    const opts = { priorKcal: t.refs.maintain, intakeDayStatus };
+    // through the same buildIntakeDayMap seam (see lib/expenditure.js). excludeDay: `today` is
+    // still being logged — its running intake total isn't a complete day yet, so every
+    // estimator treats it as missing (identically to a flagged-incomplete day) rather than
+    // reading this morning's partial total as a genuine low-intake day.
+    const opts = { priorKcal: t.refs.maintain, intakeDayStatus, excludeDay: today };
     if (expSettings.algo === "v1") return estimateExpenditure(w, i, opts);
     if (expSettings.algo === "v2") return kalmanEstimateExpenditure(w, i, opts);
     return ucEstimateExpenditure(w, i, opts); // v3 (default)
-  }, [weightLog.items, intakeLog.items, intakeDayStatus, expSettings.algo, t.refs.maintain]);
+  }, [weightLog.items, intakeLog.items, intakeDayStatus, expSettings.algo, t.refs.maintain, today]);
 
   // Profile helpers (unchanged semantics, just centralized).
   const ageUnit = p.ageUnit || "months";

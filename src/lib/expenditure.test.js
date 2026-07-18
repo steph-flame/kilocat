@@ -145,6 +145,33 @@ describe("buildIntakeDayMap (intake day-status seam)", () => {
     const map = buildIntakeDayMap([{ date: "2026-01-01", value: 100 }], { "2026-01-09": "incomplete" });
     expect([...map.keys()]).toEqual(["2026-01-01"]);
   });
+
+  describe("excludeDay (the in-progress local 'today')", () => {
+    it("drops today even though it has real entries", () => {
+      const map = buildIntakeDayMap(
+        [{ date: "2026-01-01", value: 100 }, { date: "2026-01-02", value: 80 }],
+        {}, "2026-01-02",
+      );
+      expect(map.has("2026-01-01")).toBe(true);
+      expect(map.has("2026-01-02")).toBe(false);
+    });
+    it("drops today's explicit zero-kcal 'nothing eaten' entry too — it could still gain a meal", () => {
+      const map = buildIntakeDayMap([{ date: "2026-01-02", value: 0 }], {}, "2026-01-02");
+      expect(map.has("2026-01-02")).toBe(false);
+    });
+    it("leaves yesterday (and every other day) unaffected", () => {
+      const map = buildIntakeDayMap(
+        [{ date: "2026-01-01", value: 100 }, { date: "2026-01-02", value: 80 }],
+        {}, "2026-01-02",
+      );
+      expect(map.get("2026-01-01")).toBe(100);
+    });
+    it("no excludeDay given (null/omitted) reproduces the old behavior exactly", () => {
+      const entries = [{ date: "2026-01-01", value: 100 }, { date: "2026-01-02", value: 80 }];
+      expect(buildIntakeDayMap(entries)).toEqual(buildIntakeDayMap(entries, {}, null));
+      expect([...buildIntakeDayMap(entries, {}, null).keys()]).toEqual(["2026-01-01", "2026-01-02"]);
+    });
+  });
 });
 
 describe("estimators treat a flagged-incomplete day exactly like a missing day", () => {
@@ -179,5 +206,64 @@ describe("estimators treat a flagged-incomplete day exactly like a missing day",
     expect(withZero.missingIntake).toBe(0); // every day present, including the zero day
     expect(missingThatDay.missingIntake).toBeGreaterThan(0);
     expect(withZero.kcal).toBeLessThan(missingThatDay.kcal); // the real zero drags the mean down; imputation would not
+  });
+});
+
+// The owner-reported bug: today's intake is still being logged, so its running total reads,
+// every morning, as a genuine (low) complete day — the estimate dips, then "recovers" by
+// night. excludeDay makes today's number (whatever it reads right now — partial, wildly off,
+// or even the eventual full amount) never enter the calculation at all until the day is over.
+// Since these synthetic histories log a CONSTANT true intake every day, "today logged
+// normally" and "today's number replaced with a low partial reading, but excluded" collapse to
+// the exact same inputs (the excluded day falls back to the mean of every other — identical —
+// day), so the two runs must agree exactly: proof the estimate never moves on a partial today.
+describe("excludeDay: a partial/in-progress 'today' never moves the estimate", () => {
+  it("estimateExpenditure (v1)", () => {
+    const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
+    const today = intakeEntries[intakeEntries.length - 1].date;
+    const normal = estimateExpenditure(weightEntries, intakeEntries, { rho });
+    const partialToday = intakeEntries.map((e) => (e.date === today ? { ...e, value: 20 } : e)); // a morning-only reading
+    const excluded = estimateExpenditure(weightEntries, partialToday, { rho, excludeDay: today });
+    expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
+    // and the exclusion is NOT counted as a logging gap — missingIntake stays 0, not 1/28th
+    expect(excluded.missingIntake).toBeCloseTo(normal.missingIntake, 6);
+    expect(excluded.missingIntake).toBe(0);
+  });
+  it("kalmanEstimateExpenditure (v2)", () => {
+    const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
+    const today = intakeEntries[intakeEntries.length - 1].date;
+    const normal = kalmanEstimateExpenditure(weightEntries, intakeEntries, { rho });
+    const partialToday = intakeEntries.map((e) => (e.date === today ? { ...e, value: 20 } : e));
+    const excluded = kalmanEstimateExpenditure(weightEntries, partialToday, { rho, excludeDay: today });
+    expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
+    expect(excluded.missingIntake).toBeCloseTo(normal.missingIntake, 6);
+  });
+  it("ucEstimateExpenditure (v3)", () => {
+    const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
+    const today = intakeEntries[intakeEntries.length - 1].date;
+    const normal = ucEstimateExpenditure(weightEntries, intakeEntries, { rho });
+    const partialToday = intakeEntries.map((e) => (e.date === today ? { ...e, value: 20 } : e));
+    const excluded = ucEstimateExpenditure(weightEntries, partialToday, { rho, excludeDay: today });
+    expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
+    expect(excluded.missingIntake).toBeCloseTo(normal.missingIntake, 6);
+  });
+  it("today's weigh-in (a point measurement) still counts — only intake is excluded", () => {
+    const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
+    const today = intakeEntries[intakeEntries.length - 1].date;
+    const withoutTodaysWeight = estimateExpenditure(weightEntries.slice(0, -1), intakeEntries.slice(0, -1), { rho, minDays: 10 });
+    const withTodaysWeight = estimateExpenditure(weightEntries, intakeEntries, { rho, minDays: 10, excludeDay: today });
+    // today's weigh-in extends the logged span by a day even though its intake is excluded
+    expect(withTodaysWeight.nDays).toBe(withoutTodaysWeight.nDays + 1);
+    expect(withTodaysWeight.trendWeightKg).not.toBeNull();
+  });
+  it("an explicit 0-kcal 'nothing eaten' entry dated today is excluded too — it counts from tomorrow", () => {
+    const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
+    const today = intakeEntries[intakeEntries.length - 1].date;
+    const normal = estimateExpenditure(weightEntries, intakeEntries, { rho });
+    const nothingEatenToday = intakeEntries.map((e) => (e.date === today ? { ...e, value: 0 } : e));
+    const excluded = estimateExpenditure(weightEntries, nothingEatenToday, { rho, excludeDay: today });
+    // without excludeDay, a real logged 0 would drag the mean down for real (see the test
+    // above) — WITH excludeDay, today's 0 is dropped exactly like any other in-progress value.
+    expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
   });
 });
