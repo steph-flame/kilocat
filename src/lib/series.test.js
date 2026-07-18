@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { median, mean, addDays, diffDays, enumerateDays, dailyReduce, fillDaily, ewma, linreg, localDateOf, manualWeighInStamp, patchEntry } from "./series.js";
+import { median, mean, addDays, diffDays, enumerateDays, dailyReduce, fillDaily, ewma, linreg, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "./series.js";
 
 describe("median / mean", () => {
   it("median of odd and even counts", () => {
@@ -114,6 +114,40 @@ describe("manualWeighInStamp", () => {
   it("defaults nowTs to Date.now() when omitted", () => {
     const today = localDateOf(Date.now());
     expect(manualWeighInStamp(today)).toEqual({ date: today, ts: expect.any(Number) });
+  });
+});
+
+describe("repairWeighInDate", () => {
+  it("rewrites a mismatched date to ts's local calendar day", () => {
+    const ts = new Date(2026, 3, 2, 8, 0, 0).getTime(); // local Apr 2
+    const entry = { id: "a", date: "2026-04-03", ts, kg: 4.5 }; // stale UTC-derived date, one day ahead
+    expect(repairWeighInDate(entry)).toEqual({ id: "a", date: "2026-04-02", ts, kg: 4.5 });
+  });
+
+  it("is a no-op (same reference) when date already agrees with ts", () => {
+    const ts = new Date(2026, 3, 2, 8, 0, 0).getTime();
+    const entry = { id: "a", date: "2026-04-02", ts, kg: 4.5 };
+    expect(repairWeighInDate(entry)).toBe(entry);
+  });
+
+  it("is idempotent — repairing twice gives the same result as once", () => {
+    const ts = new Date(2026, 3, 2, 23, 30, 0).getTime();
+    const entry = { id: "a", date: "2026-04-03", ts, kg: 4.5 };
+    const once = repairWeighInDate(entry);
+    const twice = repairWeighInDate(once);
+    expect(twice).toEqual(once);
+    expect(twice).toBe(once); // second pass finds it already correct — same reference
+  });
+
+  it("leaves a ts-less (backfilled/future-dated) entry untouched — nothing to re-derive from", () => {
+    const entry = { id: "a", date: "2026-04-03", kg: 4.5 };
+    expect(repairWeighInDate(entry)).toBe(entry);
+  });
+
+  it("leaves a non-finite ts (null/undefined/NaN) entry untouched", () => {
+    expect(repairWeighInDate({ id: "a", date: "2026-04-03", ts: null })).toEqual({ id: "a", date: "2026-04-03", ts: null });
+    expect(repairWeighInDate({ id: "a", date: "2026-04-03", ts: undefined })).toEqual({ id: "a", date: "2026-04-03", ts: undefined });
+    expect(repairWeighInDate({ id: "a", date: "2026-04-03", ts: NaN })).toEqual({ id: "a", date: "2026-04-03", ts: NaN });
   });
 });
 

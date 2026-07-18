@@ -50,6 +50,21 @@ export function localDateOf(ts) {
   return `${y}-${m}-${day}`;
 }
 
+// Self-healing normalization for weigh-in entries logged before `today` (see AppState.jsx)
+// was derived in LOCAL time instead of UTC: such an entry's `date` may be off by one from
+// its own `ts` near midnight in a UTC-negative timezone (the UTC-sliced `today` of the time
+// briefly disagreeing with the wall-clock day). `ts` is a real moment in time — ground
+// truth — so on load, re-derive `date` from it via localDateOf whenever the two disagree.
+// Idempotent (a second pass is a no-op) and safe: it only ever moves `date` to match `ts`,
+// never the other way. Entries with no `ts` (backfilled or future-dated manual weigh-ins —
+// see manualWeighInStamp) have nothing to re-derive from and are returned unchanged; the SAME
+// object reference when nothing changes, matching patchEntry's identity-preserving contract.
+export function repairWeighInDate(entry) {
+  if (!Number.isFinite(entry?.ts)) return entry;
+  const date = localDateOf(entry.ts);
+  return date === entry.date ? entry : { ...entry, date };
+}
+
 // A manual weigh-in's { date, ts } stamp: the owner-picked date, plus a real ts ONLY when
 // that date is today (a live "log now") — a backfilled past (or future-dated) entry has no
 // actual time-of-day behind it, so it's stamped date-only (see Log.jsx's per-entry time

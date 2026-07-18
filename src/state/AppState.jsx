@@ -7,7 +7,7 @@ import {
   migrateLegacyFood, ensureBuiltins, sumPct, blankFood, normalizePct, waterfall,
 } from "../lib/foods.js";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
-import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry } from "../lib/series.js";
+import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "../lib/series.js";
 import { usePersistence, store, probeStorage } from "../lib/storage.js";
 import { useFoodLibrary } from "../hooks/useFoodLibrary.js";
 import {
@@ -38,7 +38,10 @@ const sanitizeCat = (cat) => ({
   profile: cat?.profile ?? freshProfile(),
   ration: (cat?.ration || []).map(cleanFood),
   start: (cat?.start || []).map(cleanFood),
-  weightLog: cat?.weightLog || [],
+  // repairWeighInDate: self-heals any weigh-in whose stored `date` was UTC-derived (from
+  // before `today` below was fixed to local) and now disagrees with its own `ts` — see
+  // lib/series.js. Entries with no `ts` (backfilled/future-dated) pass through untouched.
+  weightLog: (cat?.weightLog || []).map(repairWeighInDate),
   intakeLog: (cat?.intakeLog || []).map(cleanName),
   intakeDayStatus: cat?.intakeDayStatus || {},
   tr: cat?.tr || defaultTr(),
@@ -70,8 +73,12 @@ export function AppProvider({ children }) {
   const [storageOk] = useState(probeStorage);
   // Today's date, computed once per render — everything below (ages, the demo cat's
   // generated history, "current weight") derives from this rather than a stored value, so
-  // none of it ever goes stale.
-  const today = new Date().toISOString().slice(0, 10);
+  // none of it ever goes stale. LOCAL day (see lib/series.js localDateOf), not UTC — a
+  // UTC-sliced string flips to tomorrow every evening in a UTC-negative timezone, which used
+  // to wrongly stamp intake, misalign the demo cat/ages, and (worst) make the expenditure
+  // estimator's excludeDay exclude the wrong day, re-admitting today's still-running intake
+  // total as if it were a complete day.
+  const today = localDateOf(Date.now());
   // Biscuit, the virtual demo cat: regenerated whenever `today` changes (at most once a day),
   // never stored. See lib/demoCat.js for the generator and AppState's module banner above for
   // why it's never a key in `catsState.cats`.
@@ -234,9 +241,9 @@ export function AppProvider({ children }) {
     ? { kg: median(weightDays[0].items.map((e) => num(e.kg))), date: weightDays[0].date, fromLog: true }
     : { kg: num(p.weightKg), date: null, fromLog: false };
   // Always a live "log now" (no date picker here — that's Log.jsx's backfill flow), so this
-  // always gets a real `ts`; manualWeighInStamp derives `date` from it in LOCAL time — not
-  // the `today` above (a UTC-sliced string, fine for ages/demo-cat but wrong for "what day
-  // did this weigh-in happen on" near midnight in a non-UTC timezone). See lib/series.js.
+  // always gets a real `ts`; manualWeighInStamp derives `date` from it directly via
+  // localDateOf rather than reusing `today` above, so a weigh-in's day is never one render
+  // stale relative to the exact moment it was logged. See lib/series.js.
   const logWeight = ({ kg, method }) => {
     const ts = Date.now();
     weightLog.add({ ...manualWeighInStamp(localDateOf(ts), ts), kg, method: method || expSettings.lastMethod || DEFAULT_METHOD, source: WEIGH_SOURCES.manual });

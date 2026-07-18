@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, buildIntakeDayMap, floorSdKcal, WEIGH_METHODS, DEFAULT_METHOD } from "./expenditure.js";
-import { addDays } from "./series.js";
+import { addDays, localDateOf } from "./series.js";
 
 // Build a synthetic history: constant daily intake, weight moving at the exact rate that
 // intake vs. a KNOWN true maintenance implies. The estimator should recover that maintenance.
@@ -265,5 +265,47 @@ describe("excludeDay: a partial/in-progress 'today' never moves the estimate", (
     // without excludeDay, a real logged 0 would drag the mean down for real (see the test
     // above) — WITH excludeDay, today's 0 is dropped exactly like any other in-progress value.
     expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
+  });
+
+  // Regression for the UTC-vs-local day bug (see AppState.jsx / lib/series.js localDateOf):
+  // `excludeDay` must be the caller's LOCAL today. The app used to compute it as
+  // `new Date().toISOString().slice(0, 10)` — UTC — which every evening in a UTC-negative
+  // timezone reads as TOMORROW's date. Since no intake entry is dated "tomorrow" yet,
+  // excludeDay silently matches nothing: today's still-running (partial) intake total is
+  // re-admitted as if it were a genuine complete day, exactly undoing this whole feature for
+  // a few hours every night. Pin the system clock to 11pm in a UTC-negative zone (America/
+  // New_York) to make the divergence between the two derivations deterministic regardless of
+  // the machine actually running the test.
+  describe("regression: excludeDay must be local-today, not UTC-today", () => {
+    const originalTZ = process.env.TZ;
+    const setTZ = (tz) => { process.env.TZ = tz; };
+    it("a UTC-derived excludeDay fails to exclude tonight's partial intake; a local one does", () => {
+      try {
+        setTZ("America/New_York"); // UTC-4/UTC-5 — reliably behind UTC year-round
+        const nowTs = Date.UTC(2026, 3, 3, 3, 0, 0); // 2026-04-03 03:00 UTC == 2026-04-02 23:00 EDT
+        const localToday = localDateOf(nowTs); // "2026-04-02" — the correct, current-fix value
+        const utcToday = new Date(nowTs).toISOString().slice(0, 10); // "2026-04-03" — the old bug
+        expect(localToday).toBe("2026-04-02");
+        expect(utcToday).toBe("2026-04-03");
+        expect(utcToday).not.toBe(localToday); // the divergence the whole bug hinges on
+
+        const days = 28;
+        const { weightEntries, intakeEntries, rho } = history({ days, intake: 200, maintenance: 250, start: addDays(localToday, -(days - 1)) });
+        const normal = estimateExpenditure(weightEntries, intakeEntries, { rho });
+        // tonight's entry so far: a low partial reading, same shape as every other test above
+        const partialTonight = intakeEntries.map((e) => (e.date === localToday ? { ...e, value: 20 } : e));
+
+        const withLocalExcludeDay = estimateExpenditure(weightEntries, partialTonight, { rho, excludeDay: localToday });
+        expect(withLocalExcludeDay.kcal).toBeCloseTo(normal.kcal, 6); // correctly dropped — matches "as if complete"
+
+        const withUtcExcludeDay = estimateExpenditure(weightEntries, partialTonight, { rho, excludeDay: utcToday });
+        // the bug: excludeDay names a day nothing is dated, so it's a no-op — the partial
+        // reading is NOT dropped, and the estimate is dragged down by tonight's still-running total.
+        expect(withUtcExcludeDay.kcal).not.toBeCloseTo(normal.kcal, 6);
+        expect(withUtcExcludeDay.missingIntake).toBe(0); // no gap is recorded either — silently wrong, not even flagged
+      } finally {
+        if (originalTZ === undefined) delete process.env.TZ; else process.env.TZ = originalTZ;
+      }
+    });
   });
 });
