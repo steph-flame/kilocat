@@ -33,12 +33,19 @@ function validateCatShape(d) {
 // (an older export simply has no connection) and only loosely shape-checked here (this
 // module deliberately isn't a full schema — see the file banner).
 //
+// Two accepted shapes, both normalized to the current one by lib/litterRobot.js's
+// migrateConnection() before AppState ever touches them — this module only judges whether
+// EITHER is well-formed, it doesn't do the normalizing itself:
+//   - old (one-robot-one-cat): { refreshToken, serial, model?, catId?, lastSyncTs?, weightScale? }
+//   - new (all-robots + per-pet attribution): { refreshToken, robots[], pets?, petMap?,
+//     robotMap?, lastSyncTs?, weightScale? }
+//
 // `model` ("LR4"/"LR5") and `weightScale` (LR5 only — which petWeight unit interpretation won,
-// see lib/litterRobot.js) are both newer, optional fields — an export from before LR5 support
-// simply lacks them, which validates fine.
-function isLRConnection(v) {
-  if (v === null) return true; // explicitly disconnected
-  if (!isPlainObject(v)) return false;
+// see lib/litterRobot.js) are both optional on the old shape — an export from before LR5
+// support simply lacks them, which validates fine.
+const isCatIdOrNull = (v) => v === null || typeof v === "string";
+
+function isOldLRConnection(v) {
   if (typeof v.refreshToken !== "string") return false;
   if (typeof v.serial !== "string") return false;
   if (v.catId !== undefined && typeof v.catId !== "string") return false;
@@ -46,6 +53,30 @@ function isLRConnection(v) {
   if (v.model !== undefined && v.model !== "LR4" && v.model !== "LR5") return false;
   if (v.weightScale !== undefined && v.weightScale !== null && typeof v.weightScale !== "string") return false;
   return true;
+}
+
+const isRobotEntry = (r) =>
+  isPlainObject(r) && typeof r.serial === "string"
+  && (r.model === undefined || r.model === "LR4" || r.model === "LR5")
+  && (r.name === undefined || r.name === null || typeof r.name === "string");
+const isPetEntry = (p) => isPlainObject(p) && typeof p.petId === "string" && (p.name === undefined || typeof p.name === "string");
+const isIdMap = (m) => isPlainObject(m) && Object.values(m).every(isCatIdOrNull);
+
+function isNewLRConnection(v) {
+  if (typeof v.refreshToken !== "string") return false;
+  if (!arrOf(v.robots, isRobotEntry)) return false;
+  if (v.pets !== undefined && !arrOf(v.pets, isPetEntry)) return false;
+  if (v.petMap !== undefined && !isIdMap(v.petMap)) return false;
+  if (v.robotMap !== undefined && !isIdMap(v.robotMap)) return false;
+  if (v.lastSyncTs !== undefined && v.lastSyncTs !== null && typeof v.lastSyncTs !== "number") return false;
+  if (v.weightScale !== undefined && v.weightScale !== null && typeof v.weightScale !== "string") return false;
+  return true;
+}
+
+function isLRConnection(v) {
+  if (v === null) return true; // explicitly disconnected
+  if (!isPlainObject(v)) return false;
+  return isNewLRConnection(v) || isOldLRConnection(v);
 }
 
 // Fields shared across every cat, common to both v1 (top-level) and v2 (top-level too).

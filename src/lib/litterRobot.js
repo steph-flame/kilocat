@@ -128,10 +128,10 @@ export async function refreshIdToken(refreshToken) {
 
 /* ==================== GraphQL (AppSync) ==================== */
 
-async function graphqlRequest(idToken, query, variables) {
+async function graphqlRequest(idToken, query, variables, endpoint = GRAPHQL_ENDPOINT) {
   let res;
   try {
-    res = await fetch(GRAPHQL_ENDPOINT, {
+    res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}`, "User-Agent": USER_AGENT },
       body: JSON.stringify({ query, variables }),
@@ -169,6 +169,36 @@ export async function listRobots(idToken, userId) {
   const robots = (data?.getLitterRobot4ByUser || []).filter((r) => r?.isOnboarded);
   if (!robots.length) throw new LitterRobotError("no_robots", "No onboarded Litter-Robot found on that account.");
   return robots.map((r) => ({ name: r.name || "Litter-Robot", serial: r.serial, unitId: r.unitId, model: "LR4" }));
+}
+
+// Whisker's separate pet-profile service — NOT the LR4/LR5 robot hosts above. Endpoint,
+// query document (GetPetsByUser / getPetsByUser), and field list are copied from
+// natekspencer/pylitterbot (MIT), pylitterbot/pet.py on main (fetched directly for this
+// feature — see the report): PET_PROFILE_ENDPOINT, Pet.PET_MODEL, Pet.query_by_user. Auth is
+// the same Bearer id token as the robot endpoints — confirmed by that same file's
+// query_graphql_api, which posts through Session.request, whose Authorization header
+// (session.py, get_bearer_authorization) is `Bearer {id token}`, identical in shape to what
+// graphqlRequest/lr5Request already send here. Trimmed to just the fields this app uses
+// (mapping-picker name + a sanity-check weight) from pylitterbot's much longer PET_MODEL.
+export const PET_PROFILE_ENDPOINT = "https://pet-profile.iothings.site/graphql/";
+const PETS_BY_USER_QUERY = `
+  query GetPetsByUser($userId: String!) {
+    getPetsByUser(userId: $userId) {
+      petId
+      name
+      weight
+    }
+  }
+`;
+
+// List every Whisker pet profile on the account (across all robots/generations — pet profiles
+// aren't scoped to one robot). Best-effort by design: a Whisker account may have zero pet
+// profiles set up (many LR4 owners never touch that part of the app) — that's not an error,
+// just an empty list, unlike listRobots/listRobotsLR5 which treat "none" as a no_robots error.
+export async function listPets(idToken, userId) {
+  const data = await graphqlRequest(idToken, PETS_BY_USER_QUERY, { userId }, PET_PROFILE_ENDPOINT);
+  const pets = data?.getPetsByUser || [];
+  return pets.map((p) => ({ petId: p.petId, name: p.name || "Pet" }));
 }
 
 // Query signature + LR4ActivityTimestreamRowOutput fields borrowed from
@@ -293,6 +323,15 @@ const PLAUSIBLE_CAT_MAX_KG = 15;
 // more than one interpretation clears that bar, the batch is genuinely ambiguous — import
 // NOTHING rather than risk silently mis-scaled weights (fail empty, never wrong). `weightScale`
 // tells the caller (and eventually the UI) which interpretation won, or null if none did.
+// `petId`: a PET_VISIT event's `petIds` array attributes the visit to a specific Whisker pet
+// profile — confirmed present (a single-element array) in pylitterbot's own LR5 activity test
+// fixtures (tests/test_litterrobot5.py, fetched for this feature) and confirmed absent on
+// older/other fixtures, so it's read defensively. Exactly one id → that id; zero ids (field
+// missing, or present but empty) → null (nothing to attribute to); more than one id → also
+// null — a multi-cat household visit the robot itself couldn't attribute to a single pet is
+// treated as unattributable here too, not guessed at.
+const petIdFromEvent = (e) => (Array.isArray(e.petIds) && e.petIds.length === 1 ? e.petIds[0] : null);
+
 export function parseWeightEventsLR5(events = []) {
   const raw = [];
   for (const e of events || []) {
@@ -300,7 +339,7 @@ export function parseWeightEventsLR5(events = []) {
     const w = Number(e.petWeight);
     const ts = parseEventMs(e.timestamp);
     if (!Number.isFinite(w) || w <= 0 || ts == null) continue;
-    raw.push({ w, ts });
+    raw.push({ w, ts, petId: petIdFromEvent(e) });
   }
   if (!raw.length) return { entries: [], weightScale: null };
 
@@ -318,6 +357,7 @@ export function parseWeightEventsLR5(events = []) {
       method: "litterRobot",
       source: WEIGH_SOURCES.litterRobot,
       ts: r.ts,
+      petId: r.petId,
     }))
     .sort((a, b) => a.ts - b.ts);
   return { entries, weightScale };
@@ -407,4 +447,89 @@ export async function syncWeights({ refreshToken, serial, sinceMs, existingEntri
   const parsed = parseWeightEvents(events);
   const fresh = dedupeWeightEntries(parsed, existingEntries);
   return { entries: fresh, syncedAt: Date.now() };
+}
+
+/* ==================== multi-robot / per-pet attribution (v2 connection) ==================== */
+
+// Decide which cat (if any) a single parsed weight entry belongs to, given the connection's
+// petMap (Whisker pet id → kilocat cat id, or explicit null for "don't import") and robotMap
+// (robot serial → kilocat cat id, same). Routing rule (see report):
+//   - entry has a petId (LR5 only) AND petMap has a real cat for it  → that cat
+//   - entry has a petId but petMap has nothing (unmapped) or null    → skip
+//   - entry has no petId (LR4 always; LR5 when the source event's own petIds was
+//     absent/multiple) → robotMap[serial] if set, else skip
+// Pure; returns a cat id, or null meaning "skip".
+export function routeEntry(entry, { serial, petMap = {}, robotMap = {} }) {
+  if (entry.petId != null) return petMap[entry.petId] || null;
+  return robotMap[serial] || null;
+}
+
+// Full multi-robot sync pass: one session refresh, then fetch + parse + route every robot on
+// the connection, dedupe per TARGET cat (not per robot — two robots can feed the same cat),
+// and refresh the pet-profile list (best-effort: a pet-profile hiccup shouldn't sink weight
+// import, which is why listPets is wrapped separately rather than failing the whole sync).
+// `existingEntriesByCat`: { [catId]: thatCat's whole weightLog } for every cat that might
+// receive entries — AppState passes every real cat's log since routing isn't known until
+// events are parsed. Returns:
+//   { byCat: { [catId]: fresh entries[] }, imported, skipped, syncedAt, weightScale, pets }
+// `imported`/`skipped` are what the UI's sync-summary line reports (see Settings). `pets` is
+// the refreshed Whisker pet-profile list ({ petId, name }[]) for the mapping UI — refreshed on
+// every sync (both "sync now" and the connect-time first sync), per the design brief.
+export async function syncAllWeights({ refreshToken, robots = [], sinceMs, petMap = {}, robotMap = {}, existingEntriesByCat = {} }) {
+  const { idToken, userId } = await refreshIdToken(refreshToken);
+  let pets = [];
+  try { pets = await listPets(idToken, userId); } catch { pets = []; } // best-effort — see banner
+
+  const byCatRaw = {}; // catId -> raw (not-yet-deduped) entries
+  let skipped = 0;
+  let weightScale;
+  for (const robot of robots) {
+    const { serial, model = "LR4" } = robot || {};
+    if (!serial) continue;
+    let parsed;
+    if (model === "LR5") {
+      const events = await fetchWeightActivityLR5(idToken, serial, sinceMs);
+      const { entries: allParsed, weightScale: ws } = parseWeightEventsLR5(events);
+      if (ws) weightScale = weightScale ?? ws;
+      parsed = allParsed.filter((e) => e.ts >= sinceMs);
+    } else {
+      const events = await fetchWeightActivity(idToken, serial, { sinceMs, untilMs: Date.now() });
+      parsed = parseWeightEvents(events);
+    }
+    for (const entry of parsed) {
+      const catId = routeEntry(entry, { serial, petMap, robotMap });
+      if (!catId) { skipped++; continue; }
+      (byCatRaw[catId] ||= []).push(entry);
+    }
+  }
+
+  const byCat = {};
+  let imported = 0;
+  for (const [catId, entries] of Object.entries(byCatRaw)) {
+    const fresh = dedupeWeightEntries(entries, existingEntriesByCat[catId] || []);
+    if (fresh.length) byCat[catId] = fresh;
+    imported += fresh.length;
+  }
+  return { byCat, imported, skipped, syncedAt: Date.now(), weightScale, pets };
+}
+
+// Migrate a stored connection from the old one-robot-one-cat shape ({ refreshToken, serial,
+// model, catId, lastSyncTs, weightScale }) to the current one (robots[] + pets[] + petMap +
+// robotMap — see the report / AppState banner). Idempotent: a connection that's already v2
+// shape (has a `robots` array) passes through unchanged. `null` (disconnected) passes through
+// too. Pure — called from AppState's hydrate() and importData() so both loading a saved
+// session and importing an old backup file land on the same shape.
+export function migrateConnection(conn) {
+  if (!conn) return conn;
+  if (Array.isArray(conn.robots)) return conn; // already v2
+  const { refreshToken, serial, model, catId, lastSyncTs, weightScale } = conn;
+  return {
+    refreshToken,
+    lastSyncTs: lastSyncTs ?? null,
+    weightScale: weightScale ?? null,
+    robots: serial ? [{ serial, model: model || "LR4", name: null }] : [],
+    pets: [],
+    petMap: {},
+    robotMap: serial ? { [serial]: catId ?? null } : {},
+  };
 }

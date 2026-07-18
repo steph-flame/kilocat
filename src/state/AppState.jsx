@@ -16,7 +16,10 @@ import {
 } from "../lib/catStore.js";
 import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
-import { login as lrLogin, listAllRobots as lrListAllRobots, syncWeights as lrSyncWeights, FIRST_SYNC_DAYS } from "../lib/litterRobot.js";
+import {
+  login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
+  syncAllWeights as lrSyncAllWeights, migrateConnection, FIRST_SYNC_DAYS,
+} from "../lib/litterRobot.js";
 
 // Clean up legacy food data: strip "(dry)"/"(wet)", snap macro-identical near-dupes to their
 // canonical built-in name, and retire the generic Tiki. Pure — used on load and on import.
@@ -119,7 +122,7 @@ export function AppProvider({ children }) {
     if (typeof d.skin === "string" && SKINS[d.skin]) setSkinState(d.skin);
     const resolved = resolveUnit(d.unit, activeCatId && cats[activeCatId]?.expSettings?.unit);
     if (resolved) setUnitState(resolved);
-    if (d.litterRobot !== undefined) setLitterRobotState(d.litterRobot);
+    if (d.litterRobot !== undefined) setLitterRobotState(migrateConnection(d.litterRobot));
   };
 
   // Import (user-picked file, Settings → Data): a v2 file is a full backup, so it replaces
@@ -153,7 +156,7 @@ export function AppProvider({ children }) {
     if (typeof raw.skin === "string" && SKINS[raw.skin]) setSkinState(raw.skin);
     const resolved = resolveUnit(raw.unit, newActiveCat?.expSettings?.unit);
     if (resolved) setUnitState(resolved);
-    if (raw.litterRobot !== undefined) setLitterRobotState(raw.litterRobot);
+    if (raw.litterRobot !== undefined) setLitterRobotState(migrateConnection(raw.litterRobot));
   };
 
   const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays, skin, unit, litterRobot };
@@ -295,26 +298,35 @@ export function AppProvider({ children }) {
       : s));
   };
 
-  // One sync pass against a given connection: refresh the session, pull activity since its
-  // last sync (or FIRST_SYNC_DAYS back on the very first sync), dedupe, append, and record
-  // when it happened. Shared by the on-load background sync, "sync now", and the sync that
-  // kicks off right after Connect. Never throws — callers get { ok, count, error }, for a
-  // legible status in the UI instead of an unhandled rejection.
+  // One sync pass against a given connection: refresh the session once, pull + parse + route
+  // activity across EVERY robot on the connection (see lib/litterRobot.js syncAllWeights),
+  // dedupe per TARGET cat, append, refresh the pet-profile list, and record when it happened.
+  // Shared by the on-load background sync, "sync now", and the sync that kicks off right after
+  // Connect. Never throws — callers get { ok, imported, skipped, error }, for a legible status
+  // in the UI instead of an unhandled rejection.
+  //
+  // `existingEntriesByCat` is built from every REAL cat (not Biscuit — she's never a sync
+  // target, see catStore/demoCat banners) since routing (petMap/robotMap) decides which cat(s)
+  // actually receive anything; syncAllWeights itself does the per-cat dedupe once it knows.
   const runLitterRobotSync = async (conn) => {
     if (!conn) return { ok: false };
-    const cat = catsState.cats[conn.catId];
-    if (!cat) return { ok: false, error: new Error("The cat this connection feeds no longer exists.") };
     const sinceMs = conn.lastSyncTs || Date.now() - FIRST_SYNC_DAYS * 86400000;
+    const existingEntriesByCat = Object.fromEntries(
+      Object.entries(catsState.cats).map(([id, cat]) => [id, cat.weightLog])
+    );
     try {
-      const { entries, syncedAt, weightScale } = await lrSyncWeights({
-        refreshToken: conn.refreshToken, serial: conn.serial, sinceMs, existingEntries: cat.weightLog, model: conn.model,
+      const { byCat, imported, skipped, syncedAt, weightScale, pets } = await lrSyncAllWeights({
+        refreshToken: conn.refreshToken, robots: conn.robots, sinceMs,
+        petMap: conn.petMap, robotMap: conn.robotMap, existingEntriesByCat,
       });
-      appendWeightsToCat(conn.catId, entries);
-      // weightScale is only ever present for an LR5 sync (which unit interpretation won — see
-      // parseWeightEventsLR5); once it sticks the first time, keep it even on a sync that
-      // returns nothing new (an empty page shouldn't blank out an already-determined scale).
-      setLitterRobotState((s) => (s ? { ...s, lastSyncTs: syncedAt, weightScale: weightScale ?? s.weightScale } : s));
-      return { ok: true, count: entries.length };
+      for (const [catId, entries] of Object.entries(byCat)) appendWeightsToCat(catId, entries);
+      // weightScale is only ever present when an LR5 robot's on the connection (which unit
+      // interpretation won — see parseWeightEventsLR5); once it sticks the first time, keep it
+      // even on a sync that returns nothing new (an empty page shouldn't blank out an
+      // already-determined scale). `pets` refreshes every sync per the design brief (connect +
+      // sync now), so the Settings mapping UI always shows the current Whisker pet list.
+      setLitterRobotState((s) => (s ? { ...s, lastSyncTs: syncedAt, weightScale: weightScale ?? s.weightScale, pets } : s));
+      return { ok: true, imported, skipped };
     } catch (error) {
       return { ok: false, error };
     }
@@ -323,17 +335,36 @@ export function AppProvider({ children }) {
   // Step 1 of Connect: log in with the owner's own credentials (used ONLY for this one
   // request — never stored) and list their robots, across BOTH generations (LR4 + LR5 — see
   // lib/litterRobot.js listAllRobots; either generation may legitimately be absent on a given
-  // account). Returns the pieces Settings needs to show a robot picker; doesn't touch state
-  // yet (nothing is "connected" until finish()).
+  // account), plus any Whisker pet profiles on the account (best-effort — an account with no
+  // pet profiles set up is not an error, see listPets). Returns the pieces Settings needs;
+  // doesn't touch state yet (nothing is "connected" until finish()).
   const connectLitterRobotStart = async (email, password) => {
     const { idToken, refreshToken, userId } = await lrLogin(email, password);
     const robots = await lrListAllRobots(idToken, userId);
-    return { refreshToken, robots };
+    let pets = [];
+    try { pets = await lrListPets(idToken, userId); } catch { pets = []; }
+    return { refreshToken, robots, pets };
   };
-  // Step 2: commit the connection (refresh token + chosen serial/model + target cat) and kick
+  // Step 2: commit the connection — EVERY robot on the account, not a picked one — and kick
   // off the first sync immediately. Returns that first sync's result so the UI can show it.
-  const connectLitterRobotFinish = (refreshToken, serial, catId, model) => {
-    const conn = { refreshToken, serial, catId, model, lastSyncTs: null };
+  //
+  // Auto-map only the zero-config common case: exactly one REAL cat on this device. In that
+  // case every robot's robotMap entry points at it (this is the fallback route for ANY event
+  // without an attributable petId — LR4 always, LR5 when a visit's own petIds was
+  // absent/ambiguous — so it's what keeps a single-cat LR4 household working with no extra
+  // steps, exactly as it did before this connection shape existed) and, if there's also
+  // exactly one Whisker pet profile, that pet's petMap entry points at the same cat too. Two+
+  // real cats (or 0) means routing is genuinely ambiguous — leave both maps empty and let the
+  // owner set it up in the Settings mapping section (see design brief item 5).
+  const connectLitterRobotFinish = (refreshToken, robots, pets) => {
+    const realCatIds = Object.keys(catsState.cats);
+    let robotMap = {}, petMap = {};
+    if (realCatIds.length === 1) {
+      const catId = realCatIds[0];
+      robotMap = Object.fromEntries((robots || []).map((r) => [r.serial, catId]));
+      if (pets?.length === 1) petMap = { [pets[0].petId]: catId };
+    }
+    const conn = { refreshToken, lastSyncTs: null, weightScale: null, robots: robots || [], pets: pets || [], petMap, robotMap };
     setLitterRobotState(conn);
     return runLitterRobotSync(conn);
   };
@@ -341,6 +372,12 @@ export function AppProvider({ children }) {
   // (they're indistinguishable from any other logged weight once they're in).
   const disconnectLitterRobot = () => setLitterRobotState(null);
   const syncLitterRobotNow = () => runLitterRobotSync(litterRobot);
+  // Settings mapping UI: change one Whisker pet's (or one LR4-generation robot's) target cat.
+  // `catId` of null/"" means "don't import" — stored explicitly (not just left absent) so a
+  // deliberate opt-out is distinguishable from a pet/robot the owner hasn't looked at yet, if
+  // that distinction ever matters later; routing treats both the same (skip either way).
+  const setPetMapping = (petId, catId) => setLitterRobotState((s) => (s ? { ...s, petMap: { ...s.petMap, [petId]: catId || null } } : s));
+  const setRobotMapping = (serial, catId) => setLitterRobotState((s) => (s ? { ...s, robotMap: { ...s.robotMap, [serial]: catId || null } } : s));
 
   // Background sync on app load: once, if a connection already exists. Deliberately keyed
   // only on `loaded` (not on litterRobot/catsState) so it fires exactly once per session —
@@ -363,6 +400,7 @@ export function AppProvider({ children }) {
     exportData: () => JSON.stringify(persistData, null, 2),
     importData,
     litterRobot, connectLitterRobotStart, connectLitterRobotFinish, disconnectLitterRobot, syncLitterRobotNow,
+    setPetMapping, setRobotMapping,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

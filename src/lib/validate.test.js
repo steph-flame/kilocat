@@ -119,8 +119,36 @@ describe("validateImport tolerates/checks the litterRobot connection field", () 
   });
   it("rejects a malformed connection", () => {
     expect(validateImport({ ...validV2Export(), litterRobot: { serial: "LR4-123" } })).toBe(false); // no refreshToken
-    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: "rt-1" } })).toBe(false); // no serial
+    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: "rt-1" } })).toBe(false); // no serial, no robots
     expect(validateImport({ ...validV2Export(), litterRobot: "nope" })).toBe(false);
     expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: 1, serial: "LR4-123" } })).toBe(false);
+  });
+
+  it("accepts the new all-robots + per-pet-attribution shape", () => {
+    const lr = {
+      refreshToken: "rt-1",
+      lastSyncTs: 1700000000000,
+      weightScale: "lb100",
+      robots: [{ serial: "LR4-123", model: "LR4", name: "Living Room" }, { serial: "LR5-1", model: "LR5" }],
+      pets: [{ petId: "PET-1", name: "Mithril" }],
+      petMap: { "PET-1": "cat-1", "PET-2": null },
+      robotMap: { "LR4-123": "cat-1" },
+    };
+    expect(validateImport({ ...validV2Export(), litterRobot: lr })).toBe(true);
+  });
+
+  it("accepts the new shape missing every optional field (just refreshToken + robots)", () => {
+    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: "rt-1", robots: [] } })).toBe(true);
+  });
+
+  it("rejects a new-shape connection with a malformed robot entry", () => {
+    const bad = { refreshToken: "rt-1", robots: [{ model: "LR4" }] }; // no serial
+    expect(validateImport({ ...validV2Export(), litterRobot: bad })).toBe(false);
+  });
+
+  it("rejects a new-shape connection with a bad model, weightScale, or map value", () => {
+    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: "rt-1", robots: [{ serial: "s", model: "LR9" }] } })).toBe(false);
+    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: "rt-1", robots: [], weightScale: 5 } })).toBe(false);
+    expect(validateImport({ ...validV2Export(), litterRobot: { refreshToken: "rt-1", robots: [], petMap: { "PET-1": 5 } } })).toBe(false);
   });
 });

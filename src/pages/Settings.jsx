@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown, Settings as SettingsIcon, Download, Upload, AlertTriangle, Trash2, Check, Link2, Unlink, RefreshCw, Loader2, ShieldCheck } from "lucide-react";
 import { C, SKINS } from "../theme.js";
 import { useApp } from "../state/AppState.jsx";
 import { validateImport } from "../lib/validate.js";
 import { platformInstallHint, isStandalone } from "../lib/pwa.js";
-import { FIRST_SYNC_DAYS, LR5_WEIGHT_SCALES } from "../lib/litterRobot.js";
+import { LR5_WEIGHT_SCALES } from "../lib/litterRobot.js";
 import { Field, Note } from "../components/primitives.jsx";
 import CatMark from "../components/CatMark.jsx";
 
@@ -27,19 +27,19 @@ const INSTALL_GESTURES = [
 
 export default function Settings() {
   const {
-    p, catsSummary, activeCatId, eraseAll,
+    p, catsSummary, eraseAll,
     fridgeDays, exportData, importData, skin, setSkin, unit, setUnit,
     litterRobot, connectLitterRobotStart, connectLitterRobotFinish, disconnectLitterRobot, syncLitterRobotNow,
+    setPetMapping, setRobotMapping,
   } = useApp();
   const [installExpanded, setInstallExpanded] = useState(false);
   const installed = isStandalone();
   const platform = typeof navigator !== "undefined" ? platformInstallHint(navigator.userAgent, navigator.maxTouchPoints) : "other";
   const detectedGesture = INSTALL_GESTURES.find((g) => g.key === platform);
   const otherGestures = INSTALL_GESTURES.filter((g) => g.key !== platform);
-  // Litter-Robot's target-cat picker: real cats only — Biscuit (the demo cat) can't take a
-  // weight feed, since her data is regenerated fresh every load, not stored.
+  // Litter-Robot mapping targets: real cats only — Biscuit (the demo cat) can NEVER be a
+  // mapping target, since her data is regenerated fresh every load, not stored.
   const realCats = catsSummary.filter((c) => !c.demo);
-  const realActiveCatId = realCats.some((c) => c.id === activeCatId) ? activeCatId : realCats[0]?.id;
 
   const doExport = () => {
     const blob = new Blob([exportData()], { type: "application/json" });
@@ -143,11 +143,12 @@ export default function Settings() {
         <LitterRobotCard
           connection={litterRobot}
           catsSummary={realCats}
-          activeCatId={realActiveCatId}
           connectStart={connectLitterRobotStart}
           connectFinish={connectLitterRobotFinish}
           disconnect={disconnectLitterRobot}
           syncNow={syncLitterRobotNow}
+          setPetMapping={setPetMapping}
+          setRobotMapping={setRobotMapping}
         />
 
         {/* cats — profiles, ages, per-cat history now live on their own page */}
@@ -209,87 +210,54 @@ function SkinSwatch({ name, tokens, active, onClick }) {
 }
 
 /* ---------- Litter-Robot connect card ---------- */
-// Disconnected: an explainer + email/password form, a trust note, then (after a successful
-// login) a robot picker (only shown if the account has more than one) and a cat picker.
-// Connected: serial, last sync, sync-now, disconnect. Errors surface as their own .message
-// (LitterRobotError from lib/litterRobot.js already turns raw Cognito/AppSync failures into
-// something legible — see that file).
-function LitterRobotCard({ connection, catsSummary, activeCatId, connectStart, connectFinish, disconnect, syncNow }) {
+// Disconnected: an explainer + email/password form + a trust note. A successful login now
+// connects ALL robots on the account (LR4 + LR5) at once — no per-connect robot/cat picker;
+// which cat each robot/pet feeds is set afterward, in the connected card's mapping section
+// below, which is also where a first-sync failure surfaces (see onFirstSync/firstSyncResult).
+// Connected: robot list, mapping section (one row per Whisker pet + per LR4-generation robot),
+// last sync, sync-now, disconnect. Errors surface as their own .message (LitterRobotError from
+// lib/litterRobot.js already turns raw Cognito/AppSync failures into something legible).
+function LitterRobotCard({ connection, catsSummary, connectStart, connectFinish, disconnect, syncNow, setPetMapping, setRobotMapping }) {
+  // Lives here (not inside LRDisconnected) because connectFinish() sets `connection` truthy
+  // synchronously, before its returned first-sync promise resolves — LRDisconnected unmounts
+  // (swapped for LRConnected) well before that promise settles, so the result has to land on a
+  // component that's still around to receive it.
+  const [firstSyncResult, setFirstSyncResult] = useState(null);
   return (
     <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
       <h2 className="font-medium mb-1 flex items-center gap-1.5"><Link2 size={15} /> Litter-Robot</h2>
       {connection
-        ? <LRConnected connection={connection} catsSummary={catsSummary} disconnect={disconnect} syncNow={syncNow} />
-        : <LRDisconnected catsSummary={catsSummary} activeCatId={activeCatId} connectStart={connectStart} connectFinish={connectFinish} />}
+        ? <LRConnected connection={connection} catsSummary={catsSummary} disconnect={disconnect} syncNow={syncNow}
+            initialResult={firstSyncResult} setPetMapping={setPetMapping} setRobotMapping={setRobotMapping} />
+        : <LRDisconnected connectStart={connectStart} connectFinish={connectFinish} onFirstSync={setFirstSyncResult} />}
     </section>
   );
 }
 
-function LRDisconnected({ catsSummary, activeCatId, connectStart, connectFinish }) {
+function LRDisconnected({ connectStart, connectFinish, onFirstSync }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [picking, setPicking] = useState(null); // { refreshToken, robots } once login succeeds
-  const [serial, setSerial] = useState("");
-  const [catId, setCatId] = useState(activeCatId);
-  const [finishing, setFinishing] = useState(false);
-  const [finishResult, setFinishResult] = useState(null);
 
   const doConnect = async () => {
     setError(""); setBusy(true);
     try {
-      const { refreshToken, robots } = await connectStart(email.trim(), password);
-      setPicking({ refreshToken, robots });
-      setSerial(robots[0]?.serial || "");
+      const { refreshToken, robots, pets } = await connectStart(email.trim(), password);
+      // Fire-and-forget from THIS component's perspective: connectFinish sets `connection`
+      // truthy immediately (synchronously), which swaps this whole component out for
+      // LRConnected before the sync itself finishes — onFirstSync (owned by the parent
+      // LitterRobotCard, which stays mounted) is what actually receives the result.
+      connectFinish(refreshToken, robots, pets).then(onFirstSync);
     } catch (e) {
       setError(e?.message || "Couldn't connect — try again.");
-    } finally {
       setBusy(false);
     }
   };
-  const doFinish = async () => {
-    setFinishing(true);
-    const model = picking.robots.find((r) => r.serial === serial)?.model;
-    setFinishResult(await connectFinish(picking.refreshToken, serial, catId, model));
-    setFinishing(false);
-  };
-
-  if (picking) {
-    return (
-      <div className="space-y-3">
-        <p style={{ color: C.faint }} className="text-xs">
-          Signed in. {picking.robots.length > 1 ? "Pick a robot and which cat its weigh-ins go to." : "Pick which cat its weigh-ins go to."}
-        </p>
-        {picking.robots.length > 1 && (
-          <Field label="Robot">
-            <select value={serial} onChange={(e) => setSerial(e.target.value)} className="w-full bg-transparent outline-none text-sm" style={{ color: C.ink }}>
-              {picking.robots.map((r) => <option key={r.serial} value={r.serial}>{r.name} · {r.model} ({r.serial})</option>)}
-            </select>
-          </Field>
-        )}
-        <Field label="Feeds weigh-ins to">
-          <select value={catId} onChange={(e) => setCatId(e.target.value)} className="w-full bg-transparent outline-none text-sm" style={{ color: C.ink }}>
-            {catsSummary.map((c) => <option key={c.id} value={c.id}>{c.name || "unnamed cat"}</option>)}
-          </select>
-        </Field>
-        <button onClick={doFinish} disabled={finishing || !serial} style={{ background: C.spruce }}
-          className="w-full rounded-xl py-2 text-sm text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-60">
-          {finishing ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} {finishing ? "Connecting…" : "Finish connecting"}
-        </button>
-        {finishResult && !finishResult.ok && (
-          <Note tone="warn">Connected, but the first sync failed: {finishResult.error?.message || "unknown error"}. It'll retry next time the app loads, or use "sync now" below.</Note>
-        )}
-        {finishResult?.ok && (
-          <Note>Connected — pulled {finishResult.count} weigh-in{finishResult.count === 1 ? "" : "s"} from the last {FIRST_SYNC_DAYS} days.</Note>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-3">
-      <p style={{ color: C.faint }} className="text-xs">Sign in with your Whisker account to pull your cat's weigh-ins from the Litter-Robot automatically.</p>
+      <p style={{ color: C.faint }} className="text-xs">Sign in with your Whisker account to pull your cats' weigh-ins from every Litter-Robot on it automatically.</p>
       <Field label="Email">
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" data-lpignore="true" data-1p-ignore
           className="w-full bg-transparent outline-none text-sm" style={{ color: C.ink }} />
@@ -311,10 +279,14 @@ function LRDisconnected({ catsSummary, activeCatId, connectStart, connectFinish 
   );
 }
 
-function LRConnected({ connection, catsSummary, disconnect, syncNow }) {
+function LRConnected({ connection, catsSummary, disconnect, syncNow, initialResult, setPetMapping, setRobotMapping }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
-  const catName = catsSummary.find((c) => c.id === connection.catId)?.name || "unnamed cat";
+  // The very first sync (kicked off by connectFinish, before this card even existed) arrives
+  // asynchronously via the parent — show it once, same as any other sync's result. Keyed on
+  // `initialResult` itself (not e.g. `result === null`) so a LATER "sync now" that briefly
+  // sets result back to null doesn't get clobbered by this same-old first-sync result again.
+  useEffect(() => { if (initialResult) setResult(initialResult); }, [initialResult]);
 
   const doSync = async () => {
     setBusy(true); setResult(null);
@@ -325,14 +297,47 @@ function LRConnected({ connection, catsSummary, disconnect, syncNow }) {
     if (window.confirm("Disconnect the Litter-Robot? Already-synced weigh-ins stay in the log; new ones will stop appearing until you reconnect.")) disconnect();
   };
 
+  const robots = connection.robots || [];
+  const pets = connection.pets || [];
+  // LR5 robots don't get a mapping row of their own — their events route via petMap when a
+  // visit's petIds resolves to a real pet, or via robotMap as a fallback (see routeEntry); only
+  // LR4 robots, which never have petIds at all, NEED an explicit robotMap row to route anything.
+  const lr4Robots = robots.filter((r) => r.model !== "LR5");
+
   return (
-    <div className="space-y-2">
-      <p style={{ color: C.spruce }} className="text-xs flex items-center gap-1"><Check size={13} /> Connected — feeding {catName}</p>
+    <div className="space-y-3">
+      <p style={{ color: C.spruce }} className="text-xs flex items-center gap-1"><Check size={13} /> Connected</p>
       <div style={{ color: C.faint }} className="text-xs font-mono">
-        <div>Robot: {connection.serial} ({connection.model || "LR4"})</div>
         <div>Last sync: {connection.lastSyncTs ? new Date(connection.lastSyncTs).toLocaleString() : "not yet"}</div>
         {connection.weightScale && <div>Weight units: {WEIGHT_SCALE_LABELS[connection.weightScale] || connection.weightScale}</div>}
       </div>
+
+      {robots.length > 0 && (
+        <div className="space-y-1">
+          <div style={{ color: C.sub }} className="text-xs font-medium">Robots</div>
+          {robots.map((r) => (
+            <div key={r.serial} className="text-xs flex items-center gap-1.5">
+              <span style={{ background: C.spruceSoft, color: C.spruce }} className="rounded-full px-1.5 py-0.5 font-mono text-[10px]">{r.model || "LR4"}</span>
+              <span style={{ color: C.ink }}>{r.name || r.serial}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(pets.length > 0 || lr4Robots.length > 0) && (
+        <div className="space-y-1.5">
+          <div style={{ color: C.sub }} className="text-xs font-medium">Feeds weigh-ins to</div>
+          {pets.map((pet) => (
+            <MappingRow key={pet.petId} label={pet.name || "Pet"} value={connection.petMap?.[pet.petId]}
+              onChange={(v) => setPetMapping(pet.petId, v)} catOptions={catsSummary} />
+          ))}
+          {lr4Robots.map((r) => (
+            <MappingRow key={r.serial} label={`${r.name || r.serial} (${r.model || "LR4"})`} value={connection.robotMap?.[r.serial]}
+              onChange={(v) => setRobotMapping(r.serial, v)} catOptions={catsSummary} />
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <button onClick={doSync} disabled={busy} style={{ borderColor: C.line, color: C.sub }}
           className="inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1.5 hover:bg-white disabled:opacity-60">
@@ -343,8 +348,25 @@ function LRConnected({ connection, catsSummary, disconnect, syncNow }) {
         </button>
       </div>
       {result && (result.ok
-        ? <Note>Synced — {result.count} new weigh-in{result.count === 1 ? "" : "s"}.</Note>
+        ? <Note>Imported {result.imported} weigh-in{result.imported === 1 ? "" : "s"}{result.skipped ? ` (${result.skipped} skipped — unmapped pets)` : ""}.</Note>
         : <Note tone="warn">Sync failed: {result.error?.message || "unknown error"}</Note>)}
+    </div>
+  );
+}
+
+// One mapping row: a label (pet or robot name) + a dropdown of real cats, plus "don't import".
+// `value` is a cat id, or null/undefined (both render as "don't import" — routing treats them
+// identically, see routeEntry in lib/litterRobot.js). `catOptions` is already demo-cat-filtered
+// by the caller (Settings' `realCats`) — Biscuit can never appear here.
+function MappingRow({ label, value, onChange, catOptions }) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs">
+      <span style={{ color: C.ink }} className="truncate">{label}</span>
+      <select value={value || ""} onChange={(e) => onChange(e.target.value || null)}
+        className="bg-transparent outline-none text-right" style={{ color: C.sub }}>
+        <option value="">don't import</option>
+        {catOptions.map((c) => <option key={c.id} value={c.id}>{c.name || "unnamed cat"}</option>)}
+      </select>
     </div>
   );
 }

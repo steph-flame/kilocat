@@ -5,7 +5,8 @@ import {
   parseWeightEvents, dedupeWeightEntries, decodeJwtPayload,
   login, refreshIdToken, listRobots, fetchWeightActivity,
   listRobotsLR5, fetchWeightActivityLR5, parseWeightEventsLR5, listAllRobots,
-  LR5_BASE, LR5_WEIGHT_SCALES,
+  listPets, routeEntry, syncAllWeights, migrateConnection,
+  LR5_BASE, LR5_WEIGHT_SCALES, PET_PROFILE_ENDPOINT,
   COGNITO_CLIENT_ID, GRAPHQL_ENDPOINT, LitterRobotError,
 } from "./litterRobot.js";
 
@@ -428,5 +429,225 @@ describe("listAllRobots", () => {
       return Promise.resolve(okJson([]));
     });
     await expect(listAllRobots("id-token", "user-1")).rejects.toMatchObject({ code: "no_robots" });
+  });
+});
+
+/* ---------- listPets — pet-profile GraphQL (all-robots + per-pet attribution) ---------- */
+// Endpoint, query document, and field list are copied from natekspencer/pylitterbot's
+// pet.py (main, fetched directly for this feature) — PET_PROFILE_ENDPOINT,
+// Pet.query_by_user's `getPetsByUser($userId: String!)`. Auth is the same Bearer id token as
+// every other call in this file (pylitterbot's session.py get_bearer_authorization confirms it).
+describe("listPets", () => {
+  let fetchMock;
+  beforeEach(() => { fetchMock = vi.fn(); global.fetch = fetchMock; });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const okJson = (body) => ({ ok: true, status: 200, json: async () => body });
+
+  it("POSTs GetPetsByUser to the pet-profile endpoint (not the LR4/LR5 hosts) with a Bearer token and userId variable", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({
+      data: { getPetsByUser: [{ petId: "PET-1", name: "Mithril", weight: 9.4 }] },
+    }));
+    const pets = await listPets("id-token", "user-1");
+    expect(pets).toEqual([{ petId: "PET-1", name: "Mithril" }]);
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe(PET_PROFILE_ENDPOINT);
+    expect(url).not.toBe(GRAPHQL_ENDPOINT);
+    expect(opts.headers.Authorization).toBe("Bearer id-token");
+    const body = JSON.parse(opts.body);
+    expect(body.query).toMatch(/getPetsByUser/);
+    expect(body.query).toMatch(/GetPetsByUser\(\$userId: String!\)/);
+    expect(body.variables).toEqual({ userId: "user-1" });
+  });
+
+  it("returns an empty list (not an error) when the account has no pet profiles set up", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ data: { getPetsByUser: [] } }));
+    expect(await listPets("id-token", "user-1")).toEqual([]);
+  });
+
+  it("falls back to a generic name when a pet profile has none", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ data: { getPetsByUser: [{ petId: "PET-2", name: null }] } }));
+    expect(await listPets("id-token", "user-1")).toEqual([{ petId: "PET-2", name: "Pet" }]);
+  });
+
+  it("surfaces a 401 as an 'auth'-coded error, same as the other GraphQL calls", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ errors: [{ message: "Unauthorized" }] }) });
+    await expect(listPets("id-token", "user-1")).rejects.toMatchObject({ code: "auth" });
+  });
+});
+
+/* ---------- parseWeightEventsLR5 — petId passthrough (per-pet attribution) ---------- */
+describe("parseWeightEventsLR5 petId passthrough", () => {
+  const petVisit = (petWeight, iso, petIds) => ({ messageId: `m-${iso}`, type: "PET_VISIT", timestamp: iso, petWeight, petIds });
+
+  it("passes through a single petIds entry as petId", () => {
+    const events = [petVisit(937, "2026-02-14T23:12:12Z", ["PET-1"]), petVisit(920, "2026-02-15T10:00:00Z", ["PET-1"])];
+    const { entries } = parseWeightEventsLR5(events);
+    expect(entries.every((e) => e.petId === "PET-1")).toBe(true);
+  });
+
+  it("maps a multi-id event (ambiguous attribution) to petId: null", () => {
+    const events = [petVisit(937, "2026-02-14T23:12:12Z", ["PET-1", "PET-2"]), petVisit(920, "2026-02-15T10:00:00Z", ["PET-1"])];
+    const { entries } = parseWeightEventsLR5(events);
+    expect(entries.find((e) => e.ts === Date.parse("2026-02-14T23:12:12Z")).petId).toBeNull();
+    expect(entries.find((e) => e.ts === Date.parse("2026-02-15T10:00:00Z")).petId).toBe("PET-1");
+  });
+
+  it("maps a missing/empty petIds to petId: null", () => {
+    const noField = petVisit(937, "2026-02-14T23:12:12Z", undefined);
+    const emptyArr = petVisit(920, "2026-02-15T10:00:00Z", []);
+    const { entries } = parseWeightEventsLR5([noField, emptyArr]);
+    expect(entries.every((e) => e.petId === null)).toBe(true);
+  });
+});
+
+/* ---------- routeEntry — routing matrix (mapped/unmapped pet, robot fallback, skip) ---------- */
+describe("routeEntry", () => {
+  it("routes a petId-bearing entry to petMap's cat when mapped", () => {
+    expect(routeEntry({ petId: "PET-1" }, { serial: "LR5-1", petMap: { "PET-1": "cat-a" }, robotMap: {} })).toBe("cat-a");
+  });
+  it("skips a petId-bearing entry whose pet isn't in petMap at all (unmapped)", () => {
+    expect(routeEntry({ petId: "PET-1" }, { serial: "LR5-1", petMap: {}, robotMap: { "LR5-1": "cat-a" } })).toBeNull();
+  });
+  it("skips a petId-bearing entry explicitly mapped to null (\"don't import\")", () => {
+    expect(routeEntry({ petId: "PET-1" }, { serial: "LR5-1", petMap: { "PET-1": null }, robotMap: { "LR5-1": "cat-a" } })).toBeNull();
+  });
+  it("falls back to robotMap when the entry has no petId (LR4, or an unattributable LR5 visit)", () => {
+    expect(routeEntry({ petId: null }, { serial: "LR4-1", petMap: {}, robotMap: { "LR4-1": "cat-b" } })).toBe("cat-b");
+  });
+  it("skips a petId-less entry when its robot isn't in robotMap either", () => {
+    expect(routeEntry({ petId: null }, { serial: "LR4-1", petMap: {}, robotMap: {} })).toBeNull();
+  });
+  it("skips a petId-less entry whose robot is explicitly mapped to null", () => {
+    expect(routeEntry({ petId: null }, { serial: "LR4-1", petMap: {}, robotMap: { "LR4-1": null } })).toBeNull();
+  });
+});
+
+/* ---------- syncAllWeights — multi-robot orchestration, per-cat dedupe, sync summary ---------- */
+describe("syncAllWeights", () => {
+  let fetchMock;
+  beforeEach(() => { fetchMock = vi.fn(); global.fetch = fetchMock; });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const okJson = (body) => ({ ok: true, status: 200, json: async () => body });
+  const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const fakeIdToken = (claims) => `${b64url({ alg: "none" })}.${b64url(claims)}.sig`;
+  const idToken = fakeIdToken({ mid: "user-1" });
+  const authOk = () => okJson({ AuthenticationResult: { IdToken: idToken, AccessToken: "at" } });
+
+  const lr4Activity = (lb, iso) => okJson({ data: { getLitterRobot4Activity: [{ measure: "activity", value: "catWeight", actionValue: String(lb), timestamp: iso }] } });
+  const lr5Activity = (petWeight, iso, petIds) => okJson([{ type: "PET_VISIT", timestamp: iso, petWeight, petIds }]);
+
+  it("routes events from multiple robots to different cats, skips unmapped, and dedupes per cat", async () => {
+    const sinceMs = Date.parse("2026-01-01T00:00:00Z");
+    fetchMock.mockImplementation((url) => {
+      if (/cognito-idp/.test(url)) return Promise.resolve(authOk());
+      if (url === GRAPHQL_ENDPOINT) return Promise.resolve(lr4Activity(9.4, "2026-02-01T00:00:00Z"));
+      if (url === PET_PROFILE_ENDPOINT) return Promise.resolve(okJson({ data: { getPetsByUser: [] } }));
+      if (/LR5-1\/activities/.test(url)) return Promise.resolve(lr5Activity(937, "2026-02-02T00:00:00Z", ["PET-1"])); // mapped -> cat-pet
+      if (/LR5-2\/activities/.test(url)) return Promise.resolve(lr5Activity(937, "2026-02-03T00:00:00Z", ["PET-unmapped"])); // unmapped -> skip
+      return Promise.resolve(okJson([]));
+    });
+
+    const result = await syncAllWeights({
+      refreshToken: "rt-1",
+      robots: [{ serial: "LR4-1", model: "LR4" }, { serial: "LR5-1", model: "LR5" }, { serial: "LR5-2", model: "LR5" }],
+      sinceMs,
+      petMap: { "PET-1": "cat-pet" },
+      robotMap: { "LR4-1": "cat-robot" },
+      existingEntriesByCat: {},
+    });
+
+    expect(Object.keys(result.byCat).sort()).toEqual(["cat-pet", "cat-robot"]);
+    expect(result.byCat["cat-robot"]).toHaveLength(1); // LR4 -> robotMap
+    expect(result.byCat["cat-pet"]).toHaveLength(1); // LR5-1's mapped pet
+    expect(result.imported).toBe(2);
+    expect(result.skipped).toBe(1); // LR5-2's unmapped pet
+  });
+
+  it("dedupes against the TARGET cat's own existing entries, per cat (not globally)", async () => {
+    const sinceMs = Date.parse("2026-01-01T00:00:00Z");
+    const iso = "2026-02-01T00:00:00Z";
+    fetchMock.mockImplementation((url) => {
+      if (/cognito-idp/.test(url)) return Promise.resolve(authOk());
+      if (url === GRAPHQL_ENDPOINT) return Promise.resolve(lr4Activity(9.4, iso));
+      if (url === PET_PROFILE_ENDPOINT) return Promise.resolve(okJson({ data: { getPetsByUser: [] } }));
+      return Promise.resolve(okJson([]));
+    });
+    const parsed = parseWeightEvents([{ measure: "activity", value: "catWeight", actionValue: "9.4", timestamp: iso }]);
+    const result = await syncAllWeights({
+      refreshToken: "rt-1",
+      robots: [{ serial: "LR4-1", model: "LR4" }],
+      sinceMs,
+      petMap: {},
+      robotMap: { "LR4-1": "cat-a" },
+      existingEntriesByCat: { "cat-a": [{ ts: parsed[0].ts, kg: parsed[0].kg, source: "litter-robot" }] },
+    });
+    expect(result.byCat["cat-a"]).toBeUndefined(); // already logged for this cat -> deduped away
+    expect(result.imported).toBe(0);
+  });
+
+  it("refreshes the pets list from the pet-profile endpoint and returns it", async () => {
+    fetchMock.mockImplementation((url) => {
+      if (/cognito-idp/.test(url)) return Promise.resolve(authOk());
+      if (url === PET_PROFILE_ENDPOINT) return Promise.resolve(okJson({ data: { getPetsByUser: [{ petId: "PET-1", name: "Mithril" }] } }));
+      return Promise.resolve(okJson([]));
+    });
+    const result = await syncAllWeights({ refreshToken: "rt-1", robots: [], sinceMs: 0, existingEntriesByCat: {} });
+    expect(result.pets).toEqual([{ petId: "PET-1", name: "Mithril" }]);
+  });
+
+  it("tolerates a pet-profile fetch failure — weight sync still completes with an empty pets list", async () => {
+    fetchMock.mockImplementation((url) => {
+      if (/cognito-idp/.test(url)) return Promise.resolve(authOk());
+      if (url === PET_PROFILE_ENDPOINT) return Promise.reject(new TypeError("Failed to fetch"));
+      if (url === GRAPHQL_ENDPOINT) return Promise.resolve(okJson({ data: { getLitterRobot4Activity: [] } }));
+      return Promise.resolve(okJson([]));
+    });
+    const result = await syncAllWeights({
+      refreshToken: "rt-1", robots: [{ serial: "LR4-1", model: "LR4" }], sinceMs: 0,
+      robotMap: { "LR4-1": "cat-a" }, existingEntriesByCat: {},
+    });
+    expect(result.pets).toEqual([]);
+    expect(result.imported).toBe(0);
+  });
+});
+
+/* ---------- migrateConnection — old (one-robot-one-cat) -> new (all-robots + petMap) ---------- */
+describe("migrateConnection", () => {
+  it("passes null (disconnected) through unchanged", () => {
+    expect(migrateConnection(null)).toBeNull();
+  });
+
+  it("passes an already-v2 connection (has a robots array) through unchanged", () => {
+    const v2 = { refreshToken: "rt", robots: [{ serial: "LR4-1", model: "LR4", name: "Living Room" }], pets: [], petMap: {}, robotMap: {} };
+    expect(migrateConnection(v2)).toBe(v2); // same reference — true no-op
+  });
+
+  it("migrates an old single-robot connection into robots[]/robotMap, leaving petMap empty", () => {
+    const old = { refreshToken: "rt-1", serial: "LR4-123", model: "LR4", catId: "cat-a", lastSyncTs: 1700000000000, weightScale: null };
+    const migrated = migrateConnection(old);
+    expect(migrated).toEqual({
+      refreshToken: "rt-1",
+      lastSyncTs: 1700000000000,
+      weightScale: null,
+      robots: [{ serial: "LR4-123", model: "LR4", name: null }],
+      pets: [],
+      petMap: {},
+      robotMap: { "LR4-123": "cat-a" },
+    });
+  });
+
+  it("defaults model to LR4 and lastSyncTs/weightScale to null when the old shape omits them", () => {
+    const migrated = migrateConnection({ refreshToken: "rt-1", serial: "LR4-123", catId: "cat-a" });
+    expect(migrated.robots).toEqual([{ serial: "LR4-123", model: "LR4", name: null }]);
+    expect(migrated.lastSyncTs).toBeNull();
+    expect(migrated.weightScale).toBeNull();
+  });
+
+  it("tolerates an old shape with no catId yet (never finished a target-cat pick)", () => {
+    const migrated = migrateConnection({ refreshToken: "rt-1", serial: "LR4-123" });
+    expect(migrated.robotMap).toEqual({ "LR4-123": null });
   });
 });
