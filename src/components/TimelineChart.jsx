@@ -305,8 +305,12 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
         )}
       </div>
 
-      {/* screen-reader / no-pointer data fallback for the SVG */}
-      <table className="sr-only">
+      {/* screen-reader / no-pointer data fallback for the SVG. The sr-only class goes on a
+          wrapper div, NOT the table: tables ignore width:1px (content min-width wins) and
+          overflow doesn't reliably apply to table boxes, so a classed table leaks its full
+          intrinsic width into the page's scrollWidth on narrow screens. */}
+      <div className="sr-only">
+      <table>
         <caption>{summary}</caption>
         <thead><tr><th>Date</th><th>Weight ({weightLabel(unit)})</th><th>Calories in (kcal)</th>{hasExp && <th>Est. expenditure (kcal)</th>}<th>Counted in estimate</th></tr></thead>
         <tbody>
@@ -321,6 +325,7 @@ export default function TimelineChart({ frame, range, onRange, ranges, unit = "k
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
