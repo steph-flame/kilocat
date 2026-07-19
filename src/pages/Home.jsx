@@ -99,7 +99,7 @@ export default function Home() {
         </div>
 
         {/* stat strip */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6">
           <StatCard label="Weight" value={showW(currentWeight.kg)}>
             {hasWeighIns && rateTone && (
               <Pill tone={rateTone}>{ratePct <= 0 ? "▾" : "▴"} {r1(rateMag)} %/wk · {rateTone === "ok" ? "safe" : "fast"}</Pill>
@@ -109,13 +109,15 @@ export default function Home() {
             {!kitten && <WeightBand weightKg={currentWeight.kg} idealKg={t.idealWeight} />}
           </StatCard>
 
-          <BowlCard dispensedKcal={dispensedKcal} target={target} direction={dir} maintenance={maintenance} floorKcal={plan?.floorKcal} targetLine={targetLine} />
-
           <StatCard label={`${name} burns`} value={expenditure.enoughData ? r0(expenditure.kcal) : "—"} unit={expenditure.enoughData ? `±${r0(1.96 * expenditure.sd)}` : null}>
             {expenditure.enoughData
               ? <ConfidenceBand sd={expenditure.sd} kcal={expenditure.kcal} />
               : <Caption>log weight + intake to estimate</Caption>}
           </StatCard>
+        </div>
+
+        <div className="mt-3">
+          <BowlCard dispensedKcal={dispensedKcal} target={target} direction={dir} maintenance={maintenance} floorKcal={plan?.floorKcal} targetLine={targetLine} />
         </div>
 
         {/* tools */}
