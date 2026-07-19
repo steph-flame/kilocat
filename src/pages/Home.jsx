@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Scale, Activity, NotebookPen, ChevronRight, Settings as SettingsIcon, Cat as CatIcon } from "lucide-react";
 import { C } from "../theme.js";
 import { useApp } from "../state/AppState.jsx";
@@ -5,6 +6,7 @@ import { r0, r1, clamp } from "../lib/util.js";
 import { toDisplayWeight, weightLabel, weeklyRate } from "../lib/units.js";
 import { resolveTarget } from "../lib/targeting.js";
 import { RATE } from "../lib/weightPlan.js";
+import { dispensedToday, dispenseProgress } from "../lib/dispenseProgress.js";
 import CatMark from "../components/CatMark.jsx";
 import CatMenu from "../components/CatMenu.jsx";
 
@@ -20,7 +22,7 @@ const greeting = () => {
 // Every tile degrades honestly — first-run demo, no weigh-ins yet, a growing kitten, or not
 // enough data for a measured estimate all get their own truthful copy, never a guessed number.
 export default function Home() {
-  const { p, t, expenditure, weightLog, intakeLog, expSettings, currentWeight, ration, unit, catsSummary, activeCatId, switchCat, addCat } = useApp();
+  const { p, t, today, expenditure, weightLog, intakeLog, expSettings, currentWeight, ration, unit, catsSummary, activeCatId, switchCat, addCat } = useApp();
   const wLbl = weightLabel(unit);
   const showW = (kg, d = 1) => `${(d === 1 ? r1 : r0)(toDisplayWeight(kg, unit))} ${wLbl}`;
   const name = p.name || "Your cat";
@@ -37,6 +39,11 @@ export default function Home() {
   const targetLine = measured
     ? dir === "maintain" ? "measured maintenance" : `gentle ${dir === "gain" ? "surplus" : "trim"} · measured burn`
     : t.goalId === "custom" ? "your custom target" : "from the vet formula";
+
+  // Today's dispensed-vs-target: read straight from intakeLog (today's own entries are already
+  // excluded from the expenditure ESTIMATE elsewhere — see lib/expenditure.js's excludeDay —
+  // this is purely a display sum, it never feeds back into resolveTarget/estimation).
+  const dispensedKcal = useMemo(() => dispensedToday(intakeLog.items, today), [intakeLog.items, today]);
 
   // Masthead headline + one-line status — every branch reads only real, already-computed
   // values (currentWeight, expenditure, t), never a fabricated number. The name always leads
@@ -102,7 +109,8 @@ export default function Home() {
           </StatCard>
 
           <StatCard label="Tonight's bowl" value={`${r0(target)}`} unit="kcal">
-            <Caption>{targetLine}</Caption>
+            <DispenseBar dispensedKcal={dispensedKcal} target={target} />
+            <span style={{ color: C.faint }} className="block text-[10.5px] mt-1">{targetLine}</span>
           </StatCard>
 
           <StatCard label={`${name} burns`} value={expenditure.enoughData ? r0(expenditure.kcal) : "—"} unit={expenditure.enoughData ? `±${r0(1.96 * expenditure.sd)}` : null}>
@@ -175,6 +183,33 @@ function Pill({ tone, children }) {
 
 function Caption({ children }) {
   return <span style={{ color: C.sub }} className="block text-[11.5px] mt-2">{children}</span>;
+}
+
+// Tonight's bowl progress bar — how much of the target has actually been dispensed today, not
+// just the target number (see lib/dispenseProgress.js for the pure percentage math). Same
+// visual family as the weight-vs-ideal band below: a thin C.line track, rounded. The ok-token
+// segment is "up to target"; a warn-token segment past it means the cat's had more than
+// tonight's plan calls for. Zero dispensed today (no entries at all, or an explicit 0-kcal
+// "nothing eaten" entry — either way a real, not missing, zero) shows as a fully empty track
+// with its own caption rather than a 0%-wide sliver of the ok color.
+function DispenseBar({ dispensedKcal, target }) {
+  const { fillPct, overPct, overKcal, isEmpty } = dispenseProgress(dispensedKcal, target);
+  const base = `${r0(dispensedKcal)} of ${r0(target)} kcal dispensed`;
+  const caption = isEmpty ? "nothing dispensed yet" : overKcal > 0 ? `${base} · +${r0(overKcal)} over` : base;
+  const ariaLabel = isEmpty
+    ? `Nothing dispensed yet — 0 of ${r0(target)} kcal`
+    : overKcal > 0
+      ? `${r0(dispensedKcal)} of ${r0(target)} kcal dispensed, ${r0(overKcal)} over target`
+      : `${r0(dispensedKcal)} of ${r0(target)} kcal dispensed`;
+  return (
+    <div className="mt-2.5">
+      <div style={{ background: C.line }} role="img" aria-label={ariaLabel} className="relative h-[7px] rounded-full overflow-hidden">
+        {!isEmpty && <div style={{ width: `${fillPct}%`, background: C.ok }} className="absolute inset-y-0 left-0 rounded-full" />}
+        {overPct > 0 && <div style={{ left: `${fillPct}%`, width: `${overPct}%`, background: C.warn }} className="absolute inset-y-0 rounded-full" />}
+      </div>
+      <span style={{ color: C.faint }} className="block text-[10.5px] mt-1.5">{caption}</span>
+    </div>
+  );
 }
 
 // The weight-vs-ideal meter ("the scale thing") — a subtle track from ideal weight up to a
