@@ -12,8 +12,11 @@ import { blankFood } from "./foods.js";
 export const DEMO_CAT_ID = "__demo__";
 
 export const defaultTr = () => ({ on: false, days: 7, timelineUnit: "g" });
-// weight unit used to live here (per-cat); it's now a shared top-level field (see AppState.jsx).
-export const defaultExpSettings = () => ({ pctPerWeek: 1, energyBasis: "formula", algo: "v3", direction: "auto", lastMethod: "petScale" });
+// weight unit and estimator algo used to live here (per-cat); both are now shared top-level
+// fields (see AppState.jsx) — `algo` is deliberately no longer written here, though old
+// stored/imported data that still has it on a cat's expSettings is tolerated (see resolveEstimator,
+// validate.js, migrate.js), just ignored in favor of the shared field.
+export const defaultExpSettings = () => ({ pctPerWeek: 1, energyBasis: "formula", direction: "auto", lastMethod: "petScale" });
 
 // Resolve the shared weight unit on load/import: the blob's own top-level field if it's a
 // valid unit, else (an older export from before `unit` was promoted out of per-cat
@@ -22,6 +25,18 @@ export const defaultExpSettings = () => ({ pctPerWeek: 1, energyBasis: "formula"
 export function resolveUnit(topUnit, legacyUnit) {
   if (topUnit === "kg" || topUnit === "lb") return topUnit;
   if (legacyUnit === "kg" || legacyUnit === "lb") return legacyUnit;
+  return undefined;
+}
+
+const ESTIMATORS = ["v1", "v2", "v3"];
+// Resolve the shared expenditure estimator on load/import: same courtesy pattern as
+// resolveUnit above. The blob's own top-level field if it's a valid estimator, else (an
+// older export from before `estimator` was promoted out of per-cat expSettings.algo) the
+// given cat's old `algo` value. Undefined if neither — caller keeps whatever's already
+// there (the "v3" default on first run, or the current value on import).
+export function resolveEstimator(topEstimator, legacyAlgo) {
+  if (ESTIMATORS.includes(topEstimator)) return topEstimator;
+  if (ESTIMATORS.includes(legacyAlgo)) return legacyAlgo;
   return undefined;
 }
 

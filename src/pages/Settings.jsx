@@ -28,7 +28,7 @@ const INSTALL_GESTURES = [
 export default function Settings() {
   const {
     p, catsSummary, eraseAll,
-    fridgeDays, exportData, importData, skin, setSkin, unit, setUnit,
+    fridgeDays, exportData, importData, skin, setSkin, unit, setUnit, estimator, setEstimator,
     litterRobot, connectLitterRobotStart, connectLitterRobotFinish, disconnectLitterRobot, syncLitterRobotNow,
     setPetMapping, setRobotMapping,
   } = useApp();
@@ -160,6 +160,23 @@ export default function Settings() {
             </div>
             <a href="#/cats" style={{ color: C.spruce }} className="text-xs font-mono underline decoration-dotted underline-offset-2 shrink-0">Cats →</a>
           </div>
+        </section>
+
+        {/* estimator — an advanced setting, so it goes near the end. Shared across every
+            cat (like unit/skin), so it also applies while viewing Biscuit — that's fine, it's
+            not a per-cat mutation. */}
+        <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="font-medium">Estimator</h2>
+            <div className="flex rounded-full overflow-hidden border" style={{ borderColor: C.line }}>
+              {["v3", "v2", "v1"].map((a) => (
+                <button key={a} onClick={() => setEstimator(a)} aria-pressed={estimator === a} style={{ background: estimator === a ? C.spruce : "transparent", color: estimator === a ? "#fff" : C.sub }} className="text-xs px-2.5 py-1.5 font-mono">{a}{a === "v3" ? " · recommended" : ""}</button>
+              ))}
+            </div>
+          </div>
+          <p style={{ color: C.faint }} className="text-xs">
+            How the measured-maintenance number (on the Expenditure page) is computed from your logs. v3 (unobserved-components) separates day-to-day gut-fill/hydration swings from real change and is best for almost everyone; v2 (Kalman) and v1 (EWMA + regression) are simpler and mainly here for comparison. Shared across every cat.
+          </p>
         </section>
 
         {/* data */}

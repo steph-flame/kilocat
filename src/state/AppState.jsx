@@ -12,7 +12,7 @@ import { usePersistence, store, probeStorage } from "../lib/storage.js";
 import { useFoodLibrary } from "../hooks/useFoodLibrary.js";
 import {
   addCat as addCatPure, deleteCat as deleteCatPure, clearCatHistory as clearCatHistoryPure, switchCat as switchCatPure,
-  updateCatProfile as updateCatProfilePure, updateActiveCatState, freshCatState, freshProfile, defaultTr, defaultExpSettings, resolveUnit, DEMO_CAT_ID,
+  updateCatProfile as updateCatProfilePure, updateActiveCatState, freshCatState, freshProfile, defaultTr, defaultExpSettings, resolveUnit, resolveEstimator, DEMO_CAT_ID,
 } from "../lib/catStore.js";
 import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
@@ -93,6 +93,11 @@ export function AppProvider({ children }) {
   // data — used to live in each cat's expSettings. Defaults to "kg".
   const [unit, setUnitState] = useState("kg");
   const setUnit = (u) => { if (u === "kg" || u === "lb") setUnitState(u); };
+  // Expenditure estimator (v1/v2/v3): shared across every cat (like unit/skin/fridgeDays),
+  // not per-cat data — used to live in each cat's expSettings.algo. Defaults to "v3", the
+  // recommended unobserved-components estimator (see lib/expenditure.js).
+  const [estimator, setEstimatorState] = useState("v3");
+  const setEstimator = (a) => { if (a === "v1" || a === "v2" || a === "v3") setEstimatorState(a); };
   // Litter-Robot connection: shared, top-level (like skin/unit/fridgeDays), not per-cat —
   // one Whisker account's refresh token, which robot serial it's reading, and which cat's
   // weightLog it feeds. Null = not connected. Never stores the password, only this token.
@@ -127,6 +132,8 @@ export function AppProvider({ children }) {
     if (typeof d.skin === "string" && SKINS[d.skin]) setSkinState(d.skin);
     const resolved = resolveUnit(d.unit, activeCatId && cats[activeCatId]?.expSettings?.unit);
     if (resolved) setUnitState(resolved);
+    const resolvedEstimator = resolveEstimator(d.estimator, activeCatId && cats[activeCatId]?.expSettings?.algo);
+    if (resolvedEstimator) setEstimatorState(resolvedEstimator);
     if (d.litterRobot !== undefined) setLitterRobotState(migrateConnection(d.litterRobot));
   };
 
@@ -161,10 +168,12 @@ export function AppProvider({ children }) {
     if (typeof raw.skin === "string" && SKINS[raw.skin]) setSkinState(raw.skin);
     const resolved = resolveUnit(raw.unit, newActiveCat?.expSettings?.unit);
     if (resolved) setUnitState(resolved);
+    const resolvedEstimator = resolveEstimator(raw.estimator, newActiveCat?.expSettings?.algo);
+    if (resolvedEstimator) setEstimatorState(resolvedEstimator);
     if (raw.litterRobot !== undefined) setLitterRobotState(migrateConnection(raw.litterRobot));
   };
 
-  const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays, skin, unit, litterRobot };
+  const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays, skin, unit, estimator, litterRobot };
   const loaded = usePersistence(persistData, hydrate);
 
   // Foods enter the library only on an explicit save click (see saveFood) — never
@@ -259,10 +268,10 @@ export function AppProvider({ children }) {
     // estimator treats it as missing (identically to a flagged-incomplete day) rather than
     // reading this morning's partial total as a genuine low-intake day.
     const opts = { priorKcal: t.refs.maintain, intakeDayStatus, excludeDay: today };
-    if (expSettings.algo === "v1") return estimateExpenditure(w, i, opts);
-    if (expSettings.algo === "v2") return kalmanEstimateExpenditure(w, i, opts);
+    if (estimator === "v1") return estimateExpenditure(w, i, opts);
+    if (estimator === "v2") return kalmanEstimateExpenditure(w, i, opts);
     return ucEstimateExpenditure(w, i, opts); // v3 (default)
-  }, [weightLog.items, intakeLog.items, intakeDayStatus, expSettings.algo, t.refs.maintain, today]);
+  }, [weightLog.items, intakeLog.items, intakeDayStatus, estimator, t.refs.maintain, today]);
 
   // Profile helpers (unchanged semantics, just centralized).
   const ageUnit = p.ageUnit || "months";
@@ -427,7 +436,7 @@ export function AppProvider({ children }) {
     today, currentWeight, logWeight,
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
-    skin, setSkin, unit, setUnit,
+    skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,
     exportData: () => JSON.stringify(persistData, null, 2),

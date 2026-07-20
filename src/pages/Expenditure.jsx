@@ -15,10 +15,10 @@ import CatMark from "../components/CatMark.jsx";
 const fmtKcal = (n) => (n == null ? "—" : r0(n));
 
 export default function Expenditure() {
-  const { p, t, expenditure, intakeLog, weightLog, intakeDayStatus, expSettings, setExpSettings, unit, today } = useApp();
+  const { p, t, expenditure, intakeLog, weightLog, intakeDayStatus, expSettings, setExpSettings, unit, estimator, today } = useApp();
   const e = expenditure;
   const kitten = t.stage !== "adult"; // stage, not a raw age check — catches a newborn (dob = today, age 0) too
-  const algoName = { v3: "unobserved-components", v2: "Kalman filter", v1: "EWMA + regression" }[expSettings.algo];
+  const algoName = { v3: "unobserved-components", v2: "Kalman filter", v1: "EWMA + regression" }[estimator];
   const wLbl = weightLabel(unit);
   const showW = (kg, d = 1) => `${(d === 1 ? r1 : r0)(toDisplayWeight(kg, unit))} ${wLbl}`;
 
@@ -30,7 +30,6 @@ export default function Expenditure() {
   const changeRate = weeklyRate(plan.resultingWeeklyChangeKg, unit);
   const dirLabel = { lose: "Lose", maintain: "Maintain", gain: "Gain" };
 
-  const [showAlgo, setShowAlgo] = useState(false);
   const [range, setRange] = useState("3m");
   const [analysis, setAnalysis] = useState("none"); // 'none' | 'rate' | 'kcal'
   const rangeDays = RANGES.find((r) => r.key === range)?.days;
@@ -88,18 +87,7 @@ export default function Expenditure() {
         <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-5 mb-4">
           <div className="flex items-center justify-between">
             <div style={{ color: C.sub }} className="text-xs uppercase tracking-widest font-mono">Measured maintenance</div>
-            <button onClick={() => setShowAlgo((s) => !s)} aria-expanded={showAlgo} style={{ color: C.faint }} className="text-xs font-mono">estimator {expSettings.algo} {showAlgo ? "▾" : "▸"}</button>
           </div>
-          {showAlgo && (
-            <div className="flex items-center justify-between mt-2 mb-1">
-              <span style={{ color: C.faint }} className="text-[11px] leading-snug">v3 unobserved-components · v2 Kalman · v1 EWMA. v3 is best for almost everyone.</span>
-              <div className="flex rounded-full overflow-hidden border shrink-0 ml-2" style={{ borderColor: C.line }}>
-                {[["v3", "v3"], ["v2", "v2"], ["v1", "v1"]].map(([a, lbl]) => (
-                  <button key={a} onClick={() => setExpSettings({ algo: a })} aria-pressed={expSettings.algo === a} style={{ background: expSettings.algo === a ? C.spruce : "transparent", color: expSettings.algo === a ? "#fff" : C.sub }} className="text-xs px-2 py-1 font-mono">{lbl}</button>
-                ))}
-              </div>
-            </div>
-          )}
           {e.enoughData ? (
             <>
               <div className="flex items-baseline gap-2 mt-1">
@@ -114,7 +102,8 @@ export default function Expenditure() {
               </div>
               <p style={{ color: C.faint }} className="text-xs mt-3 leading-snug">
                 vs. the vet formula's {r0(t.refs.maintain)} kcal maintenance. {algoName}, {e.nDays} days
-                {e.missingIntake > 0 && `, ${r0(e.missingIntake * 100)}% of intake days imputed`}.
+                {e.missingIntake > 0 && `, ${r0(e.missingIntake * 100)}% of intake days imputed`}.{" "}
+                <a href="#/settings" style={{ color: C.faint }} className="underline">change estimator</a>
               </p>
             </>
           ) : (

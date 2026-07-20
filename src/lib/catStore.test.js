@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addCat, deleteCat, clearCatHistory, switchCat, renameCat, updateCatProfile, updateActiveCatState, freshCatState, freshProfile, defaultExpSettings, resolveUnit, DEMO_CAT_ID } from "./catStore.js";
+import { addCat, deleteCat, clearCatHistory, switchCat, renameCat, updateCatProfile, updateActiveCatState, freshCatState, freshProfile, defaultExpSettings, resolveUnit, resolveEstimator, DEMO_CAT_ID } from "./catStore.js";
 import { patchEntry } from "./series.js";
 
 const stateWith = (ids) => ({
@@ -156,6 +156,25 @@ describe("switchCat", () => {
 describe("defaultExpSettings", () => {
   it("no longer carries a unit — that's a shared top-level field now, not per-cat", () => {
     expect(defaultExpSettings().unit).toBeUndefined();
+  });
+  it("no longer carries an algo — the estimator is a shared top-level field now, not per-cat", () => {
+    expect(defaultExpSettings().algo).toBeUndefined();
+  });
+});
+
+describe("resolveEstimator", () => {
+  it("uses the shared top-level estimator when it's valid", () => {
+    expect(resolveEstimator("v1", "v3")).toBe("v1");
+    expect(resolveEstimator("v2", "v1")).toBe("v2");
+    expect(resolveEstimator("v3", "v1")).toBe("v3");
+  });
+  it("falls back to the legacy per-cat expSettings.algo value when the top-level field is absent/invalid", () => {
+    expect(resolveEstimator(undefined, "v1")).toBe("v1");
+    expect(resolveEstimator("bogus", "v2")).toBe("v2");
+  });
+  it("is undefined when neither is a valid estimator — caller keeps the v3 default", () => {
+    expect(resolveEstimator(undefined, undefined)).toBeUndefined();
+    expect(resolveEstimator(null, "bogus")).toBeUndefined();
   });
 });
 
