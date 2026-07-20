@@ -161,10 +161,11 @@ function gatedPairs(name) {
   // white text on solid brand fills
   add("white text on second/spruce (selected tab pill, buttons)", "text-normal", white, s.second);
   add("white text on warn (erase-all button)", "text-normal", white, s.warn);
-  // borders/hairlines — real UI-component boundaries (input fields, segmented controls, meter
-  // tracks), not purely decorative dividers
-  add("line hairline on ground (segmented-control border etc.)", "nontext", s.line, s.ground);
-  add("line color on card (input/card border, meter-track background)", "nontext", s.line, s.card);
+  // borders/hairlines — RECLASSIFIED DECORATIVE by owner decision (2026-07-19): card contours,
+  // dividers, and meter-track backgrounds are architecture, deliberately soft; the information
+  // they frame is carried by fills, markers, and numeric labels, all gated above/below. `line`
+  // is therefore NOT contrast-gated. (Original audit had gated it at 3:1, which fixed
+  // invisibility but flattened the Companion's gentle look — the owner preferred soft contours.)
   // chart marks (TimelineChart lives inside a C.card section)
   add("CHART.weight line (ink) on card", "nontext", s.ink, s.card);
   add("CHART.expenditure line (data1===ok) on card", "nontext", s.data1, s.card);
@@ -182,12 +183,15 @@ function gatedPairs(name) {
   add("BowlCard segment-transition divider (C.sub) vs okSoft fill", "nontext", s.soft, s.okSoft);
   add("BowlCard nutritional-floor marker (solid warn) vs warnSoft segment", "nontext", s.warn, s.warnSoft);
   add("BowlCard nutritional-floor marker (solid warn) vs okSoft segment", "nontext", s.warn, s.okSoft);
-  add("BowlCard/meter track (C.line) vs card", "nontext", s.line, s.card);
+  // Track backgrounds (C.line) are decorative per the owner's soft-contours decision — the
+  // information is the solid fill/marker ON the track, gated below.
+  add("BowlCard zone-bar position marker (solid ok) vs soft track (line)", "nontext", s.ok, s.line);
   // WeightBand / ConfidenceBand meters: every position marker is a solid dot with a 2px
   // C.card ring (see borderColor: C.card on each) — the ring-vs-track pairing is the real
   // on-track visibility mechanism, in addition to the dot-vs-its-own-fill check.
   add("WeightBand dot (solid ok) vs its own safe-zone fill (okSoft)", "nontext", s.ok, s.okSoft);
-  add("marker's card-colored ring vs track (line)", "nontext", white, s.line);
+  add("WeightBand marker dot (solid ok) vs soft track (line)", "nontext", s.ok, s.line);
+  add("ConfidenceBand marker dot (solid accent) vs soft track (line)", "nontext", s.accent, s.line);
   add("ConfidenceBand dot (solid accent) vs its own fill (accentSoft)", "nontext", s.accent, s.accentSoft);
 
   return P;

@@ -21,7 +21,10 @@
 // measurement script referenced there): every text/UI-element pairing actually used across the
 // app was measured against WCAG 1.4.3/1.4.11 thresholds, per skin. Two categories of locked hex
 // below were retuned as a direct result, both minimally — same hue, nudged for legibility:
-//   - `line`: was a barely-there hairline (~1.2:1 against both ground and card) — invisible as an
+//   - `line`: deliberately soft (~1.2:1) — it draws card contours and dividers, which are
+//     ARCHITECTURE, not information (owner's call: the gentle outlines are part of the look).
+//     Information-bearing elements (text, chart marks, zone dividers) carry their own tokens
+//     and ARE contrast-gated in theme.test.js; `line` is classified decorative there. Was
 //     input-field/segmented-control boundary, which is exactly the "reads too low-contrast"
 //     complaint. Retuned to mix(soft, ground, 0.72) per skin (still each skin's own neutral cast,
 //     just dark enough to read as a real border, ~3.2-3.5:1 against card).
@@ -31,15 +34,15 @@
 //     reported "Blossom" worst case). Both nudged darker by <10%, same hue — not a hue swap.
 export const SKINS = {
   original: {
-    ground: "#FAF6EE", card: "#FFFFFF", line: "#8F897C", ink: "#33302A", soft: "#655F50",
+    ground: "#FAF6EE", card: "#FFFFFF", line: "#EAE2D3", ink: "#33302A", soft: "#655F50",
     accent: "#A75633", second: "#54704F", ok: "#54704F", data1: "#54704F", data2: "#A75633",
   },
   blossom: {
-    ground: "#FAF5F2", card: "#FFFFFF", line: "#95878C", ink: "#362C31", soft: "#6E5C64",
+    ground: "#FAF5F2", card: "#FFFFFF", line: "#EDDFE0", ink: "#362C31", soft: "#6E5C64",
     accent: "#A8465E", second: "#586F60", ok: "#586F60", data1: "#586F60", data2: "#A8465E",
   },
   tidepool: {
-    ground: "#F0F5F4", card: "#FFFFFF", line: "#7E8D8B", ink: "#22312F", soft: "#526562",
+    ground: "#F0F5F4", card: "#FFFFFF", line: "#DBE5E3", ink: "#22312F", soft: "#526562",
     accent: "#B04E38", second: "#26655F", ok: "#26655F", data1: "#26655F", data2: "#B04E38",
   },
   spruce: {
@@ -47,7 +50,7 @@ export const SKINS = {
     // (spruce green) is what happens to also be the safe-state green, and second (amber)
     // is NOT safe-colored. ok is pinned to accent, not second, so a safe pill never renders
     // amber in this skin.
-    ground: "#F4F6F3", card: "#FFFFFF", line: "#848D86", ink: "#232A26", soft: "#59645C",
+    ground: "#F4F6F3", card: "#FFFFFF", line: "#DFE5DF", ink: "#232A26", soft: "#59645C",
     accent: "#3E5C50", second: "#8A5A12", ok: "#3E5C50", data1: "#3E5C50", data2: "#8A5A12",
   },
 };
