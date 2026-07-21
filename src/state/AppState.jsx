@@ -16,7 +16,7 @@ import {
 } from "../lib/catStore.js";
 import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
-import { mergeV2 } from "../lib/mergeData.js";
+import { mergeV2, pruneTombstones, weightKey, intakeKey } from "../lib/mergeData.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -30,11 +30,15 @@ const cleanFood = (f) => { const s = cleanName(f); return s.name == null ? s : m
 // A freshly-installed app has NO real cats at all — just Biscuit, the virtual demo cat (see
 // lib/demoCat.js), active by default. Biscuit is never a key in `cats`; it's generated on the
 // fly from `today` (see the demoCat useMemo below) and never persisted. addCat()/deleteCat()'s
-// replacement cat are a real, blank cat instead — see freshCatState.
-const makeInitialCatsState = () => ({ activeCatId: DEMO_CAT_ID, cats: {} });
+// replacement cat are a real, blank cat instead — see freshCatState. `deletedCats` (edit-
+// propagation-sync tombstones — see lib/mergeData.js) lives alongside `cats` in this same
+// piece of state since deleteCat mutates both together (see lib/catStore.js's deleteCat).
+const makeInitialCatsState = () => ({ activeCatId: DEMO_CAT_ID, cats: {}, deletedCats: {} });
 
 // Fill in a per-cat record from (possibly partial/imported) data, defaulting anything
-// missing and running the food cleanup on every food-shaped field.
+// missing and running the food cleanup on every food-shaped field. stateModAt/deletedEntries
+// default to 0/{} — a cat with no stamp is treated as the oldest possible edit (see
+// lib/mergeData.js's mergeCat), which is exactly right for legacy/never-synced data.
 const sanitizeCat = (cat) => ({
   profile: cat?.profile ?? freshProfile(),
   ration: (cat?.ration || []).map(cleanFood),
@@ -47,6 +51,8 @@ const sanitizeCat = (cat) => ({
   intakeDayStatus: cat?.intakeDayStatus || {},
   tr: cat?.tr || defaultTr(),
   expSettings: { ...defaultExpSettings(), ...(cat?.expSettings || {}) },
+  stateModAt: cat?.stateModAt ?? 0,
+  deletedEntries: cat?.deletedEntries || {},
 });
 
 const catsFromV2 = (d) => {
@@ -70,8 +76,14 @@ export const useApp = () => useContext(Ctx);
 export function AppProvider({ children }) {
   const [catsState, setCatsState] = useState(makeInitialCatsState);
   const library = useFoodLibrary(makeLibrarySeed);
-  const [fridgeDays, setFridgeDays] = useState(3);
+  const [fridgeDays, setFridgeDaysRaw] = useState(3);
   const [storageOk] = useState(probeStorage);
+  // Top-level LWW timestamp for the shared-settings bundle (fridgeDays/skin/unit/estimator —
+  // see lib/mergeData.js's mergeV2). Stamped by every setter below that changes one of those
+  // four; NOT touched by eraseAll (which only actually resets fridgeDays, not the others — see
+  // eraseAll below), so a plain erase doesn't misrepresent unchanged skin/unit/estimator as
+  // freshly edited. Missing/0 (a legacy or never-synced device) is the oldest possible value.
+  const [settingsModAt, setSettingsModAt] = useState(0);
   // Today's date, computed once per render — everything below (ages, the demo cat's
   // generated history, "current weight") derives from this rather than a stored value, so
   // none of it ever goes stale. LOCAL day (see lib/series.js localDateOf), not UTC — a
@@ -88,17 +100,20 @@ export function AppProvider({ children }) {
   // to "original" and is tolerant of missing/unknown values on load/import (see hydrate,
   // importData) — an older export simply keeps whatever's already active.
   const [skin, setSkinState] = useState(DEFAULT_SKIN);
-  const setSkin = (name) => { if (SKINS[name]) setSkinState(name); };
+  const setSkin = (name) => { if (SKINS[name]) { setSkinState(name); setSettingsModAt(Date.now()); } };
   useEffect(() => { applySkin(skin); }, [skin]);
   // Weight display unit (kg/lb): shared across every cat (like skin/fridgeDays), not per-cat
   // data — used to live in each cat's expSettings. Defaults to "kg".
   const [unit, setUnitState] = useState("kg");
-  const setUnit = (u) => { if (u === "kg" || u === "lb") setUnitState(u); };
+  const setUnit = (u) => { if (u === "kg" || u === "lb") { setUnitState(u); setSettingsModAt(Date.now()); } };
   // Expenditure estimator (v1/v2/v3): shared across every cat (like unit/skin/fridgeDays),
   // not per-cat data — used to live in each cat's expSettings.algo. Defaults to "v3", the
   // recommended unobserved-components estimator (see lib/expenditure.js).
   const [estimator, setEstimatorState] = useState("v3");
-  const setEstimator = (a) => { if (a === "v1" || a === "v2" || a === "v3") setEstimatorState(a); };
+  const setEstimator = (a) => { if (a === "v1" || a === "v2" || a === "v3") { setEstimatorState(a); setSettingsModAt(Date.now()); } };
+  // fridgeDays' public setter — stamps settingsModAt like the three above. eraseAll uses
+  // setFridgeDaysRaw directly (see below) so a full reset doesn't stamp a bundle edit.
+  const setFridgeDays = (n) => { setFridgeDaysRaw(n); setSettingsModAt(Date.now()); };
   // Litter-Robot connection: shared, top-level (like skin/unit/fridgeDays), not per-cat —
   // one Whisker account's refresh token, which robot serial it's reading, and which cat's
   // weightLog it feeds. Null = not connected. Never stores the password, only this token.
@@ -115,10 +130,16 @@ export function AppProvider({ children }) {
   const updateActiveCat = (fn) => setCatsState((s) => updateActiveCatState(s, fn));
 
   // Load: the stored blob is our own — always a whole snapshot (v1 legacy or v2). Migrate
-  // v1 → v2 (see lib/migrate.js) then adopt it wholesale.
+  // v1 → v2 (see lib/migrate.js), prune any ancient tombstones (see lib/mergeData.js's
+  // pruneTombstones — bounds deletedCats/deletedEntries growth even on a device that never
+  // imports/merges, per the ~180-day GC policy), then adopt it wholesale. Uses the *Raw/
+  // *State setters throughout, not the stamped public setSkin/setUnit/setEstimator/
+  // setFridgeDays/updateCatProfile — loading a value FROM storage isn't a fresh edit, so it
+  // must not stamp stateModAt/settingsModAt to "now" (that would make every reload look like
+  // a just-now edit and always win the next merge).
   const hydrate = (raw) => {
     if (!raw || typeof raw !== "object") return;
-    const d = toV2(raw);
+    const d = pruneTombstones(toV2(raw));
     const cats = catsFromV2(d);
     let activeCatId;
     if (Object.keys(cats).length) {
@@ -126,19 +147,24 @@ export function AppProvider({ children }) {
       // key in `cats` — she stays active rather than silently falling back to a real cat.
       activeCatId = d.activeCatId === DEMO_CAT_ID ? DEMO_CAT_ID
         : d.activeCatId && cats[d.activeCatId] ? d.activeCatId : Object.keys(cats)[0];
-      setCatsState({ activeCatId, cats });
+      setCatsState({ activeCatId, cats, deletedCats: d.deletedCats || {} });
     }
     if (d.library) library.setFoods(dedupeFoods(ensureBuiltins(d.library.map(cleanFood))));
-    if (typeof d.fridgeDays === "number") setFridgeDays(d.fridgeDays);
+    if (typeof d.fridgeDays === "number") setFridgeDaysRaw(d.fridgeDays);
     if (typeof d.skin === "string" && SKINS[d.skin]) setSkinState(d.skin);
     const resolved = resolveUnit(d.unit, activeCatId && cats[activeCatId]?.expSettings?.unit);
     if (resolved) setUnitState(resolved);
     const resolvedEstimator = resolveEstimator(d.estimator, activeCatId && cats[activeCatId]?.expSettings?.algo);
     if (resolvedEstimator) setEstimatorState(resolvedEstimator);
+    setSettingsModAt(typeof d.settingsModAt === "number" ? d.settingsModAt : 0);
     if (d.litterRobot !== undefined) setLitterRobotState(migrateConnection(d.litterRobot));
   };
 
-  const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays, skin, unit, estimator, litterRobot };
+  const persistData = {
+    v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods,
+    fridgeDays, skin, unit, estimator, litterRobot,
+    deletedCats: catsState.deletedCats || {}, settingsModAt,
+  };
   const loaded = usePersistence(persistData, hydrate);
 
   // Import (user-picked file, Settings → Data): ADDITIVE MERGE, never a replace — the file's
@@ -174,14 +200,17 @@ export function AppProvider({ children }) {
   const saveFood = (f) => library.upsert(toLibraryEntry(f));
 
   const p = activeCat.profile;
-  const setP = (updater) => updateActiveCat((cat) => ({ ...cat, profile: typeof updater === "function" ? updater(cat.profile) : updater }));
+  // profile is part of the current-state bundle stateModAt covers (see lib/mergeData.js) —
+  // every edit stamps it so this device's edit wins LWW against a stale copy elsewhere.
+  const setP = (updater) => updateActiveCat((cat) => ({ ...cat, profile: typeof updater === "function" ? updater(cat.profile) : updater, stateModAt: Date.now() }));
 
   // Editable food list (the ration, the start blend) scoped to the active cat — same
   // {items, setItems, sum, setField, add, remove, normalize, slide, patch} shape the pages
-  // already expect (previously from useFoodList).
+  // already expect (previously from useFoodList). Only ever used for "ration"/"start", both
+  // current-state-bundle fields, so setItems always stamps stateModAt (see setP above).
   const makeListView = (field) => {
     const items = activeCat[field];
-    const setItems = (updater) => updateActiveCat((cat) => ({ ...cat, [field]: typeof updater === "function" ? updater(cat[field]) : updater }));
+    const setItems = (updater) => updateActiveCat((cat) => ({ ...cat, [field]: typeof updater === "function" ? updater(cat[field]) : updater, stateModAt: Date.now() }));
     return {
       items, setItems,
       sum: sumPct(items),
@@ -197,15 +226,27 @@ export function AppProvider({ children }) {
   const start = makeListView("start");
 
   // Generic dated-entry log (weight log, intake log) scoped to the active cat — same
-  // {items, setItems, add, edit, remove} shape as before (previously from useLog).
+  // {items, setItems, add, edit, remove} shape as before (previously from useLog). Logs are
+  // append-only/unioned in the merge, NOT part of the stateModAt bundle (see lib/mergeData.js
+  // and catStore.js's updateActiveCatState banner) — setItems here deliberately does NOT
+  // stamp stateModAt, or an ordinary weigh-in would fake-bump the profile/ration LWW clock.
+  // `remove` DOES record a deletedEntries tombstone (mergeData's own weightKey/intakeKey — the
+  // same identity the merge union dedupes by) so the deletion propagates on the next merge
+  // instead of a stale copy of the deleted entry reappearing from another device.
   const makeLogView = (field) => {
     const items = activeCat[field];
+    const keyFn = field === "weightLog" ? weightKey : intakeKey;
     const setItems = (updater) => updateActiveCat((cat) => ({ ...cat, [field]: typeof updater === "function" ? updater(cat[field]) : updater }));
     return {
       items, setItems,
       add: (entry) => setItems((xs) => [...xs, { id: uid(), ...entry }]),
       edit: (id, patch) => setItems((xs) => patchEntry(xs, id, patch)),
-      remove: (id) => setItems((xs) => xs.filter((e) => e.id !== id)),
+      remove: (id) => updateActiveCat((cat) => {
+        const removed = (cat[field] || []).find((e) => e.id === id);
+        const next = { ...cat, [field]: (cat[field] || []).filter((e) => e.id !== id) };
+        if (removed) next.deletedEntries = { ...(cat.deletedEntries || {}), [keyFn(removed)]: Date.now() };
+        return next;
+      }),
     };
   };
   const weightLog = makeLogView("weightLog");
@@ -224,10 +265,12 @@ export function AppProvider({ children }) {
     return { ...cat, intakeDayStatus: next };
   });
 
+  // tr/expSettings are current-state-bundle fields too — stamp stateModAt, same reasoning as
+  // setP/makeListView above.
   const tr = activeCat.tr;
-  const setTr = (updater) => updateActiveCat((cat) => ({ ...cat, tr: typeof updater === "function" ? updater(cat.tr) : updater }));
+  const setTr = (updater) => updateActiveCat((cat) => ({ ...cat, tr: typeof updater === "function" ? updater(cat.tr) : updater, stateModAt: Date.now() }));
   const expSettings = activeCat.expSettings;
-  const setExpSettings = (patch) => updateActiveCat((cat) => ({ ...cat, expSettings: { ...cat.expSettings, ...patch } }));
+  const setExpSettings = (patch) => updateActiveCat((cat) => ({ ...cat, expSettings: { ...cat.expSettings, ...patch }, stateModAt: Date.now() }));
 
   // Permanent vs. logged state. Age derives from date of birth (so it never goes stale);
   // with no dob to derive it from, the cat is treated as an adult (never a fabricated
@@ -312,9 +355,14 @@ export function AppProvider({ children }) {
   const eraseAll = () => {
     store.clear();
     const id = uid();
-    setCatsState({ activeCatId: id, cats: { [id]: freshCatState() } });
+    // deletedCats: {} — a full local wipe drops every tombstone too (see the file banner in
+    // lib/mergeData.js: "eraseAll wipes everything incl. tombstones"). setFridgeDaysRaw (not
+    // the public setFridgeDays) so this reset doesn't stamp settingsModAt — skin/unit/
+    // estimator aren't actually being reset here, so bumping the shared-settings bundle's
+    // clock would misrepresent them as freshly edited too.
+    setCatsState({ activeCatId: id, cats: { [id]: freshCatState() }, deletedCats: {} });
     library.reset();
-    setFridgeDays(3);
+    setFridgeDaysRaw(3);
     setLitterRobotState(null);
   };
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { addCat, deleteCat, clearCatHistory, switchCat, renameCat, updateCatProfile, updateActiveCatState, freshCatState, freshProfile, defaultExpSettings, resolveUnit, resolveEstimator, DEMO_CAT_ID } from "./catStore.js";
 import { patchEntry } from "./series.js";
+import { weightKey, intakeKey } from "./mergeData.js";
 
 const stateWith = (ids) => ({
   activeCatId: ids[0],
@@ -32,6 +33,11 @@ describe("freshCatState / freshProfile", () => {
     expect(c.intakeLog).toEqual([]);
     expect(c.intakeDayStatus).toEqual({});
   });
+  it("starts at stateModAt 0 (oldest) with no deletedEntries tombstones", () => {
+    const c = freshCatState();
+    expect(c.stateModAt).toBe(0);
+    expect(c.deletedEntries).toEqual({});
+  });
 });
 
 describe("addCat", () => {
@@ -44,6 +50,11 @@ describe("addCat", () => {
     const newId = s1.activeCatId;
     expect(s1.cats[newId].profile.name).toBe("");
     expect(s1.cats[newId].weightLog).toEqual([]);
+  });
+  it("passes the top-level deletedCats tombstone map through untouched", () => {
+    const s0 = { ...stateWith(["a"]), deletedCats: { "old-cat": 123 } };
+    const s1 = addCat(s0);
+    expect(s1.deletedCats).toEqual({ "old-cat": 123 });
   });
 });
 
@@ -77,6 +88,39 @@ describe("deleteCat", () => {
     const s1 = deleteCat(s0, "nope");
     expect(Object.keys(s1.cats).sort()).toEqual(["a", "b"]);
   });
+
+  it("records a deletedCats tombstone (id -> deletedAt) for the deleted cat", () => {
+    const s0 = stateWith(["a", "b"]);
+    const s1 = deleteCat(s0, "b", 12345);
+    expect(s1.deletedCats).toEqual({ b: 12345 });
+  });
+  it("unions the tombstone into any pre-existing deletedCats map, leaving other ids untouched", () => {
+    const s0 = { ...stateWith(["a", "b"]), deletedCats: { "already-gone": 111 } };
+    const s1 = deleteCat(s0, "b", 999);
+    expect(s1.deletedCats).toEqual({ "already-gone": 111, b: 999 });
+  });
+  it("does NOT tombstone an id that never named a real cat (no-op delete, e.g. a typo'd id)", () => {
+    const s0 = stateWith(["a", "b"]);
+    const s1 = deleteCat(s0, "nope", 999);
+    expect(s1.deletedCats).toEqual({});
+  });
+  it("does NOT tombstone Biscuit (DEMO_CAT_ID) even though targeting her is a no-op", () => {
+    const s0 = stateWith(["a", "b"]);
+    const s1 = deleteCat(s0, DEMO_CAT_ID, 999);
+    expect(s1.deletedCats).toEqual({});
+  });
+  it("still records the tombstone when deleting the last real cat (falls back to Biscuit)", () => {
+    const s0 = stateWith(["a"]);
+    const s1 = deleteCat(s0, "a", 555);
+    expect(s1.activeCatId).toBe(DEMO_CAT_ID);
+    expect(s1.deletedCats).toEqual({ a: 555 });
+  });
+  it("defaults `now` to Date.now() when omitted (app-code convenience)", () => {
+    const before = Date.now();
+    const s1 = deleteCat(stateWith(["a"]), "a");
+    expect(s1.deletedCats.a).toBeGreaterThanOrEqual(before);
+    expect(s1.deletedCats.a).toBeLessThanOrEqual(Date.now());
+  });
 });
 
 describe("clearCatHistory", () => {
@@ -99,6 +143,25 @@ describe("clearCatHistory", () => {
   it("is a no-op for Biscuit (the demo cat) — she's never a key in cats", () => {
     const s0 = stateWith(["a"]);
     expect(clearCatHistory(s0, DEMO_CAT_ID)).toEqual(s0);
+  });
+
+  it("records a deletedEntries tombstone (via mergeData's weightKey/intakeKey) for every cleared weigh-in/meal", () => {
+    const s0 = stateWith(["a"]);
+    const w = s0.cats.a.weightLog[0], m = s0.cats.a.intakeLog[0];
+    const s1 = clearCatHistory(s0, "a", 777);
+    expect(s1.cats.a.deletedEntries).toEqual({ [weightKey(w)]: 777, [intakeKey(m)]: 777 });
+  });
+  it("unions new tombstones into any deletedEntries already on the cat", () => {
+    const s0 = stateWith(["a"]);
+    s0.cats.a.deletedEntries = { "already-gone": 111 };
+    const w = s0.cats.a.weightLog[0], m = s0.cats.a.intakeLog[0];
+    const s1 = clearCatHistory(s0, "a", 888);
+    expect(s1.cats.a.deletedEntries).toEqual({ "already-gone": 111, [weightKey(w)]: 888, [intakeKey(m)]: 888 });
+  });
+  it("does NOT stamp stateModAt — history isn't part of the current-state bundle", () => {
+    const s0 = stateWith(["a"]);
+    const s1 = clearCatHistory(s0, "a", 777);
+    expect(s1.cats.a.stateModAt).toBe(s0.cats.a.stateModAt);
   });
 });
 
@@ -202,6 +265,10 @@ describe("renameCat", () => {
     const s1 = renameCat(s0, "nope", "Mochi");
     expect(s1).toBe(s0);
   });
+  it("stamps stateModAt too — it's a thin wrapper over updateCatProfile", () => {
+    const s1 = renameCat(stateWith(["a"]), "a", "Mochi", 4242);
+    expect(s1.cats.a.stateModAt).toBe(4242);
+  });
 });
 
 describe("updateCatProfile", () => {
@@ -228,6 +295,18 @@ describe("updateCatProfile", () => {
     const s0 = stateWith(["a"]);
     const s1 = updateCatProfile(s0, "nope", { dob: "2020-01-01" });
     expect(s1).toBe(s0);
+  });
+  it("stamps that cat's stateModAt — profile is part of the current-state bundle mergeV2 LWWs on", () => {
+    const s0 = stateWith(["a", "b"]);
+    const s1 = updateCatProfile(s0, "a", { dob: "2020-01-01" }, 4242);
+    expect(s1.cats.a.stateModAt).toBe(4242);
+    expect(s1.cats.b.stateModAt).toBeUndefined(); // untouched cat unaffected
+  });
+  it("defaults `now` to Date.now() when omitted", () => {
+    const before = Date.now();
+    const s1 = updateCatProfile(stateWith(["a"]), "a", { name: "X" });
+    expect(s1.cats.a.stateModAt).toBeGreaterThanOrEqual(before);
+    expect(s1.cats.a.stateModAt).toBeLessThanOrEqual(Date.now());
   });
 });
 

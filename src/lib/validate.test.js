@@ -161,6 +161,49 @@ describe("validateImport tolerates/checks the litterRobot connection field", () 
   });
 });
 
+describe("validateImport tolerates/checks the edit-propagation-sync fields (stateModAt/deletedEntries/settingsModAt/deletedCats)", () => {
+  it("accepts a blob with none of these fields at all (an export from before sync)", () => {
+    expect(validateImport(validExport())).toBe(true);
+    expect(validateImport(validV2Export())).toBe(true);
+  });
+  it("accepts a well-formed stateModAt/deletedEntries on a per-cat entry", () => {
+    const cats = { ...validV2Export().cats, "cat-1": { ...validV2Export().cats["cat-1"], stateModAt: 1700000000000, deletedEntries: { w1: 1700000000000 } } };
+    expect(validateImport({ ...validV2Export(), cats })).toBe(true);
+  });
+  it("rejects a non-numeric stateModAt", () => {
+    const cats = { ...validV2Export().cats, "cat-1": { ...validV2Export().cats["cat-1"], stateModAt: "not-a-number" } };
+    expect(validateImport({ ...validV2Export(), cats })).toBe(false);
+  });
+  it("rejects a deletedEntries map whose values aren't numbers", () => {
+    const cats = { ...validV2Export().cats, "cat-1": { ...validV2Export().cats["cat-1"], deletedEntries: { w1: "not-a-number" } } };
+    expect(validateImport({ ...validV2Export(), cats })).toBe(false);
+  });
+  it("rejects a deletedEntries that isn't an object", () => {
+    const cats = { ...validV2Export().cats, "cat-1": { ...validV2Export().cats["cat-1"], deletedEntries: ["w1"] } };
+    expect(validateImport({ ...validV2Export(), cats })).toBe(false);
+  });
+  it("accepts an empty deletedEntries map", () => {
+    const cats = { ...validV2Export().cats, "cat-1": { ...validV2Export().cats["cat-1"], deletedEntries: {} } };
+    expect(validateImport({ ...validV2Export(), cats })).toBe(true);
+  });
+  it("accepts a well-formed top-level settingsModAt/deletedCats", () => {
+    expect(validateImport({ ...validV2Export(), settingsModAt: 1700000000000, deletedCats: { "cat-2": 1700000000000 } })).toBe(true);
+  });
+  it("rejects a non-numeric settingsModAt", () => {
+    expect(validateImport({ ...validV2Export(), settingsModAt: "not-a-number" })).toBe(false);
+  });
+  it("rejects a deletedCats map whose values aren't numbers, or that isn't an object", () => {
+    expect(validateImport({ ...validV2Export(), deletedCats: { "cat-2": "not-a-number" } })).toBe(false);
+    expect(validateImport({ ...validV2Export(), deletedCats: ["cat-2"] })).toBe(false);
+  });
+  it("checks stateModAt/deletedEntries on a v1 blob's implicit cat too, and settingsModAt/deletedCats at v1's top level", () => {
+    expect(validateImport({ ...validExport(), stateModAt: 1700000000000, deletedEntries: { w1: 1700000000000 } })).toBe(true);
+    expect(validateImport({ ...validExport(), stateModAt: "nope" })).toBe(false);
+    expect(validateImport({ ...validExport(), settingsModAt: 1700000000000, deletedCats: {} })).toBe(true);
+    expect(validateImport({ ...validExport(), deletedCats: { x: "nope" } })).toBe(false);
+  });
+});
+
 describe("validateImport tolerates/checks intakeDayStatus (per-day incomplete flags)", () => {
   it("accepts a blob with no intakeDayStatus field at all (an export from before this feature)", () => {
     expect(validateImport(validExport())).toBe(true);

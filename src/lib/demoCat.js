@@ -139,5 +139,11 @@ export function buildDemoCat(today) {
     intakeDayStatus: {}, // Biscuit's log is always complete — never flagged, never mutated
     tr: defaultTr(),
     expSettings: defaultExpSettings(),
+    // stateModAt/deletedEntries: the edit-propagation-sync bookkeeping fields (see
+    // lib/mergeData.js) — present here only to keep this shape matching freshCatState()'s
+    // exactly (see demoCat.test.js); meaningless for Biscuit since she's never persisted,
+    // mutated, or merged.
+    stateModAt: 0,
+    deletedEntries: {},
   };
 }

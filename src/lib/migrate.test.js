@@ -12,6 +12,10 @@ const v1Blob = () => ({
   tr: { on: true, days: 10, timelineUnit: "kcal" },
   fridgeDays: 5,
   expSettings: { unit: "lb", algo: "v2" },
+  stateModAt: 1700000000000,
+  deletedEntries: { w1: 1699999999999 },
+  settingsModAt: 1700000000001,
+  deletedCats: { "old-cat": 1699999999998 },
 });
 
 describe("migrateV1", () => {
@@ -36,6 +40,14 @@ describe("migrateV1", () => {
     expect(out.fridgeDays).toBe(src.fridgeDays);
     expect(cat.library).toBeUndefined();
     expect(cat.fridgeDays).toBeUndefined();
+    // edit-propagation-sync fields: per-cat ones pass through onto the cat, top-level ones
+    // stay top-level, same shared-vs-per-cat split as library/fridgeDays above (a v1 file
+    // carrying these is a hand-rolled/hypothetical case — see the CAT_FIELDS comment — but
+    // migrateV1 must not drop them if present).
+    expect(cat.stateModAt).toBe(src.stateModAt);
+    expect(cat.deletedEntries).toEqual(src.deletedEntries);
+    expect(out.settingsModAt).toBe(src.settingsModAt);
+    expect(out.deletedCats).toEqual(src.deletedCats);
   });
 
   it("gives every migrated cat a distinct id", () => {

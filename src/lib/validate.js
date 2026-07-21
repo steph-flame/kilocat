@@ -25,8 +25,15 @@ const isIntakeEntry = (e) => isPlainObject(e) && typeof e.date === "string" && t
 // means "trust the logged entries as-is".
 const isIntakeDayStatus = (m) => isPlainObject(m) && Object.values(m).every((v) => v === "incomplete");
 
-// Fields that live on one cat: profile, ration, start, weightLog, intakeLog, tr, expSettings.
-// Shared by both the top-level v1 shape and each per-cat entry inside a v2 blob's `cats` map.
+// A tombstone map: { key: deletedAtMs }, epoch-ms values — used for both deletedCats
+// (top-level) and each cat's deletedEntries. See lib/mergeData.js for the merge/GC rules.
+const isTombstoneMap = (m) => isPlainObject(m) && Object.values(m).every((v) => typeof v === "number");
+
+// Fields that live on one cat: profile, ration, start, weightLog, intakeLog, tr, expSettings,
+// stateModAt, deletedEntries. Shared by both the top-level v1 shape and each per-cat entry
+// inside a v2 blob's `cats` map. stateModAt/deletedEntries are new (edit-propagation sync) —
+// both optional and tolerated when absent (an older export simply has neither; lib/mergeData.js
+// treats a missing stateModAt as 0, the oldest possible value).
 function validateCatShape(d) {
   if (!isPlainObject(d)) return false;
   if (d.profile !== undefined && !isPlainObject(d.profile)) return false;
@@ -37,6 +44,8 @@ function validateCatShape(d) {
   if (d.intakeDayStatus !== undefined && !isIntakeDayStatus(d.intakeDayStatus)) return false;
   if (d.tr !== undefined && !isPlainObject(d.tr)) return false;
   if (d.expSettings !== undefined && !isPlainObject(d.expSettings)) return false;
+  if (d.stateModAt !== undefined && typeof d.stateModAt !== "number") return false;
+  if (d.deletedEntries !== undefined && !isTombstoneMap(d.deletedEntries)) return false;
   return true;
 }
 
@@ -91,10 +100,14 @@ function isLRConnection(v) {
 }
 
 // Fields shared across every cat, common to both v1 (top-level) and v2 (top-level too).
+// settingsModAt/deletedCats are new (edit-propagation sync) — same tolerate-when-absent
+// treatment as stateModAt/deletedEntries above.
 function validateSharedShape(d) {
   if (d.library !== undefined && !arrOf(d.library, isFoodEntry)) return false;
   if (d.fridgeDays !== undefined && typeof d.fridgeDays !== "number") return false;
   if (d.litterRobot !== undefined && !isLRConnection(d.litterRobot)) return false;
+  if (d.settingsModAt !== undefined && typeof d.settingsModAt !== "number") return false;
+  if (d.deletedCats !== undefined && !isTombstoneMap(d.deletedCats)) return false;
   return true;
 }
 
