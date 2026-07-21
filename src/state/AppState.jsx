@@ -16,6 +16,7 @@ import {
 } from "../lib/catStore.js";
 import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
+import { mergeV2 } from "../lib/mergeData.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -137,44 +138,36 @@ export function AppProvider({ children }) {
     if (d.litterRobot !== undefined) setLitterRobotState(migrateConnection(d.litterRobot));
   };
 
-  // Import (user-picked file, Settings → Data): a v2 file is a full backup, so it replaces
-  // every cat. A v1 file (a legacy single-cat export, or one made before this device had
-  // other cats) is adopted as one NEW cat alongside whatever's already here, rather than
-  // clobbering existing cats — "migrate on accept". Shared fields (library/fridgeDays) only
-  // change if the file actually has them, so an old/partial file can't blank out the library.
-  const importData = (raw) => {
-    if (!raw || typeof raw !== "object") return;
-    let newActiveCat; // the cat that becomes active by this import, if any — for the unit fallback below
-    if (raw.v === 2) {
-      const cats = catsFromV2(raw);
-      if (Object.keys(cats).length) {
-        const activeCatId = raw.activeCatId === DEMO_CAT_ID ? DEMO_CAT_ID
-          : raw.activeCatId && cats[raw.activeCatId] ? raw.activeCatId : Object.keys(cats)[0];
-        setCatsState({ activeCatId, cats });
-        newActiveCat = cats[activeCatId];
-      }
-    } else {
-      const migrated = migrateV1(raw);
-      const newId = migrated.activeCatId;
-      const rawCat = migrated.cats[newId];
-      if (Object.keys(rawCat).length) { // a wholly-empty import has nothing to adopt
-        const cat = sanitizeCat(rawCat);
-        setCatsState((s) => ({ activeCatId: newId, cats: { ...s.cats, [newId]: cat } }));
-        newActiveCat = cat;
-      }
-    }
-    if (raw.library) library.setFoods(dedupeFoods(ensureBuiltins(raw.library.map(cleanFood))));
-    if (typeof raw.fridgeDays === "number") setFridgeDays(raw.fridgeDays);
-    if (typeof raw.skin === "string" && SKINS[raw.skin]) setSkinState(raw.skin);
-    const resolved = resolveUnit(raw.unit, newActiveCat?.expSettings?.unit);
-    if (resolved) setUnitState(resolved);
-    const resolvedEstimator = resolveEstimator(raw.estimator, newActiveCat?.expSettings?.algo);
-    if (resolvedEstimator) setEstimatorState(resolvedEstimator);
-    if (raw.litterRobot !== undefined) setLitterRobotState(migrateConnection(raw.litterRobot));
-  };
-
   const persistData = { v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods, fridgeDays, skin, unit, estimator, litterRobot };
   const loaded = usePersistence(persistData, hydrate);
+
+  // Import (user-picked file, Settings → Data): ADDITIVE MERGE, never a replace — the file's
+  // cats/weigh-ins/meals/foods are UNIONED into whatever's already here, so importing can only
+  // ever add data, never lose or clobber current setup. See lib/mergeData.js for the exact
+  // rule table (short version: append-only logs union+dedupe; a cat's profile/ration/settings
+  // stay whatever's local when that cat already exists here; the food library unions by name).
+  // A v1 file (a legacy single-cat export, or one made before this device had other cats) is
+  // migrated to v2 first (lib/migrate.js), then merged in exactly like any other incoming
+  // cat — EXCEPT a wholly-empty v1 blob (e.g. bare `{}`, which validateImport tolerates)
+  // contributes nothing: migrateV1 mints a fresh, unstable id for a v1 blob's implicit one
+  // cat, so treating an empty one as "a real cat" would add a meaningless blank cat every time.
+  //
+  // The merge result is adopted through the SAME seam `hydrate` uses on load (toV2 + sanitize
+  // + set every piece of state) — merged data is a valid v2 blob, so this is just "hydrate
+  // from a blob we built instead of one read from storage," keeping persistence/derived-state
+  // identical to the load path.
+  const importData = (raw) => {
+    if (!raw || typeof raw !== "object") return;
+    let incoming;
+    if (raw.v === 2) {
+      incoming = raw;
+    } else {
+      const migrated = migrateV1(raw);
+      const hasCat = Object.keys(migrated.cats[migrated.activeCatId] || {}).length > 0;
+      incoming = hasCat ? migrated : { ...migrated, cats: {} };
+    }
+    hydrate(mergeV2(persistData, incoming));
+  };
 
   // Foods enter the library only on an explicit save click (see saveFood) — never
   // automatically, so typing a food doesn't silently accumulate library entries.

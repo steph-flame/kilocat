@@ -51,6 +51,10 @@ export default function Settings() {
   const doImport = (ev) => {
     const file = ev.target.files?.[0]; ev.target.value = "";
     if (!file) return;
+    // Import is an ADDITIVE merge, never a replace (see AppState.jsx's importData / lib/
+    // mergeData.js) — confirm that plainly before it runs, since "Import" alone could easily
+    // be misread as "replace what's here."
+    if (!window.confirm("Import will ADD any cats, weigh-ins, meals, and foods from this file that you don't already have. Your current cats and settings won't be changed.")) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -182,7 +186,7 @@ export default function Settings() {
         {/* data */}
         <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
           <h2 className="font-medium mb-1">Data</h2>
-          <p style={{ color: C.faint }} className="text-xs mb-3">Everything above — every cat, the food library, all history — in one file. Saved on this device only; export to back up or move to another browser.</p>
+          <p style={{ color: C.faint }} className="text-xs mb-3">Everything above — every cat, the food library, all history — in one file. Saved on this device only; export to back up or move to another browser. Import ADDS what's in the file to what's already here — it never replaces or overwrites your current cats or settings.</p>
           <div className="flex items-center gap-2">
             <button onClick={doExport} style={{ borderColor: C.line, color: C.sub }} className="inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1.5 hover:bg-white"><Download size={13} /> Export data</button>
             <label style={{ borderColor: C.line, color: C.sub }} className="inline-flex items-center gap-1.5 text-xs border rounded-lg px-2.5 py-1.5 hover:bg-white cursor-pointer">
