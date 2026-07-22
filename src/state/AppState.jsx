@@ -388,7 +388,9 @@ export function AppProvider({ children }) {
   // currently being viewed. A thin sibling of makeLogView's add(), for an arbitrary cat.
   const appendWeightsToCat = (catId, entries) => {
     if (!entries.length) return;
-    setCatsState((s) => (s.cats[catId]
+    // Never route weigh-ins to a hidden (merge-retained, tombstoned) cat — a stale
+    // robotMap/petMap could still name one; visibleCats is the source of truth.
+    setCatsState((s) => (s.cats[catId] && visibleCats(s)[catId]
       ? { ...s, cats: { ...s.cats, [catId]: { ...s.cats[catId], weightLog: [...s.cats[catId].weightLog, ...entries.map((e) => ({ id: uid(), ...e }))] } } }
       : s));
   };
@@ -406,8 +408,11 @@ export function AppProvider({ children }) {
   const runLitterRobotSync = async (conn) => {
     if (!conn) return { ok: false };
     const sinceMs = conn.lastSyncTs || Date.now() - FIRST_SYNC_DAYS * 86400000;
+    // Only VISIBLE cats are sync targets — a hidden (tombstoned) cat a merge retained must
+    // not receive weigh-ins even if a stale mapping still points at it (appendWeightsToCat
+    // enforces the same at write time; this keeps the dedupe set consistent).
     const existingEntriesByCat = Object.fromEntries(
-      Object.entries(catsState.cats).map(([id, cat]) => [id, cat.weightLog])
+      Object.entries(visibleCats(catsState)).map(([id, cat]) => [id, cat.weightLog])
     );
     try {
       const { byCat, imported, skipped, syncedAt, weightScale, pets } = await lrSyncAllWeights({
