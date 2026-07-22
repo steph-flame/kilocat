@@ -136,8 +136,10 @@ export const BUILTIN_FOODS = [
   { name: "Fromm Adult Gold", mode: "perKg", kcalPerKg: 3820, gramsPerCup: 103 },
 ];
 
-// The macro fields that define a food, independent of any ration (%, id excluded).
-const MACRO_KEYS = ["kcalPerKg", "gramsPerCup", "kcalPerUnit", "gramsPerUnit"];
+// The macro fields that define a food, independent of any ration (%, id excluded). Exported
+// for lib/mergeData.js's order-independent library merge (mergeLibrary), which needs the same
+// field list to combine two replicas' conflicting copies of a same-identity food.
+export const MACRO_KEYS = ["kcalPerKg", "gramsPerCup", "kcalPerUnit", "gramsPerUnit"];
 
 // Fresh library, one editable entry per built-in. This is the seed for useFoodLibrary.
 export const makeLibrarySeed = () =>

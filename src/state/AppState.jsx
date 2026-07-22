@@ -16,7 +16,7 @@ import {
 } from "../lib/catStore.js";
 import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
-import { mergeV2, pruneTombstones, weightKey, intakeKey } from "../lib/mergeData.js";
+import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../lib/mergeData.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -120,7 +120,10 @@ export function AppProvider({ children }) {
   const [litterRobot, setLitterRobotState] = useState(null);
 
   // Biscuit is never a key in `cats` — it's generated above, not stored — so the active cat
-  // is either that generated stand-in or a real lookup into `cats`.
+  // is either that generated stand-in or a real lookup into `cats`. Not re-checked against
+  // visibleCats here: every site that can SET activeCatId (hydrate, switchCat, addCat,
+  // deleteCat, eraseAll — see lib/catStore.js and below) already guarantees it never points at
+  // a hidden/tombstoned cat, so this lookup can stay a plain read.
   const activeCat = catsState.activeCatId === DEMO_CAT_ID ? demoCat : catsState.cats[catsState.activeCatId];
   // The ONE seam every per-cat mutation (profile edits, ration/start, weigh-ins, intake, tr,
   // expSettings — see setP/makeListView/makeLogView/setTr/setExpSettings below) funnels
@@ -143,10 +146,18 @@ export function AppProvider({ children }) {
     const cats = catsFromV2(d);
     let activeCatId;
     if (Object.keys(cats).length) {
+      // `cats` can include a hidden/tombstoned cat that a merge retained (see
+      // lib/mergeData.js's join-semilattice design — mergeCats no longer drops a tombstoned
+      // cat's data, it's kept for GC/revival and only hidden at read time). activeCatId must
+      // never resolve to one of those — check visibility (not just presence) before adopting
+      // the persisted id, and fall back to another VISIBLE cat (or Biscuit, never a hidden
+      // one) if it doesn't qualify.
+      const visibleIds = visibleCats(d);
       // A persisted activeCatId of DEMO_CAT_ID is tolerated even though Biscuit is never a
       // key in `cats` — she stays active rather than silently falling back to a real cat.
       activeCatId = d.activeCatId === DEMO_CAT_ID ? DEMO_CAT_ID
-        : d.activeCatId && cats[d.activeCatId] ? d.activeCatId : Object.keys(cats)[0];
+        : d.activeCatId && visibleIds[d.activeCatId] ? d.activeCatId
+        : Object.keys(visibleIds)[0] ?? DEMO_CAT_ID;
       setCatsState({ activeCatId, cats, deletedCats: d.deletedCats || {} });
     }
     if (d.library) library.setFoods(dedupeFoods(ensureBuiltins(d.library.map(cleanFood))));
@@ -338,8 +349,13 @@ export function AppProvider({ children }) {
       active: id === catsState.activeCatId,
     };
   };
+  // visibleCats: `catsState.cats` can hold a hidden/tombstoned cat a merge retained (see
+  // lib/mergeData.js's join-semilattice design) — it must never appear in this list (so it
+  // never renders on the Cats page, never counts, and can't be picked as the target of a
+  // switch/mapping). The retained data still round-trips through exportData (see below),
+  // just never surfaces here.
   const catsSummary = [
-    ...Object.entries(catsState.cats).map(([id, cat]) => catRow(id, cat)),
+    ...Object.entries(visibleCats(catsState)).map(([id, cat]) => catRow(id, cat)),
     { ...catRow(DEMO_CAT_ID, demoCat), name: "Biscuit", demo: true },
   ];
   const switchCat = (id) => setCatsState((s) => switchCatPure(s, id));
@@ -436,7 +452,10 @@ export function AppProvider({ children }) {
   // real cats (or 0) means routing is genuinely ambiguous — leave both maps empty and let the
   // owner set it up in the Settings mapping section (see design brief item 5).
   const connectLitterRobotFinish = (refreshToken, robots, pets) => {
-    const realCatIds = Object.keys(catsState.cats);
+    // visibleCats: a merge-retained hidden cat (see lib/mergeData.js) must not count toward
+    // "exactly one real cat" here — auto-mapping every robot/pet to a cat the owner can't even
+    // see would be a confusing, silent misroute.
+    const realCatIds = Object.keys(visibleCats(catsState));
     let robotMap = {}, petMap = {};
     if (realCatIds.length === 1) {
       const catId = realCatIds[0];

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeV2, weightKey, intakeKey, pruneTombstones, TOMBSTONE_TTL_MS } from "./mergeData.js";
+import { mergeV2, weightKey, intakeKey, pruneTombstones, TOMBSTONE_TTL_MS, visibleCats, mergeLibrary } from "./mergeData.js";
 import { validateImport } from "./validate.js";
 import { migrateV1 } from "./migrate.js";
 
@@ -326,11 +326,44 @@ describe("mergeV2 intakeDayStatus union", () => {
 /* ---------- library union ---------- */
 
 describe("mergeV2 library union", () => {
-  it("unions foods by name identity (case-insensitive, (dry)/(wet)-stripped) via dedupeFoods", () => {
+  it("unions foods by name identity (case-insensitive, (dry)/(wet)-stripped) via mergeLibrary", () => {
     const local = snap({ library: [{ id: "f1", name: "Food A", mode: "perKg", kcalPerKg: 4000 }] });
     const incoming = snap({ library: [{ id: "f2", name: "food a", mode: "perKg", kcalPerKg: 4000 }] });
     const merged = mergeV2(local, incoming);
     expect(merged.library).toHaveLength(1);
+  });
+
+  // Regression for the library order-dependence bug: the OLD implementation (dedupeFoods over
+  // a plain concatenation) kept whichever same-identity entry it saw FIRST for any field both
+  // sides had a real, differing value for — so a 3-way merge's chain order/grouping could pick
+  // a different winner depending on which pair got folded together first, breaking
+  // associativity (the same class of bug as the cat-deletion one, just for the food library —
+  // see mergeData.js's file banner). mergeLibrary fixes this with a deterministic content
+  // tiebreak (combineFoodEntry) instead of "first seen wins" — verify convergence holds
+  // regardless of merge grouping/order for a food three replicas each edited conflictingly.
+  it("converges to the SAME library regardless of 3-way merge order/grouping, even when every replica edited the same food's macros conflictingly", () => {
+    const foodA = (kcalPerKg) => ({ id: "shared-id", name: "Shared Food", mode: "perKg", kcalPerKg, gramsPerCup: "" });
+    const s1 = snap({ library: [foodA(4000)] });
+    const s2 = snap({ library: [foodA(4500)] });
+    const s3 = snap({ library: [foodA(5000)] });
+
+    const leftFirst = mergeV2(mergeV2(s1, s2), s3);
+    const rightFirst = mergeV2(s1, mergeV2(s2, s3));
+    const rotated = mergeV2(mergeV2(s2, s3), s1);
+
+    expect(leftFirst.library).toEqual(rightFirst.library);
+    expect(leftFirst.library).toEqual(rotated.library);
+    expect(leftFirst.library).toHaveLength(1); // still deduped to one entry, not three
+  });
+
+  it("mergeLibrary itself is associative/commutative on a raw conflicting-macro case (unit-level, no mergeV2 plumbing)", () => {
+    const f = (kcalPerKg) => [{ id: "x", name: "Food X", mode: "perKg", kcalPerKg }];
+    const a = f(100), b = f(200), c = f(300);
+    const leftFirst = mergeLibrary(mergeLibrary(a, b), c);
+    const rightFirst = mergeLibrary(a, mergeLibrary(b, c));
+    expect(leftFirst).toEqual(rightFirst);
+    // idempotent too: merging identical data in again changes nothing
+    expect(mergeLibrary(leftFirst, leftFirst)).toEqual(leftFirst);
   });
 
   it("fills a missing macro on the local entry from the incoming duplicate (dedupeFoods' own gap-fill)", () => {
@@ -433,35 +466,49 @@ describe("mergeV2 litterRobot", () => {
 const now = 1_000_000_000_000;
 
 describe("mergeV2 deletedCats tombstones", () => {
-  it("drops a cat deleted locally (tombstone) even though incoming still has a stale copy", () => {
+  // NOTE: mergeV2 no longer physically drops a tombstoned cat from `cats` — it's retained
+  // (bundle+logs, unioned like any other cat) so a later merge can still reveal revival
+  // evidence or a third replica's log-only edit without working from already-discarded data
+  // (see mergeData.js's file banner — the join-semilattice fix for the associativity/
+  // data-loss bug the fuzzer found). Whether a cat is currently VISIBLE is a read-time
+  // question — see visibleCats/isCatVisible — so these tests assert against that projection,
+  // not raw `merged.cats` presence.
+
+  it("hides a cat deleted locally (tombstone) even though incoming still has a stale copy — but its data is still retained", () => {
     // local deleted cat-2 a while ago; incoming never got the memo and still has it.
     const local = snap({ cats: { "cat-1": makeCat() }, deletedCats: { "cat-2": now - 5000 } });
     const incoming = snap({
       cats: { "cat-1": makeCat(), "cat-2": makeCat({ profile: { name: "Stale Copy" }, stateModAt: now - 9000 }) },
     });
     const merged = mergeV2(local, incoming, now);
-    expect(Object.keys(merged.cats).sort()).toEqual(["cat-1"]);
+    expect(Object.keys(visibleCats(merged)).sort()).toEqual(["cat-1"]);
     expect(merged.deletedCats["cat-2"]).toBe(now - 5000);
+    // retained, not discarded — a future merge that reveals revival evidence must still have
+    // this data to work with.
+    expect(merged.cats["cat-2"]).toBeDefined();
   });
 
-  it("drops a cat deleted on the incoming side too, symmetrically", () => {
+  it("hides a cat deleted on the incoming side too, symmetrically", () => {
     const local = snap({ cats: { "cat-1": makeCat(), "cat-2": makeCat({ stateModAt: now - 9000 }) } });
     const incoming = snap({ cats: { "cat-1": makeCat() }, deletedCats: { "cat-2": now - 5000 } });
-    expect(Object.keys(mergeV2(local, incoming, now).cats).sort()).toEqual(["cat-1"]);
+    const merged = mergeV2(local, incoming, now);
+    expect(Object.keys(visibleCats(merged)).sort()).toEqual(["cat-1"]);
+    expect(merged.cats["cat-2"]).toBeDefined();
   });
 
   it("a cat re-created/edited AFTER the tombstone (stateModAt newer than deletedAt) survives — deletion doesn't permanently poison an id", () => {
     const local = snap({ cats: { "cat-1": makeCat() }, deletedCats: { "cat-2": now - 9000 } });
     const incoming = snap({ cats: { "cat-1": makeCat(), "cat-2": makeCat({ profile: { name: "Revived" }, stateModAt: now - 5000 }) } });
     const merged = mergeV2(local, incoming, now);
-    expect(Object.keys(merged.cats).sort()).toEqual(["cat-1", "cat-2"]);
+    expect(Object.keys(visibleCats(merged)).sort()).toEqual(["cat-1", "cat-2"]);
     expect(merged.cats["cat-2"].profile.name).toBe("Revived");
   });
 
-  it("a tombstone exactly as new as the surviving stateModAt still drops the cat (>=, not >)", () => {
+  it("a tombstone exactly as new as the surviving stateModAt still hides the cat (>=, not >)", () => {
     const local = snap({ cats: { "cat-1": makeCat() }, deletedCats: { "cat-2": now - 5000 } });
     const incoming = snap({ cats: { "cat-1": makeCat(), "cat-2": makeCat({ stateModAt: now - 5000 }) } });
-    expect(Object.keys(mergeV2(local, incoming, now).cats).sort()).toEqual(["cat-1"]);
+    const merged = mergeV2(local, incoming, now);
+    expect(Object.keys(visibleCats(merged)).sort()).toEqual(["cat-1"]);
   });
 
   it("unions deletedCats tombstones from both sides, newest deletedAt per id wins", () => {
@@ -476,7 +523,7 @@ describe("mergeV2 deletedCats tombstones", () => {
     const stale = snap({ cats: { "cat-1": makeCat(), "cat-2": makeCat({ stateModAt: now - 9000 }) } });
     const once = mergeV2(local, stale, now);
     const twice = mergeV2(once, stale, now);
-    expect(Object.keys(twice.cats).sort()).toEqual(["cat-1"]);
+    expect(Object.keys(visibleCats(twice)).sort()).toEqual(["cat-1"]);
     expect(twice).toEqual(once);
   });
 
@@ -484,6 +531,29 @@ describe("mergeV2 deletedCats tombstones", () => {
     const local = snap({ cats: { "cat-1": makeCat() }, deletedCats: { "never-existed": now - 9000 } });
     const incoming = snap({ cats: { "cat-1": makeCat() } });
     expect(Object.keys(mergeV2(local, incoming, now).cats).sort()).toEqual(["cat-1"]);
+  });
+
+  it("GC reclaims a hidden cat's orphaned bundle+logs once its tombstone ages out past the TTL (unless revived)", () => {
+    const local = snap({
+      cats: { "cat-1": makeCat(), "cat-2": makeCat({ profile: { name: "Long gone" }, stateModAt: now - TOMBSTONE_TTL_MS - 20000 }) },
+      deletedCats: { "cat-2": now - TOMBSTONE_TTL_MS - 10000 }, // tombstone itself is also past the TTL
+    });
+    const incoming = snap({ cats: { "cat-1": makeCat() } });
+    const merged = mergeV2(local, incoming, now);
+    expect(merged.deletedCats["cat-2"]).toBeUndefined(); // tombstone GC'd
+    expect(merged.cats["cat-2"]).toBeUndefined(); // ...and its orphaned data reclaimed WITH it
+  });
+
+  it("GC does NOT reclaim a cat's data when it was revived (stateModAt newer than its now-expiring tombstone)", () => {
+    const local = snap({
+      cats: { "cat-1": makeCat(), "cat-2": makeCat({ profile: { name: "Revived" }, stateModAt: now - TOMBSTONE_TTL_MS - 5000 }) },
+      deletedCats: { "cat-2": now - TOMBSTONE_TTL_MS - 10000 }, // older than the revival edit AND past the TTL
+    });
+    const incoming = snap({ cats: { "cat-1": makeCat() } });
+    const merged = mergeV2(local, incoming, now);
+    expect(merged.deletedCats["cat-2"]).toBeUndefined(); // stale tombstone GC'd
+    expect(merged.cats["cat-2"]).toBeDefined(); // but the cat itself is legitimately alive
+    expect(merged.cats["cat-2"].profile.name).toBe("Revived");
   });
 });
 

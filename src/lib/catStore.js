@@ -5,7 +5,7 @@
 import { uid } from "./util.js";
 import { defaultFactors } from "./nutrition.js";
 import { blankFood } from "./foods.js";
-import { weightKey, intakeKey } from "./mergeData.js";
+import { weightKey, intakeKey, isCatVisible } from "./mergeData.js";
 
 // Biscuit, the virtual demo cat (see lib/demoCat.js) — never a key in `cats`, never
 // persisted. Defined here (not in demoCat.js, which imports freshProfile/defaultTr/
@@ -78,19 +78,28 @@ export function addCat(state) {
 
 // Delete a cat, recording a `deletedCats` tombstone (id → deletedAt) so the deletion can
 // propagate to another device on the next merge (see lib/mergeData.js's mergeCats) instead of
-// the cat silently reappearing there. Deleting the last real one switches active to Biscuit
+// the cat silently reappearing there. Deleting the last VISIBLE one switches active to Biscuit
 // (the virtual demo cat) rather than fabricating a fresh blank real cat — a user who's just
-// removed their only cat sees the demo, exactly like a brand-new install, instead of a blank
-// profile that looks like data loss. `now` defaults to Date.now() (app code); tests pin it.
+// removed their only (visible) cat sees the demo, exactly like a brand-new install, instead of
+// a blank profile that looks like data loss. `now` defaults to Date.now() (app code); tests
+// pin it.
+//
+// The active-cat handoff below picks another VISIBLE remaining cat specifically — never a
+// hidden/tombstoned one. `state.cats` can now hold a cat that's merge-retained but currently
+// hidden (a deletedCats tombstone dominates it — see lib/mergeData.js's isCatVisible/
+// visibleCats, the file banner's join-semilattice design), e.g. imported from a device that
+// deleted it more recently than this device ever saw. Handing "active" to that id would
+// surface a supposedly-deleted cat in the UI.
 export function deleteCat(state, id, now = Date.now()) {
   const deletedCats = { ...(state.deletedCats || {}) };
   if (state.cats[id]) deletedCats[id] = now; // only tombstone a cat that actually existed
-  const remaining = Object.keys(state.cats).filter((k) => k !== id);
-  if (remaining.length === 0) return { activeCatId: DEMO_CAT_ID, cats: {}, deletedCats };
   const cats = { ...state.cats };
   delete cats[id];
-  const activeCatId = state.activeCatId === id ? remaining[0] : state.activeCatId;
-  return { ...state, activeCatId, cats, deletedCats };
+  const remainingIds = Object.keys(cats);
+  if (remainingIds.length === 0) return { activeCatId: DEMO_CAT_ID, cats, deletedCats };
+  if (state.activeCatId !== id) return { ...state, cats, deletedCats };
+  const nextVisible = remainingIds.find((k) => isCatVisible(cats[k], deletedCats[k]));
+  return { ...state, activeCatId: nextVisible ?? DEMO_CAT_ID, cats, deletedCats };
 }
 
 // Wipe one cat's weigh-in + intake history only — profile, ration, and saved foods
@@ -108,12 +117,17 @@ export function clearCatHistory(state, id, now = Date.now()) {
   return { ...state, cats: { ...state.cats, [id]: { ...cat, weightLog: [], intakeLog: [], deletedEntries } } };
 }
 
-// Switch the active cat; a no-op if the id doesn't exist. Biscuit (DEMO_CAT_ID) is always a
-// valid target even though it's never a key in `cats` — it's generated on the fly (see
-// lib/demoCat.js), not stored.
+// Switch the active cat; a no-op if the id doesn't exist OR is currently hidden (a
+// deletedCats tombstone dominates it — see lib/mergeData.js's isCatVisible/visibleCats). A
+// hidden-but-still-present cat can sit in `state.cats` after a merge retained it (the file
+// banner's join-semilattice design) even though it must never become active. Biscuit
+// (DEMO_CAT_ID) is always a valid target even though it's never a key in `cats` — it's
+// generated on the fly (see lib/demoCat.js), not stored.
 export function switchCat(state, id) {
   if (id === DEMO_CAT_ID) return { ...state, activeCatId: DEMO_CAT_ID };
-  return state.cats[id] ? { ...state, activeCatId: id } : state;
+  if (!state.cats[id]) return state;
+  if (!isCatVisible(state.cats[id], state.deletedCats?.[id])) return state;
+  return { ...state, activeCatId: id };
 }
 
 // Patch any cat's profile fields by id — not just the active one, so Settings can edit

@@ -27,7 +27,7 @@
 
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { mergeV2, weightKey, intakeKey } from "./mergeData.js";
+import { mergeV2, weightKey, intakeKey, visibleCats } from "./mergeData.js";
 import { addCat, deleteCat, clearCatHistory, updateCatProfile, freshCatState } from "./catStore.js";
 import { uid } from "./util.js";
 
@@ -135,14 +135,14 @@ const makeScenarioArb = (replicaCount) => fc.record({
   ops: fc.array(fc.record({ replica: fc.nat({ max: replicaCount - 1 }), op: opArb }), { minLength: 0, maxLength: 14 }),
 });
 
-// The main gating property below merges exactly 2 replicas ONCE (no chaining) — see the "KNOWN
-// BUG" section further down for why 3-way CHAINED merges are excluded from the gate: a real,
-// reproducible order-dependence bug (not one of the documented intentional asymmetries) means a
-// 3-replica chain fuzz WILL find genuine failures, and per review instructions those are
-// reported/xfail'd rather than silently designed around. A single 2-replica merge cannot hit
-// that bug (there's no "intermediate, not-yet-final" step for data to be lost in) and still
-// exercises every non-chained invariant at full strength.
-const scenarioArb = makeScenarioArb(2);
+// The main gating property below runs at BOTH replicaCount 2 and 3 — 3-way CHAINED merges
+// used to be excluded (see the file's former "KNOWN BUG" section, now fixed: mergeData.js is a
+// proper join-semilattice — mergeCats never discards a tombstoned cat's data at merge time,
+// deletion is a read-time projection instead — see visibleCats/isCatVisible). With that fix, a
+// 3-replica chain no longer has an "intermediate, not-yet-final" step where data can be lost,
+// so this property is exercised at both replica counts (see runConvergenceProperty below).
+const scenarioArb2 = makeScenarioArb(2);
+const scenarioArb3 = makeScenarioArb(3);
 
 // Each replica starts from an IDENTICAL baseline (two blank cats) and independently evolves
 // per its slice of a single globally-ordered op list — so op N always gets tick N regardless
@@ -177,77 +177,121 @@ function convergedFor(snaps, i, now) {
 
 /* ---------- the big one: multi-replica convergence over random op sequences ---------- */
 
+// Shared body for the gating property, parameterized by replicaCount so it can run at both 2
+// (no chaining possible) and 3 (chained merges — see scenarioArb2/scenarioArb3 above) replicas
+// with the exact same, full-strength set of assertions. Runs at HIGH numRuns for both — the
+// associativity/data-loss bug this whole file exists to catch only showed up at replicaCount 3
+// with chained merges, so that arm carries the real weight of the acceptance oracle.
+function runConvergenceProperty(scenarioArb, numRuns) {
+  fc.assert(
+    fc.property(scenarioArb, (scenario) => {
+      const replicas = runScenario(scenario);
+      const now = BASE_NOW + (scenario.ops.length + 10) * 1000;
+      const snaps = replicas.map(wrapV2);
+
+      // CONVERGENCE: every replica's fully-merged view agrees on the data that should converge.
+      // This is now a plain monotonic-union property (no tombstone-driven discarding at merge
+      // time — see mergeData.js's file banner), so it holds for any number of chained replicas.
+      const converged = snaps.map((_, i) => convergedFor(snaps, i, now));
+      for (let i = 1; i < converged.length; i++) {
+        expect(projectConvergent(converged[i])).toEqual(projectConvergent(converged[0]));
+      }
+
+      // COMMUTATIVITY (data only): mergeV2(a,b) vs mergeV2(b,a), every pair.
+      for (let i = 0; i < snaps.length; i++) {
+        for (let j = i + 1; j < snaps.length; j++) {
+          const ab = mergeV2(snaps[i], snaps[j], now);
+          const ba = mergeV2(snaps[j], snaps[i], now);
+          expect(projectConvergent(ab)).toEqual(projectConvergent(ba));
+        }
+      }
+
+      // ASSOCIATIVITY: mergeV2((a⊕b)⊕c) vs mergeV2(a⊕(b⊕c)) — the specific shape of the bug
+      // this fuzzer originally caught (a single pairwise merge can't be non-associative; it
+      // takes ≥3 replicas grouped two different ways). Only meaningful at replicaCount ≥ 3, but
+      // harmless (and still exercised, trivially) at 2.
+      if (snaps.length >= 3) {
+        const [a, b, c] = snaps;
+        const leftFirst = mergeV2(mergeV2(a, b, now), c, now);
+        const rightFirst = mergeV2(a, mergeV2(b, c, now), now);
+        expect(projectConvergent(leftFirst)).toEqual(projectConvergent(rightFirst));
+      }
+
+      // IDEMPOTENCE: merging the same incoming snapshot in again changes nothing further.
+      const once = mergeV2(snaps[0], snaps[1], now);
+      const twice = mergeV2(once, snaps[1], now);
+      expect(projectConvergent(twice)).toEqual(projectConvergent(once));
+
+      const finalView = converged[0];
+
+      // Per-cat: derive the CORRECT outcome directly from the raw replica states (not from
+      // mergeV2 itself, which is the thing under test) and check the converged view against it.
+      const allCatIds = new Set(replicas.flatMap((r) => Object.keys(r.cats)));
+      for (const catId of allCatIds) {
+        const withCat = replicas.filter((r) => r.cats[catId]);
+        const maxStateModAt = withCat.length ? Math.max(...withCat.map((r) => r.cats[catId].stateModAt ?? 0)) : -Infinity;
+        const maxDeleteTick = Math.max(-Infinity, ...replicas.map((r) => r.deletedCats?.[catId] ?? -Infinity));
+        const shouldSurvive = maxStateModAt > maxDeleteTick;
+
+        // VISIBILITY (read-time projection, not raw presence — see mergeData.js's file banner):
+        // whether the cat currently SHOWS is exactly `shouldSurvive`.
+        const survived = !!visibleCats(finalView)[catId];
+        expect(survived).toBe(shouldSurvive);
+
+        // RETENTION (join-semilattice, always true regardless of visibility): the fuzzer's
+        // `now` never reaches TOMBSTONE_TTL_MS, so mergeV2 must NEVER have physically discarded
+        // this cat's raw bundle+logs — only pruneTombstones' GC (untested here) may ever do
+        // that, and only once its tombstone itself ages out. This is the core of the fix: a
+        // hidden cat's data survives every merge, it just isn't rendered.
+        expect(!!finalView.cats[catId]).toBe(true);
+
+        // NO LOST WRITES: every entry any replica still has locally must be present in the
+        // final raw (not visibility-projected) log — whether or not the cat itself is
+        // currently visible, since hidden data is retained, not discarded.
+        for (const field of ["weightLog", "intakeLog"]) {
+          const keyFn = field === "weightLog" ? weightKey : intakeKey;
+          const survivorKeys = new Set(finalView.cats[catId][field].map(keyFn));
+          for (const r of withCat) {
+            for (const e of r.cats[catId][field]) expect(survivorKeys.has(keyFn(e))).toBe(true);
+          }
+        }
+
+        // DELETES STICK: every tombstoned key (from any replica) stays gone.
+        const tombstoned = new Set();
+        for (const r of replicas) for (const k of Object.keys(r.cats[catId]?.deletedEntries || {})) tombstoned.add(k);
+        for (const field of ["weightLog", "intakeLog"]) {
+          const keyFn = field === "weightLog" ? weightKey : intakeKey;
+          for (const e of finalView.cats[catId][field]) expect(tombstoned.has(keyFn(e))).toBe(false);
+        }
+
+        // LWW: the surviving bundle belongs to whichever replica achieved the max stateModAt —
+        // true regardless of visibility, since bundle LWW and cat visibility are independent
+        // mechanisms now (see mergeData.js's file banner). (Ties only occur at
+        // maxStateModAt === 0 — "nobody ever touched the bundle" — where every tied replica's
+        // bundle is still the identical, untouched freshCatState default.)
+        const winner = withCat.find((r) => (r.cats[catId].stateModAt ?? 0) === maxStateModAt);
+        expect(finalView.cats[catId].profile).toEqual(winner.cats[catId].profile);
+        expect(finalView.cats[catId].ration).toEqual(winner.cats[catId].ration);
+        expect(finalView.cats[catId].tr).toEqual(winner.cats[catId].tr);
+        expect(finalView.cats[catId].expSettings).toEqual(winner.cats[catId].expSettings);
+      }
+    }),
+    { numRuns },
+  );
+}
+
 describe("fuzz: multi-replica convergence over random op sequences", () => {
-  it("converges across replicas/merge-orders, is idempotent, commutative on convergent data, loses no live write, keeps deletes stuck, and LWWs correctly", () => {
-    fc.assert(
-      fc.property(scenarioArb, (scenario) => {
-        const replicas = runScenario(scenario);
-        const now = BASE_NOW + (scenario.ops.length + 10) * 1000;
-        const snaps = replicas.map(wrapV2);
+  it("converges across 2 replicas/merge-orders, is idempotent, commutative on convergent data, loses no live write, keeps deletes stuck, and LWWs correctly", () => {
+    runConvergenceProperty(scenarioArb2, 500);
+  });
 
-        // CONVERGENCE: every replica's fully-merged view agrees on the data that should converge.
-        const converged = snaps.map((_, i) => convergedFor(snaps, i, now));
-        for (let i = 1; i < converged.length; i++) {
-          expect(projectConvergent(converged[i])).toEqual(projectConvergent(converged[0]));
-        }
-
-        // COMMUTATIVITY (data only): mergeV2(a,b) vs mergeV2(b,a), every pair.
-        for (let i = 0; i < snaps.length; i++) {
-          for (let j = i + 1; j < snaps.length; j++) {
-            const ab = mergeV2(snaps[i], snaps[j], now);
-            const ba = mergeV2(snaps[j], snaps[i], now);
-            expect(projectConvergent(ab)).toEqual(projectConvergent(ba));
-          }
-        }
-
-        // IDEMPOTENCE: merging the same incoming snapshot in again changes nothing further.
-        const once = mergeV2(snaps[0], snaps[1], now);
-        const twice = mergeV2(once, snaps[1], now);
-        expect(projectConvergent(twice)).toEqual(projectConvergent(once));
-
-        const finalView = converged[0];
-
-        // Per-cat: derive the CORRECT outcome directly from the raw replica states (not from
-        // mergeV2 itself, which is the thing under test) and check the converged view against it.
-        const allCatIds = new Set(replicas.flatMap((r) => Object.keys(r.cats)));
-        for (const catId of allCatIds) {
-          const withCat = replicas.filter((r) => r.cats[catId]);
-          const maxStateModAt = withCat.length ? Math.max(...withCat.map((r) => r.cats[catId].stateModAt ?? 0)) : -Infinity;
-          const maxDeleteTick = Math.max(-Infinity, ...replicas.map((r) => r.deletedCats?.[catId] ?? -Infinity));
-          const shouldSurvive = maxStateModAt > maxDeleteTick;
-          const survived = !!finalView.cats[catId];
-          expect(survived).toBe(shouldSurvive);
-          if (!survived) continue;
-
-          // NO LOST WRITES: every entry any surviving replica still has locally must be present.
-          for (const field of ["weightLog", "intakeLog"]) {
-            const keyFn = field === "weightLog" ? weightKey : intakeKey;
-            const survivorKeys = new Set(finalView.cats[catId][field].map(keyFn));
-            for (const r of withCat) {
-              for (const e of r.cats[catId][field]) expect(survivorKeys.has(keyFn(e))).toBe(true);
-            }
-          }
-
-          // DELETES STICK: every tombstoned key (from any replica) stays gone.
-          const tombstoned = new Set();
-          for (const r of replicas) for (const k of Object.keys(r.cats[catId]?.deletedEntries || {})) tombstoned.add(k);
-          for (const field of ["weightLog", "intakeLog"]) {
-            const keyFn = field === "weightLog" ? weightKey : intakeKey;
-            for (const e of finalView.cats[catId][field]) expect(tombstoned.has(keyFn(e))).toBe(false);
-          }
-
-          // LWW: the surviving bundle belongs to whichever replica achieved the max stateModAt.
-          // (Ties only occur at maxStateModAt === 0 — "nobody ever touched the bundle" — where
-          // every tied replica's bundle is still the identical, untouched freshCatState default.)
-          const winner = withCat.find((r) => (r.cats[catId].stateModAt ?? 0) === maxStateModAt);
-          expect(finalView.cats[catId].profile).toEqual(winner.cats[catId].profile);
-          expect(finalView.cats[catId].ration).toEqual(winner.cats[catId].ration);
-          expect(finalView.cats[catId].tr).toEqual(winner.cats[catId].tr);
-          expect(finalView.cats[catId].expSettings).toEqual(winner.cats[catId].expSettings);
-        }
-      }),
-      { numRuns: 500 },
-    );
+  // The 3-replica arm: this is the one that used to be a `it.fails` canary (see git history —
+  // "KNOWN BUG: delete-vs-revive-vs-log-only-edit races across ≥3 replicas are not
+  // associative") because chained 3-way merges could lose a third replica's log-only edit
+  // depending on merge order. Now a real, non-xfail property at high numRuns — the acceptance
+  // oracle for the join-semilattice fix (see mergeData.js's file banner).
+  it("converges across 3 CHAINED replicas/merge-orders too — the associativity bug's exact shape — with every invariant above still holding", () => {
+    runConvergenceProperty(scenarioArb3, 1000);
   });
 });
 
@@ -328,59 +372,51 @@ describe("fuzz: recreate/edit beats an older delete tombstone; a tombstone >= th
         deletedCats: {},
       });
       const merged = mergeV2(local, incoming, Math.max(deleteAt, editAt) + 1_000_000); // `now` far from any TTL edge
-      expect(!!merged.cats["cat-B"]).toBe(editAt > deleteAt);
+      // VISIBILITY, not raw presence: mergeCats always retains cat-B's data now (see
+      // mergeData.js's file banner) — survival is a read-time question, see visibleCats.
+      expect(!!visibleCats(merged)["cat-B"]).toBe(editAt > deleteAt);
+      // ...but the retained raw data is there either way (never physically dropped at merge
+      // time), which is exactly what makes this no longer order-dependent across ≥3 replicas.
+      expect(merged.cats["cat-B"]).toBeDefined();
     }));
   });
 });
 
 /* ==========================================================================================
- * KNOWN BUG (found by this fuzzer, not fixed — left for design review; see the test report)
- * ==========================================================================================
- *
- * mergeV2 is NOT associative across ≥3 parties (equivalently: 2 devices that sync more than
- * once with a third device's data landing in between) when a single cat is simultaneously:
+ * FIXED BUG (formerly "KNOWN BUG" — see git history for the original xfail'd repro): mergeV2
+ * was NOT associative across ≥3 parties (equivalently: 2 devices that sync more than once with
+ * a third device's data landing in between) when a single cat was simultaneously:
  *   (1) deleted on one replica,
  *   (2) revived by a bundle edit (profile/ration/tr/expSettings — anything that bumps
  *       stateModAt) on a second replica, timestamped AFTER the delete — so the cat SHOULD
  *       survive ("recreate/edit beats delete", see mergeData.js's file banner and the
- *       dedicated property above, which passes) — AND
+ *       dedicated property above), AND
  *   (3) given a LOG-ONLY edit (a weigh-in/meal add or remove — anything that does NOT bump
  *       stateModAt, by design; see catStore.js's updateActiveCatState banner) on a THIRD
  *       replica that never otherwise touches the bundle.
  *
- * Root cause: mergeCats() (mergeData.js) decides, independently at EACH pairwise merge call,
- * whether a cat's tombstone currently beats the stateModAt visible in just that call's two
- * inputs — and when it does, the losing side's ENTIRE per-cat object (bundle AND logs) is
- * dropped from the output, not merely hidden. A merge of (the deleter, the log-only replica)
- * ALONE cannot distinguish "this cat is really gone" from "revival evidence exists on a third
- * replica this merge hasn't seen yet" — dropping it is the only defensible call given those two
- * inputs alone, but it's DESTRUCTIVE: once folded together, the log-only replica's weigh-in is
- * gone for good, even though merging the SAME three snapshots in a different order (revival
- * folded in before the deleter) preserves it. Pure cat-level revive-vs-delete with NO log data
- * at stake (verified separately, not committed as a test — see the session's report) IS
- * order-independent; the bug is specifically the log/deletedEntries data riding along with a
- * provisionally-dropped cat.
+ * Root cause: mergeCats() used to decide, independently at EACH pairwise merge call, whether a
+ * cat's tombstone currently beat the stateModAt visible in just that call's two inputs — and
+ * when it did, the losing side's ENTIRE per-cat object (bundle AND logs) was dropped from the
+ * output, not merely hidden. A merge of (the deleter, the log-only replica) ALONE can't
+ * distinguish "this cat is really gone" from "revival evidence exists on a third replica this
+ * merge hasn't seen yet" — dropping it was destructive: once folded together, the log-only
+ * replica's weigh-in was gone for good, even though merging the SAME three snapshots in a
+ * different order (revival folded in before the deleter) preserved it.
  *
- * This is genuine data loss, not one of the documented intentional asymmetries (activeCatId /
- * litterRobot / exact-tie-keeps-local) — but the correct fix isn't a local one-liner: it needs
- * mergeCats to stop physically discarding a tombstoned cat's unioned data (bundle+logs) at
- * intermediate merges, deferring "is this cat currently visible" to every read site instead
- * (AppState.jsx's catsFromV2/catsSummary/activeCat lookup, all of which currently treat
- * *absence* from `cats` as the deletion signal) — which in turn raises a new question this
- * session isn't positioned to answer unilaterally: once a cat's tombstone itself ages out past
- * TOMBSTONE_TTL_MS (pruneTombstones), does its now-orphaned bundle+log data get GC'd too, and by
- * what rule? That's a design decision, not a bug fix, so this is intentionally left failing and
- * flagged for review rather than patched.
- *
- * `it.fails` keeps `npm test` green — a deliberately-expected failure, not a passing/weakened
- * assertion — without hiding the bug. If a future fix lands, this flips to fail-unexpectedly,
- * which is the signal to convert it to a normal `it` (and delete the second, broader canary).
+ * THE FIX (see mergeData.js's file banner): mergeCats now unions every cat's data
+ * unconditionally — a tombstoned cat's bundle+logs are always retained, never discarded at
+ * merge time. "Is this cat currently visible" moved to a pure read-time projection
+ * (isCatVisible/visibleCats) applied at every UI read site instead (AppState.jsx's
+ * catsSummary, activeCat resolution, catStore.js's switchCat/deleteCat). GC (pruneTombstones)
+ * reclaims a hidden cat's orphaned data once its own tombstone ages out past TOMBSTONE_TTL_MS
+ * AND it was never revived — see pruneTombstones' own comment.
  */
 
-describe("KNOWN BUG: delete-vs-revive-vs-log-only-edit races across ≥3 replicas are not associative", () => {
-  it.fails("a weigh-in added on a not-yet-tombstoned replica survives regardless of merge order (currently order-dependent — see comment above)", () => {
-    // Exact minimal case (originally found by fast-check, shrunk from a random run; hand-built
-    // here so this reproduction never depends on a seed):
+describe("FIXED: delete-vs-revive-vs-log-only-edit races across ≥3 replicas are now associative", () => {
+  it("a weigh-in added on a not-yet-tombstoned replica survives regardless of merge order, AND the cat's visibility agrees across orders too", () => {
+    // Exact minimal case that used to reproduce the bug (originally found by fast-check,
+    // shrunk from a random run; hand-built here so this regression never depends on a seed):
     //   replica 1: deleteCat("cat-B")                    @ tick 1
     //   replica 0: rename("cat-B", "")                   @ tick 2  (bundle edit, newer than the delete)
     //   replica 2: addWeighIn("cat-B", kg: 2)             @ tick 3  (log-only, stateModAt untouched)
@@ -394,28 +430,25 @@ describe("KNOWN BUG: delete-vs-revive-vs-log-only-edit races across ≥3 replica
     });
     const now = BASE_NOW + 1_000_000;
     const snaps = replicas.map(wrapV2);
-    const deleterAndLogOnlyFirst = mergeChain(snaps, [1, 2, 0], now); // weigh-in is lost
-    const reviverAndLogOnlyFirst = mergeChain(snaps, [0, 2, 1], now); // weigh-in survives
+    const deleterAndLogOnlyFirst = mergeChain(snaps, [1, 2, 0], now); // used to lose the weigh-in
+    const reviverAndLogOnlyFirst = mergeChain(snaps, [0, 2, 1], now); // used to keep it
     expect(projectConvergent(deleterAndLogOnlyFirst)).toEqual(projectConvergent(reviverAndLogOnlyFirst));
+
+    // Stronger than the bare convergence check above: pin down WHAT converges, not just that
+    // both orders agree with each other. The rename (tick 2) is strictly newer than the delete
+    // (tick 1), so cat-B must be VISIBLE in both orders...
+    expect(!!visibleCats(deleterAndLogOnlyFirst)["cat-B"]).toBe(true);
+    expect(!!visibleCats(reviverAndLogOnlyFirst)["cat-B"]).toBe(true);
+    // ...and the tick-3 weigh-in must survive in BOTH orders, not just one.
+    const hasTheWeighIn = (snap) => snap.cats["cat-B"].weightLog.some((e) => e.kg === 2);
+    expect(hasTheWeighIn(deleterAndLogOnlyFirst)).toBe(true);
+    expect(hasTheWeighIn(reviverAndLogOnlyFirst)).toBe(true);
   });
 
-  // Broader canary, same op vocabulary as the main gating property but with chained 3-replica
-  // merges enabled — characterizes the bug's shape rather than just the one hand-built case.
-  // Also `it.fails`: expected to find SOME violation; if fast-check ever fails to find one
-  // within numRuns, `it.fails` itself fails, which is a real signal worth investigating (either
-  // the bug's been fixed, or this needs more runs).
-  it.fails("multi-replica convergence still breaks somewhere under 3-way chained merges (canary)", () => {
-    fc.assert(
-      fc.property(makeScenarioArb(3), (scenario) => {
-        const replicas = runScenario(scenario);
-        const now = BASE_NOW + (scenario.ops.length + 10) * 1000;
-        const snaps = replicas.map(wrapV2);
-        const converged = snaps.map((_, i) => convergedFor(snaps, i, now));
-        for (let i = 1; i < converged.length; i++) {
-          expect(projectConvergent(converged[i])).toEqual(projectConvergent(converged[0]));
-        }
-      }),
-      { numRuns: 300 },
-    );
-  });
+  // The broader canary this file used to carry ("multi-replica convergence still breaks
+  // somewhere under 3-way chained merges") is gone — per its own former comment, a fix should
+  // "convert [the hand-built repro] to a normal `it` (and delete the second, broader canary)".
+  // Its job (finding ANY violation under general 3-way chained merges at high numRuns) is now
+  // covered, more rigorously, by the "converges across 3 CHAINED replicas" property above,
+  // which runs the FULL invariant set (not just bare convergence) at numRuns: 1000.
 });
