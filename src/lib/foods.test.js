@@ -3,6 +3,7 @@ import {
   distribute, waterfall, transitionAmount, kcalPerG, kcalFromGrams, isValidQty,
   upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed, dedupeFoods, canonicalFoodName,
   migrateLegacyFood, ensureBuiltins, macroProfile, backfillBuiltinMacros, blankFood, BUILTIN_FOODS, FOOD_NUM_KEYS,
+  rationMacroProfile, aafcoCheck,
 } from "./foods.js";
 
 const sum = (a) => a.reduce((s, x) => s + x, 0);
@@ -248,5 +249,50 @@ describe("backfillBuiltinMacros", () => {
   it("passes non-built-in foods through untouched", () => {
     const f = { ...blankFood(), name: "Homemade Mystery Stew", kcalPerUnit: 50, gramsPerUnit: 60 };
     expect(backfillBuiltinMacros(f)).toEqual(f);
+  });
+});
+
+describe("rationMacroProfile (blend of foods by caloric share)", () => {
+  const kibble = { name: "Kibble", mode: "perKg", kcalPerKg: 4000, protein: 40, fat: 20, fiber: 3, moisture: 8, ash: 8, pct: 50 };
+  const wet = { name: "Wet", mode: "perUnit", kcalPerUnit: 80, gramsPerUnit: 100, protein: 11, fat: 5, fiber: 1, moisture: 78, ash: 2, pct: 50 };
+
+  it("combines foods on a mass basis and derives the blend profile + density", () => {
+    const p = rationMacroProfile([kibble, wet]);
+    expect(p.coverageKcalPct).toBe(100);
+    // mass weights: kibble 50/4=12.5, wet 50/0.8=62.5 -> the wet food dominates the grams
+    expect(p.moisture).toBeCloseTo(66.33, 1);
+    expect(p.dryMatter.protein).toBe(47); // 15.83 / (100-66.33)
+    expect(p.kcalPerG).toBeCloseTo(1.333, 2); // 100 pct / 75 wSum
+    expect(p.caloric.protein + p.caloric.fat + p.caloric.carb).toBeCloseTo(100, 0);
+  });
+
+  it("reports coverage below 100% when a blend food lacks GA, and ignores it in the profile", () => {
+    const noGA = { name: "Mystery", mode: "perKg", kcalPerKg: 4000, pct: 50 };
+    const p = rationMacroProfile([kibble, wet, noGA]);
+    expect(p.coverageKcalPct).toBe(66.7); // 100 covered of 150 total pct
+  });
+
+  it("returns null when nothing in the blend can be analyzed", () => {
+    expect(rationMacroProfile([{ name: "x", mode: "perKg", kcalPerKg: 4000, pct: 100 }])).toBe(null);
+    expect(rationMacroProfile([])).toBe(null);
+  });
+});
+
+describe("aafcoCheck (dry-matter minimums)", () => {
+  it("rates adult protein/fat against the 26/9 floor", () => {
+    expect(aafcoCheck({ protein: 47, fat: 40 }, "adult")).toMatchObject({ protein: "ok", fat: "ok" });
+    expect(aafcoCheck({ protein: 24 }, "adult").protein).toBe("below");
+    expect(aafcoCheck({ protein: 27 }, "adult").protein).toBe("near"); // within 10% above 26
+    expect(aafcoCheck({ fat: 8 }, "adult").fat).toBe("below");
+    expect(aafcoCheck({ fat: 9.5 }, "adult").fat).toBe("near");
+  });
+  it("uses the higher growth protein floor (30) for kittens", () => {
+    expect(aafcoCheck({ protein: 27 }, "growing kitten").protein).toBe("below");
+    expect(aafcoCheck({ protein: 31 }, "growing kitten").protein).toBe("near");
+    expect(aafcoCheck({ protein: 40 }, "growing kitten").protein).toBe("ok");
+  });
+  it("returns null for an unknown value", () => {
+    expect(aafcoCheck({ protein: 0 }, "adult").protein).toBe(null);
+    expect(aafcoCheck({}, "adult").fat).toBe(null);
   });
 });

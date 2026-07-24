@@ -109,6 +109,61 @@ export function waterfall(rows, id, raw) {
 
 export const blankFood = () => ({ id: uid(), name: "", mode: "perKg", kcalPerKg: "", gramsPerCup: "", kcalPerUnit: "", gramsPerUnit: "", protein: "", fat: "", fiber: "", moisture: "", ash: "", pct: 0 });
 
+// The macro profile of a whole RATION — a blend of foods, each with a caloric share `pct`.
+// Guaranteed-analysis percentages are per gram, so the foods are combined on a MASS basis: a
+// food's grams share is proportional to pct/kcalPerG (its energy share ÷ its energy density),
+// which is independent of the daily target (the target is a common factor that cancels). Only
+// foods with BOTH a usable energy density AND enough GA (macroProfile != null) contribute; the
+// returned coverageKcalPct is the caloric share those covered foods represent, so a partial blend
+// is never presented as complete. Returns null when nothing in the blend can be analyzed.
+export function rationMacroProfile(rows) {
+  let wSum = 0; // Σ relative-grams of the covered foods
+  let coveredPct = 0, totalPct = 0;
+  const blended = { protein: 0, fat: 0, fiber: 0, moisture: 0, ash: 0 };
+  for (const f of rows || []) {
+    const pct = num(f.pct);
+    if (pct <= 0) continue;
+    totalPct += pct;
+    const density = kcalPerG(f);
+    const prof = macroProfile(f);
+    if (!(density > 0) || !prof) continue;
+    const w = pct / density; // ∝ grams contributed
+    wSum += w;
+    coveredPct += pct;
+    for (const k of ["protein", "fat", "fiber", "moisture", "ash"]) blended[k] += w * num(f[k]);
+  }
+  if (wSum <= 0) return null;
+  for (const k of Object.keys(blended)) blended[k] = blended[k] / wSum;
+  const prof = macroProfile(blended);
+  if (!prof) return null;
+  // Blend energy density: Σkcal/Σgrams = coveredPct / wSum (kcal per gram; ×1000 for kcal/kg).
+  return { ...prof, coverageKcalPct: totalPct > 0 ? r1((coveredPct / totalPct) * 100) : 0, kcalPerG: r1((coveredPct / wSum) * 1000) / 1000 };
+}
+
+// AAFCO cat-food nutrient MINIMUMS, dry-matter basis (%). The two gates an owner can actually
+// check from a label — crude protein and crude fat — for the two life stages. Reference values
+// ONLY: not veterinary advice, and silent about the many vitamins/minerals/amino acids (taurine!)
+// a complete diet also needs. A diet clearing these two isn't thereby "complete."
+export const AAFCO_MIN = {
+  adult: { protein: 26, fat: 9 }, // adult maintenance
+  growth: { protein: 30, fat: 9 }, // growth & reproduction (kittens, gestation/lactation)
+};
+
+// Rate a blend's dry-matter protein/fat against the AAFCO minimum for a life stage. Each →
+// "ok" | "near" | "below" (null if that value is unknown). "near" = within 10% above the floor:
+// a nudge to double-check, not a failure. `stage` is coarse — anything but "adult" uses growth.
+export function aafcoCheck(dryMatter, stage = "adult") {
+  const key = stage === "adult" ? "adult" : "growth";
+  const min = AAFCO_MIN[key];
+  const rate = (val, floor) => {
+    if (!(num(val) > 0)) return null;
+    if (num(val) < floor) return "below";
+    if (num(val) < floor * 1.1) return "near";
+    return "ok";
+  };
+  return { stage: key, min, protein: rate(dryMatter?.protein, min.protein), fat: rate(dryMatter?.fat, min.fat) };
+}
+
 // One transition-table cell: how much of food `f` to feed on a day when this blend
 // covers `blendFrac` of the ration (old blend = 1 - toNew, new ration = toNew).
 // `listSum` is that blend's total pct (its rows may not sum to exactly 100). Returns

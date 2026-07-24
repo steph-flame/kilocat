@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Plus, Scale, Info, ChevronDown, ChevronRight, ChevronLeft, ArrowRight, Activity, NotebookPen } from "lucide-react";
 import { C } from "../theme.js";
 import { num, r0, r1 } from "../lib/util.js";
-import { transitionAmount, isCompleteFood } from "../lib/foods.js";
+import { transitionAmount, isCompleteFood, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { resolveTarget } from "../lib/targeting.js";
 import { toDisplayWeight, fromDisplayWeight, weightLabel } from "../lib/units.js";
 import { useApp } from "../state/AppState.jsx";
@@ -266,6 +266,7 @@ export default function RationPlanner() {
           {Math.abs(ration.sum - 100) >= 0.5 && (
             <p style={{ color: C.warn }} className="text-xs mt-2">This split adds up to {r1(ration.sum)}%, so it delivers ~{r0(target * ration.sum / 100)} of {r0(target)} kcal/day. Use → 100% to fill the target.</p>
           )}
+          <BlendNutrition rows={ration.items} stage={t.stage} />
           <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: C.sub }}>
             <span>Opened wet cans keep</span>
             <div style={{ borderColor: C.line }} className="inline-flex items-baseline border rounded-lg px-2 py-1 bg-white">
@@ -335,6 +336,55 @@ export default function RationPlanner() {
           <p>A planning aid, not veterinary advice. Re-weigh every 3–4 weeks and adjust — for a growing kitten, holding steady while gaining frame is a win.</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+// The planned blend's nutrition, computed from the ration foods' guaranteed analysis (see
+// rationMacroProfile): energy density + moisture, the caloric protein/fat/carb split, and the
+// dry-matter protein/fat gated against AAFCO minimums for the cat's life stage. Renders nothing
+// until at least one blend food carries enough GA to analyze. Colors match the Log summary
+// (protein=spruce, fat=amber, carb=neutral); the numbers carry the meaning, not the colors.
+const BLEND_MACRO = { protein: C.spruce, fat: C.amber, carb: C.sub };
+function aafcoMark(status) {
+  if (status === "ok") return { sym: "✓", color: C.ok, text: "" };
+  if (status === "near") return { sym: "⚠", color: C.warn, text: " near min" };
+  if (status === "below") return { sym: "⚠", color: C.warn, text: " below min" };
+  return { sym: "", color: C.faint, text: "" };
+}
+function MacroDot({ color }) { return <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: color }} />; }
+
+function BlendNutrition({ rows, stage }) {
+  const prof = rationMacroProfile(rows);
+  if (!prof) return null;
+  const aafco = aafcoCheck(prof.dryMatter, stage);
+  const dmP = aafcoMark(aafco.protein), dmF = aafcoMark(aafco.fat);
+  const c = prof.caloric;
+  return (
+    <div className="mt-4 pt-3 border-t" style={{ borderColor: C.line }}>
+      <div className="flex items-center justify-between text-xs mb-1.5 gap-2">
+        <span style={{ color: C.sub }} className="font-mono uppercase tracking-wide">Blend nutrition</span>
+        <span style={{ color: C.faint }} className="tabular-nums shrink-0">{r0(prof.kcalPerG * 1000)} kcal/kg · {r0(prof.moisture)}% moisture</span>
+      </div>
+      <div className="flex h-3 rounded-full overflow-hidden mb-1.5" style={{ background: C.line }}>
+        {c.protein > 0 && <div style={{ width: `${c.protein}%`, background: BLEND_MACRO.protein }} />}
+        {c.fat > 0 && <div style={{ width: `${c.fat}%`, background: BLEND_MACRO.fat }} />}
+        {c.carb > 0 && <div style={{ width: `${c.carb}%`, background: BLEND_MACRO.carb }} />}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs mb-2" style={{ color: C.sub }}>
+        <span className="tabular-nums"><MacroDot color={BLEND_MACRO.protein} />Protein {r0(c.protein)}%</span>
+        <span className="tabular-nums"><MacroDot color={BLEND_MACRO.fat} />Fat {r0(c.fat)}%</span>
+        <span className="tabular-nums"><MacroDot color={BLEND_MACRO.carb} />Carb {r0(c.carb)}%</span>
+        <span style={{ color: C.faint }}>of calories</span>
+      </div>
+      <div className="text-xs" style={{ color: C.sub }}>
+        Dry-matter: protein <b style={{ color: C.ink }}>{r0(prof.dryMatter.protein)}%</b> <span style={{ color: dmP.color }}>{dmP.sym}{dmP.text}</span> · fat <b style={{ color: C.ink }}>{r0(prof.dryMatter.fat)}%</b> <span style={{ color: dmF.color }}>{dmF.sym}{dmF.text}</span>
+        <span style={{ color: C.faint }}> · vs AAFCO {aafco.stage} min {aafco.min.protein}/{aafco.min.fat}%</span>
+      </div>
+      {prof.coverageKcalPct < 99 && (
+        <p style={{ color: C.faint }} className="text-xs mt-1.5">Based on {r0(prof.coverageKcalPct)}% of the blend's calories — add guaranteed-analysis to the rest (Saved foods, below) to complete it.</p>
+      )}
+      <p style={{ color: C.faint }} className="text-[11px] mt-1.5 leading-snug">Reference only — not veterinary advice. Clearing these two minimums doesn't make a diet complete; taurine, vitamins, and minerals aren't shown here.</p>
     </div>
   );
 }
