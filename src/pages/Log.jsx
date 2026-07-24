@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { ChevronLeft, ChevronRight, Scale, Activity, NotebookPen, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Scale, Activity, NotebookPen, Plus, X, PieChart } from "lucide-react";
 import { C } from "../theme.js";
 import { num, r0, r1 } from "../lib/util.js";
 import { kcalPerG, kcalFromGrams, isValidQty } from "../lib/foods.js";
+import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../lib/foodStats.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp } from "../lib/series.js";
 import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, dayStripWindow, formatDayLabel } from "../lib/dayPager.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
@@ -34,6 +35,10 @@ export default function Log() {
   const todayStr = today();
   const minDate = useMemo(() => earliestLoggedDay(weightLog.items, intakeLog.items, todayStr), [weightLog.items, intakeLog.items, todayStr]);
   const [viewedDate, setViewedDate] = useState(todayStr);
+  // Food is the tab the owner actually touches day to day (a connected Litter-Robot logs the
+  // weight for them), so it leads. Weight is one tap away. Both tabs share the day pager/strip
+  // above — paging a day keeps whichever tab you're on.
+  const [tab, setTab] = useState("food");
   // Re-clamp if the range shifts under the viewed day (data cleared, or a new day rolled over
   // while today's the viewed day) rather than leaving it pointing outside [minDate, todayStr].
   useEffect(() => { setViewedDate((d) => clampDay(d, minDate, todayStr)); }, [minDate, todayStr]);
@@ -115,11 +120,19 @@ export default function Log() {
         <DayPagerHeader date={viewedDate} todayStr={todayStr} onPrev={goPrev} onNext={goNext}
           canPrev={canGoPrev(viewedDate, minDate)} canNext={canGoNext(viewedDate, todayStr)} />
 
+        <LogTabs tab={tab} onTab={setTab} />
+
         <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-          <WeightLog log={weightLog} unit={unit} lastMethod={expSettings.lastMethod || DEFAULT_METHOD} onMethod={(m) => setExpSettings({ lastMethod: m })}
-            viewedDate={viewedDate} isToday={isToday} isDemo={isDemo} />
-          <IntakeLog log={intakeLog} library={library} dayStatus={intakeDayStatus} setDayFlag={setIntakeDayFlag} isDemo={isDemo}
-            viewedDate={viewedDate} isToday={isToday} />
+          {tab === "food" ? (
+            <>
+              <IntakeLog log={intakeLog} library={library} dayStatus={intakeDayStatus} setDayFlag={setIntakeDayFlag} isDemo={isDemo}
+                viewedDate={viewedDate} isToday={isToday} />
+              <FoodSummary items={intakeLog.items} library={library.foods} viewedDate={viewedDate} />
+            </>
+          ) : (
+            <WeightLog log={weightLog} unit={unit} lastMethod={expSettings.lastMethod || DEFAULT_METHOD} onMethod={(m) => setExpSettings({ lastMethod: m })}
+              viewedDate={viewedDate} isToday={isToday} isDemo={isDemo} />
+          )}
         </div>
       </div>
     </div>
@@ -193,6 +206,146 @@ function InlineQty({ value, suffix, onCommit }) {
       />
       <span style={{ color: C.faint }}>{suffix}</span>
     </span>
+  );
+}
+
+/* ---------- tabs ---------- */
+function LogTabs({ tab, onTab }) {
+  const tabs = [
+    { key: "food", label: "Food", Icon: NotebookPen },
+    { key: "weight", label: "Weight", Icon: Scale },
+  ];
+  return (
+    <div role="tablist" aria-label="Log type" className="flex gap-1 mb-4 p-1 rounded-xl" style={{ background: C.paper, border: `1px solid ${C.line}` }}>
+      {tabs.map(({ key, label, Icon }) => {
+        const active = tab === key;
+        return (
+          <button key={key} role="tab" aria-selected={active} onClick={() => onTab(key)}
+            style={{ background: active ? C.card : "transparent", color: active ? C.ink : C.sub, borderColor: active ? C.line : "transparent" }}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 text-sm font-medium py-2 rounded-lg border">
+            <Icon size={15} /> {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- food-source summary ---------- */
+// Wet/dry is conveyed by the legend TEXT (label + %), not color alone — the colored bars/dots
+// are supplemental, so this stays legible regardless of palette contrast.
+const WET_COLOR = C.spruce;
+const DRY_COLOR = C.amber;
+const UNK_COLOR = C.faint;
+const typeColor = (t) => (t === "wet" ? WET_COLOR : t === "dry" ? DRY_COLOR : UNK_COLOR);
+
+function Seg({ pct, color }) {
+  if (!(pct > 0)) return null;
+  return <div style={{ width: `${pct}%`, background: color }} />;
+}
+function Legend({ color, label, pct }) {
+  return (
+    <span className="inline-flex items-center gap-1 tabular-nums">
+      <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} /> {label} {r0(pct)}%
+    </span>
+  );
+}
+
+// Where the viewed day's (or trailing week's) calories and grams actually came from: the wet/dry
+// split and the per-food shares, computed from the intake log (see lib/foodStats.js). Read-only —
+// a lens on what's already logged, so it shows for the demo cat too.
+const MACRO_COLORS = { protein: C.spruce, fat: C.amber, carb: C.sub };
+
+function FoodSummary({ items, library, viewedDate }) {
+  const [range, setRange] = useState("day"); // "day" | "week"
+  const windowItems = useMemo(() => {
+    if (range === "day") return { list: items.filter((e) => e.date === viewedDate), days: 1 };
+    const { start, end } = trailingWindow(viewedDate, 7);
+    return { list: itemsInRange(items, start, end), days: 7 };
+  }, [items, viewedDate, range]);
+  const summary = useMemo(() => foodSummary(windowItems.list, library, windowItems.days), [windowItems, library]);
+  const macros = useMemo(() => macroBreakdown(windowItems.list, library, windowItems.days), [windowItems, library]);
+
+  const { totals, byType, byFood, wetPctKcal, dryPctKcal, wetPctGrams, dryPctGrams, perDay, isEmpty } = summary;
+  const unkPctKcal = totals.kcal > 0 ? r0((byType.unknown.kcal / totals.kcal) * 100) : 0;
+
+  return (
+    <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <h2 className="font-medium inline-flex items-center gap-1.5"><PieChart size={15} style={{ color: C.amber }} /> Where it came from</h2>
+        <div role="tablist" aria-label="Summary window" className="flex gap-1 text-xs font-mono shrink-0">
+          {[["day", "day"], ["week", "7-day avg"]].map(([key, label]) => (
+            <button key={key} role="tab" aria-selected={range === key} onClick={() => setRange(key)}
+              style={{ borderColor: range === key ? C.spruce : C.line, background: range === key ? C.spruceSoft : "transparent", color: range === key ? C.spruce : C.sub }}
+              className="border rounded-lg px-2 py-1">{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {isEmpty ? (
+        <p style={{ color: C.faint }} className="text-xs py-2">Nothing logged {range === "day" ? "this day" : "in the last 7 days"} to summarize.</p>
+      ) : (
+        <>
+          <div className="flex items-center justify-between text-xs mb-1 gap-2">
+            <span style={{ color: C.sub }} className="font-mono uppercase tracking-wide">Wet vs dry · calories</span>
+            <span style={{ color: C.faint }} className="tabular-nums shrink-0">{r0(totals.kcal)} kcal{range === "week" ? ` · ≈${r0(perDay.kcal)}/day` : ""}</span>
+          </div>
+          <div className="flex h-3 rounded-full overflow-hidden mb-1.5" style={{ background: C.line }}>
+            <Seg pct={wetPctKcal} color={WET_COLOR} />
+            <Seg pct={dryPctKcal} color={DRY_COLOR} />
+            <Seg pct={unkPctKcal} color={UNK_COLOR} />
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs mb-3" style={{ color: C.sub }}>
+            <Legend color={WET_COLOR} label="Wet" pct={wetPctKcal} />
+            <Legend color={DRY_COLOR} label="Dry" pct={dryPctKcal} />
+            {unkPctKcal > 0 && <Legend color={UNK_COLOR} label="Other" pct={unkPctKcal} />}
+            <span style={{ color: C.faint }} className="tabular-nums">by weight: {r0(wetPctGrams)}% wet · {r0(dryPctGrams)}% dry</span>
+          </div>
+
+          <div style={{ color: C.sub }} className="text-xs font-mono uppercase tracking-wide mb-1.5">By food · calories</div>
+          <div className="space-y-1.5">
+            {byFood.map((f) => (
+              <div key={f.name}>
+                <div className="flex items-center justify-between text-xs gap-2">
+                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                    <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: typeColor(f.type) }} />
+                    <span style={{ color: C.ink }} className="truncate" title={f.name}>{f.name}</span>
+                  </span>
+                  <span className="shrink-0 tabular-nums" style={{ color: C.sub }}>{r0(f.kcalPct)}%<span style={{ color: C.faint }}> · {r0(f.gramsPct)}% g</span></span>
+                </div>
+                <div className="flex h-1.5 rounded-full overflow-hidden mt-0.5" style={{ background: C.line }}>
+                  <Seg pct={f.kcalPct} color={typeColor(f.type)} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {macros.hasData && (
+            <div className="mt-4 pt-3 border-t" style={{ borderColor: C.line }}>
+              <div className="flex items-center justify-between text-xs mb-1 gap-2">
+                <span style={{ color: C.sub }} className="font-mono uppercase tracking-wide">Macros · calories</span>
+                <span style={{ color: C.faint }} className="tabular-nums shrink-0">{r0(macros.moisturePctByWeight)}% water by wt</span>
+              </div>
+              <div className="flex h-3 rounded-full overflow-hidden mb-1.5" style={{ background: C.line }}>
+                <Seg pct={macros.caloric.protein} color={MACRO_COLORS.protein} />
+                <Seg pct={macros.caloric.fat} color={MACRO_COLORS.fat} />
+                <Seg pct={macros.caloric.carb} color={MACRO_COLORS.carb} />
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs" style={{ color: C.sub }}>
+                <Legend color={MACRO_COLORS.protein} label="Protein" pct={macros.caloric.protein} />
+                <Legend color={MACRO_COLORS.fat} label="Fat" pct={macros.caloric.fat} />
+                <Legend color={MACRO_COLORS.carb} label="Carb" pct={macros.caloric.carb} />
+              </div>
+              {macros.coverageKcalPct < 99 && (
+                <p style={{ color: C.faint }} className="text-xs mt-1.5">
+                  Based on {r0(macros.coverageKcalPct)}% of logged calories — add guaranteed-analysis to more foods (Ration → Saved foods) to complete the picture.
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

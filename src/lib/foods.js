@@ -10,6 +10,47 @@ export const kcalPerG = (f) =>
   f.mode === "perKg" ? num(f.kcalPerKg) / 1000
     : (num(f.gramsPerUnit) > 0 ? num(f.kcalPerUnit) / num(f.gramsPerUnit) : 0);
 
+// Wet vs dry. The honest discriminator is moisture: wet food is ~75-82% water, dry kibble
+// ~6-10%, and nothing real sits near the 50% line, so once a food carries a moisture % we
+// trust it. Before macros are entered we fall back to the packaging shape — a food priced
+// per-unit is a can/pouch (wet); per-kg is kibble measured by the cup (dry). This is only a
+// heuristic (a per-kg raw/freeze-dried food could be moist), which is exactly why an explicit
+// moisture value overrides it. Returns "wet" | "dry".
+export const WET_MOISTURE_PCT = 50;
+export const foodType = (f) => {
+  const m = num(f?.moisture);
+  if (m > 0) return m >= WET_MOISTURE_PCT ? "wet" : "dry";
+  return f?.mode === "perUnit" ? "wet" : "dry";
+};
+
+// Modified-Atwater factors for pet food (kcal per gram of each macro) — lower than human Atwater
+// (4/9/4) to reflect pet-diet digestibility. The standard basis for turning a guaranteed analysis
+// into a caloric macro distribution.
+export const ATWATER = { protein: 3.5, fat: 8.5, carb: 3.5 };
+
+// Derived nutrition from a food's guaranteed analysis (all as-fed %). Returns null until at least
+// protein & fat are entered (nothing meaningful to say otherwise). carbs = NFE (nitrogen-free
+// extract) = 100 − protein − fat − fiber − moisture − ash, floored at 0. `caloric` is each macro's
+// share of metabolizable energy via ATWATER; `dryMatter` restates the percentages moisture-free,
+// the honest way to compare a wet food against a dry one.
+export function macroProfile(f) {
+  if (!f) return null;
+  const protein = num(f.protein), fat = num(f.fat);
+  if (!(protein > 0) || !(fat > 0)) return null;
+  const fiber = num(f.fiber), moisture = num(f.moisture), ash = num(f.ash);
+  const carb = Math.max(0, 100 - protein - fat - fiber - moisture - ash);
+  const kcalP = protein * ATWATER.protein, kcalF = fat * ATWATER.fat, kcalC = carb * ATWATER.carb;
+  const kcalTotal = kcalP + kcalF + kcalC;
+  const pct = (x) => (kcalTotal > 0 ? r1((x / kcalTotal) * 100) : 0);
+  const dm = 100 - moisture;
+  const asDM = (x) => (dm > 0 ? r1((x / dm) * 100) : 0);
+  return {
+    protein, fat, fiber, moisture, ash, carb: r1(carb),
+    caloric: { protein: pct(kcalP), fat: pct(kcalF), carb: pct(kcalC) },
+    dryMatter: { protein: asDM(protein), fat: asDM(fat), fiber: asDM(fiber), ash: asDM(ash), carb: asDM(carb) },
+  };
+}
+
 // Re-derive an intake-log entry's kcal from an edited grams value, using the SAME per-gram
 // density recorded on the entry at creation time (entry.kcalPerG — see Log.jsx's addEntry,
 // which stores it whenever a food was picked). Returns null when the entry can't support a
@@ -66,7 +107,7 @@ export function waterfall(rows, id, raw) {
   return out;
 }
 
-export const blankFood = () => ({ id: uid(), name: "", mode: "perKg", kcalPerKg: "", gramsPerCup: "", kcalPerUnit: "", gramsPerUnit: "", pct: 0 });
+export const blankFood = () => ({ id: uid(), name: "", mode: "perKg", kcalPerKg: "", gramsPerCup: "", kcalPerUnit: "", gramsPerUnit: "", protein: "", fat: "", fiber: "", moisture: "", ash: "", pct: 0 });
 
 // One transition-table cell: how much of food `f` to feed on a day when this blend
 // covers `blendFrac` of the ration (old blend = 1 - toNew, new ration = toNew).
@@ -136,10 +177,20 @@ export const BUILTIN_FOODS = [
   { name: "Fromm Adult Gold", mode: "perKg", kcalPerKg: 3820, gramsPerCup: 103 },
 ];
 
-// The macro fields that define a food, independent of any ration (%, id excluded). Exported
-// for lib/mergeData.js's order-independent library merge (mergeLibrary), which needs the same
-// field list to combine two replicas' conflicting copies of a same-identity food.
+// The ENERGY fields that define a food's caloric density, independent of any ration. Used as
+// the food's IDENTITY for canonicalFoodName's macro-match rename (nutrition is deliberately NOT
+// part of identity — two same-energy foods should still canonicalize even if only one has GA
+// data). Kept separate from NUTRITION_KEYS for exactly that reason.
 export const MACRO_KEYS = ["kcalPerKg", "gramsPerCup", "kcalPerUnit", "gramsPerUnit"];
+
+// Guaranteed-analysis nutrition, as-fed % (the standard cat-food label): crude protein/fat
+// (min), crude fiber (max), moisture (max), ash. Carbohydrate (NFE) and the caloric macro split
+// are DERIVED from these, not stored — see macroProfile. moisture also drives wet/dry (foodType).
+export const NUTRITION_KEYS = ["protein", "fat", "fiber", "moisture", "ash"];
+
+// Every numeric content field (energy + nutrition) — the full set that travels with a food
+// through copy/seed and the order-independent library merge (lib/mergeData.js's combineFoodEntry).
+export const FOOD_NUM_KEYS = [...MACRO_KEYS, ...NUTRITION_KEYS];
 
 // Fresh library, one editable entry per built-in. This is the seed for useFoodLibrary.
 export const makeLibrarySeed = () =>
@@ -147,7 +198,25 @@ export const makeLibrarySeed = () =>
 
 function macrosOf(f) {
   const out = {};
-  for (const k of MACRO_KEYS) out[k] = f[k] ?? "";
+  for (const k of FOOD_NUM_KEYS) out[k] = f[k] ?? "";
+  return out;
+}
+
+const isBlankNum = (v) => !(num(v) > 0);
+
+// Fill any blank energy/nutrition field on a food from the matching built-in (exact name, after
+// canonicalization), so a food saved before a built-in gained its macros picks them up on load —
+// WITHOUT ever overwriting a value the user actually entered. Non-built-in foods pass through.
+// This is what auto-fills existing users' libraries when BUILTIN_FOODS gains guaranteed-analysis
+// data; harmless (a no-op) for any field the built-in itself leaves blank.
+export function backfillBuiltinMacros(f) {
+  if (!f || f.name == null) return f;
+  const b = BUILTIN_FOODS.find((x) => keyOf(x.name) === keyOf(f.name));
+  if (!b) return f;
+  let out = f;
+  for (const k of FOOD_NUM_KEYS) {
+    if (isBlankNum(out[k]) && !isBlankNum(b[k])) out = { ...out, [k]: b[k] };
+  }
   return out;
 }
 

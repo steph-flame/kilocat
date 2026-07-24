@@ -22,3 +22,6 @@ pnpm-debug.log*
 
 # local demo seed (not committed)
 public/seed.html
+
+# Local data exports (may contain credentials) — never commit
+cat-data-*.json

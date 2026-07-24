@@ -74,7 +74,7 @@
 //  - activeCatId: kept LOCAL.
 
 import { num } from "./util.js";
-import { stripKind, MACRO_KEYS } from "./foods.js";
+import { stripKind, FOOD_NUM_KEYS } from "./foods.js";
 
 /* ---------- tombstones ---------- */
 
@@ -292,15 +292,16 @@ const isBlankNum = (v) => !num(v);
 const isBlankStr = (v) => !String(v ?? "").trim();
 
 // Combine two same-identity food entries (see mergeLibrary). id/name/mode use the string-blank
-// rule; the four macro fields use the numeric-blank rule (matching dedupeFoods' own "!num(v)"
-// notion of blank) — same combineField join either way, so every field (including id) resolves
-// the same deterministic way regardless of merge order.
+// rule; the numeric content fields (energy + nutrition — see foods.js's FOOD_NUM_KEYS) use the
+// numeric-blank rule (matching dedupeFoods' own "!num(v)" notion of blank) — same combineField
+// join either way, so every field (including id) resolves the same deterministic way regardless
+// of merge order.
 function combineFoodEntry(a, b) {
   const id = combineField(a.id, b.id, isBlankStr);
   const name = combineField(stripKind(a.name), stripKind(b.name), isBlankStr);
   const mode = combineField(a.mode, b.mode, isBlankStr);
   const out = { id, name, mode };
-  for (const k of MACRO_KEYS) out[k] = combineField(a[k], b[k], isBlankNum);
+  for (const k of FOOD_NUM_KEYS) out[k] = combineField(a[k], b[k], isBlankNum);
   return out;
 }
 

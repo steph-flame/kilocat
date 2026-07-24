@@ -4,7 +4,7 @@ import { applySkin, DEFAULT_SKIN, SKINS } from "../theme.js";
 import { computeTargets, bcsToPct, pctToBcs, ageMonthsFromDob, effectiveAgeMonths } from "../lib/nutrition.js";
 import {
   makeLibrarySeed, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName,
-  migrateLegacyFood, ensureBuiltins, sumPct, blankFood, normalizePct, waterfall,
+  migrateLegacyFood, ensureBuiltins, backfillBuiltinMacros, sumPct, blankFood, normalizePct, waterfall,
 } from "../lib/foods.js";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "../lib/series.js";
@@ -25,7 +25,7 @@ import {
 // Clean up legacy food data: strip "(dry)"/"(wet)", snap macro-identical near-dupes to their
 // canonical built-in name, and retire the generic Tiki. Pure — used on load and on import.
 const cleanName = (f) => (f.name == null ? f : { ...f, name: stripKind(f.name) });
-const cleanFood = (f) => { const s = cleanName(f); return s.name == null ? s : migrateLegacyFood({ ...s, name: canonicalFoodName(s) }); };
+const cleanFood = (f) => { const s = cleanName(f); return s.name == null ? s : backfillBuiltinMacros(migrateLegacyFood({ ...s, name: canonicalFoodName(s) })); };
 
 // A freshly-installed app has NO real cats at all — just Biscuit, the virtual demo cat (see
 // lib/demoCat.js), active by default. Biscuit is never a key in `cats`; it's generated on the

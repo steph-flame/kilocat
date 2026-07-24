@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   distribute, waterfall, transitionAmount, kcalPerG, kcalFromGrams, isValidQty,
   upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed, dedupeFoods, canonicalFoodName,
-  migrateLegacyFood, ensureBuiltins,
+  migrateLegacyFood, ensureBuiltins, macroProfile, backfillBuiltinMacros, blankFood, BUILTIN_FOODS, FOOD_NUM_KEYS,
 } from "./foods.js";
 
 const sum = (a) => a.reduce((s, x) => s + x, 0);
@@ -199,6 +199,54 @@ describe("isCompleteFood gates auto-save", () => {
   });
   it("toLibraryEntry drops the ration-only fields (id, pct) and trims the name", () => {
     const e = toLibraryEntry({ id: "z", name: "A ", mode: "perKg", kcalPerKg: 1, gramsPerCup: 2, kcalPerUnit: "", gramsPerUnit: "", pct: 50 });
-    expect(e).toEqual({ name: "A", mode: "perKg", kcalPerKg: 1, gramsPerCup: 2, kcalPerUnit: "", gramsPerUnit: "" });
+    expect(e).toEqual({ name: "A", mode: "perKg", kcalPerKg: 1, gramsPerCup: 2, kcalPerUnit: "", gramsPerUnit: "", protein: "", fat: "", fiber: "", moisture: "", ash: "" });
+  });
+});
+
+describe("macroProfile (derived nutrition from guaranteed analysis)", () => {
+  it("returns null until at least protein and fat are entered", () => {
+    expect(macroProfile({})).toBe(null);
+    expect(macroProfile({ protein: 40 })).toBe(null);
+    expect(macroProfile({ fat: 20 })).toBe(null);
+  });
+  it("computes carbs as NFE and the caloric split via modified Atwater", () => {
+    // A typical premium kibble GA: 40 protein, 20 fat, 3 fiber, 8 moisture, 8 ash.
+    const p = macroProfile({ protein: 40, fat: 20, fiber: 3, moisture: 8, ash: 8 });
+    expect(p.carb).toBe(21); // 100 - 40 - 20 - 3 - 8 - 8
+    // kcal: protein 40*3.5=140, fat 20*8.5=170, carb 21*3.5=73.5; total 383.5
+    expect(p.caloric.protein).toBe(36.5); // 140/383.5
+    expect(p.caloric.fat).toBe(44.3); // 170/383.5
+    expect(p.caloric.carb).toBe(19.2); // 73.5/383.5
+    expect(p.caloric.protein + p.caloric.fat + p.caloric.carb).toBeCloseTo(100, 0);
+  });
+  it("floors carbs at zero when the GA over-sums", () => {
+    expect(macroProfile({ protein: 60, fat: 30, fiber: 5, moisture: 8, ash: 5 }).carb).toBe(0);
+  });
+  it("restates percentages on a dry-matter (moisture-free) basis", () => {
+    // A wet food: 11 protein, 5 fat as-fed, 78 moisture -> dry matter is 22%.
+    const p = macroProfile({ protein: 11, fat: 5, moisture: 78 });
+    expect(p.dryMatter.protein).toBe(50); // 11 / (100-78)
+    expect(p.dryMatter.fat).toBeCloseTo(22.7, 1);
+  });
+});
+
+describe("backfillBuiltinMacros", () => {
+  it("fills only blank fields on a food matching a built-in by name, never overwriting", () => {
+    const b = BUILTIN_FOODS[0];
+    const stale = { id: "x", name: b.name, mode: b.mode, kcalPerKg: "", gramsPerCup: "", kcalPerUnit: "", gramsPerUnit: "", protein: 99 };
+    const filled = backfillBuiltinMacros(stale);
+    // an energy field the built-in defines gets filled...
+    for (const k of FOOD_NUM_KEYS) {
+      const bv = b[k];
+      if (bv != null && bv !== "" && Number(bv) > 0 && k !== "protein") {
+        expect(Number(filled[k])).toBe(Number(bv));
+      }
+    }
+    // ...but a value the user already set is untouched
+    expect(filled.protein).toBe(99);
+  });
+  it("passes non-built-in foods through untouched", () => {
+    const f = { ...blankFood(), name: "Homemade Mystery Stew", kcalPerUnit: 50, gramsPerUnit: 60 };
+    expect(backfillBuiltinMacros(f)).toEqual(f);
   });
 });
