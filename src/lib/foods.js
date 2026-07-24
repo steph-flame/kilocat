@@ -139,42 +139,53 @@ export const makeStartSeed = () => [{ ...blankFood(), name: "Fromm Kitten Gold",
 // kcal/can are the official tikipets.com values (2026); the pâté and mousse lines share
 // flavor names but run higher, and are intentionally excluded. Cans: 2.8 oz ≈ 79 g,
 // 5.5 oz ≈ 156 g (oz→g; Tiki labels by ounce).
+// Guaranteed analysis (as-fed %) per recipe from tikipets.com (2026) — identical across the two
+// can sizes. Ash isn't stated on Tiki's label, so it's left blank (folds into NFE). The lamb/pork
+// recipes genuinely differ (higher protein, lower fiber) — verified on the manufacturer pages.
 const TIKI_AFTER_DARK = [
-  // flavor, 2.8 oz kcal, 5.5 oz kcal
-  ["Chicken", 66, 128],
-  ["Chicken & Quail Egg", 66, 129],
-  ["Chicken & Beef", 59, 116],
-  ["Chicken & Duck", 59, 114],
-  ["Chicken & Lamb", 61, 120],
-  ["Chicken & Pork", 59, 116],
+  // flavor, 2.8 oz kcal, 5.5 oz kcal, { protein, fat, fiber, moisture }
+  ["Chicken", 66, 128, { protein: 11, fat: 2, fiber: 2, moisture: 83 }],
+  ["Chicken & Quail Egg", 66, 129, { protein: 11, fat: 2, fiber: 2, moisture: 83 }],
+  ["Chicken & Beef", 59, 116, { protein: 11, fat: 2, fiber: 2, moisture: 83 }],
+  ["Chicken & Duck", 59, 114, { protein: 11, fat: 2, fiber: 2, moisture: 83 }],
+  ["Chicken & Lamb", 61, 120, { protein: 13, fat: 2.3, fiber: 0.6, moisture: 82 }],
+  ["Chicken & Pork", 59, 116, { protein: 13, fat: 2, fiber: 0.6, moisture: 81 }],
 ];
-const tikiAfterDark = TIKI_AFTER_DARK.flatMap(([flavor, k28, k55]) => [
-  { name: `Tiki Cat After Dark ${flavor} — 2.8 oz can`, mode: "perUnit", kcalPerUnit: k28, gramsPerUnit: 79 },
-  { name: `Tiki Cat After Dark ${flavor} — 5.5 oz can`, mode: "perUnit", kcalPerUnit: k55, gramsPerUnit: 156 },
+const tikiAfterDark = TIKI_AFTER_DARK.flatMap(([flavor, k28, k55, ga]) => [
+  { name: `Tiki Cat After Dark ${flavor} — 2.8 oz can`, mode: "perUnit", kcalPerUnit: k28, gramsPerUnit: 79, ...ga },
+  { name: `Tiki Cat After Dark ${flavor} — 5.5 oz can`, mode: "perUnit", kcalPerUnit: k55, gramsPerUnit: 156, ...ga },
 ]);
 
-// Weruva "Pumpkin Patch Up!" pouches (a pumpkin-purée supplement/topper). kcal per pouch
-// from weruva.com (2026); pouches are 1.05 oz ≈ 30 g and 2.8 oz ≈ 79 g.
+// Weruva "Pumpkin Patch Up!" pouches (a pumpkin-purée supplement/topper). kcal per pouch and
+// guaranteed analysis (as-fed %) from weruva.com (2026); pouches are 1.05 oz ≈ 30 g and 2.8 oz
+// ≈ 79 g. Barely any protein/fat — these are almost all water + fiber (pumpkin), which the macro
+// split reflects. Ash not stated on label.
 const WERUVA_PUMPKIN = [
-  // flavor, 1.05 oz kcal, 2.8 oz kcal
-  ["Puréed Pumpkin", 5, 15],
-  ["with Ginger & Turmeric", 4, 12],
-  ["with Coconut Oil & Flaxseeds", 16, 43],
+  // flavor, 1.05 oz kcal, 2.8 oz kcal, { protein, fat, fiber, moisture }
+  ["Puréed Pumpkin", 5, 15, { protein: 0.5, fat: 0.05, fiber: 3.5, moisture: 93 }],
+  ["with Ginger & Turmeric", 4, 12, { protein: 0.5, fat: 0.05, fiber: 2.5, moisture: 95 }],
+  ["with Coconut Oil & Flaxseeds", 16, 43, { protein: 0.5, fat: 0.5, fiber: 3, moisture: 94 }],
 ];
-const weruvaPumpkin = WERUVA_PUMPKIN.flatMap(([flavor, k105, k28]) => [
-  { name: `Weruva Pumpkin Patch Up! ${flavor} — 1.05 oz pouch`, mode: "perUnit", kcalPerUnit: k105, gramsPerUnit: 30 },
-  { name: `Weruva Pumpkin Patch Up! ${flavor} — 2.8 oz pouch`, mode: "perUnit", kcalPerUnit: k28, gramsPerUnit: 79 },
+const weruvaPumpkin = WERUVA_PUMPKIN.flatMap(([flavor, k105, k28, ga]) => [
+  { name: `Weruva Pumpkin Patch Up! ${flavor} — 1.05 oz pouch`, mode: "perUnit", kcalPerUnit: k105, gramsPerUnit: 30, ...ga },
+  { name: `Weruva Pumpkin Patch Up! ${flavor} — 2.8 oz pouch`, mode: "perUnit", kcalPerUnit: k28, gramsPerUnit: 79, ...ga },
 ]);
 
+// Dry foods — guaranteed analysis (as-fed %) from each manufacturer's own site (2026): Instinct,
+// Orijen (orijenpetfoods.com), Fromm (frommfamily.com), Farmina N&D. Where a brand doesn't print
+// ash on the label it's left blank (it then folds into the derived NFE/carb figure, the standard
+// caveat). N&D Prime is included because it's a common premium food and lets an owner who feeds
+// it pick up its macros automatically (see backfillBuiltinMacros).
 export const BUILTIN_FOODS = [
   ...tikiAfterDark,
   ...weruvaPumpkin,
-  { name: "Instinct Ultimate Protein Chicken", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110 },
-  { name: "Orijen Original Cat", mode: "perKg", kcalPerKg: 4150, gramsPerCup: 124 },
-  { name: "Orijen Fit & Trim", mode: "perKg", kcalPerKg: 3700, gramsPerCup: 120 },
-  { name: "Orijen Guardian 8", mode: "perKg", kcalPerKg: 3980, gramsPerCup: 127 },
-  { name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941, gramsPerCup: 111 },
-  { name: "Fromm Adult Gold", mode: "perKg", kcalPerKg: 3820, gramsPerCup: 103 },
+  { name: "Instinct Ultimate Protein Chicken", mode: "perKg", kcalPerKg: 4470, gramsPerCup: 110, protein: 47, fat: 17, fiber: 3, moisture: 10 },
+  { name: "Orijen Original Cat", mode: "perKg", kcalPerKg: 4150, gramsPerCup: 124, protein: 40, fat: 20, fiber: 3, moisture: 10, ash: 8 },
+  { name: "Orijen Fit & Trim", mode: "perKg", kcalPerKg: 3700, gramsPerCup: 120, protein: 42, fat: 14, fiber: 6, moisture: 10 },
+  { name: "Orijen Guardian 8", mode: "perKg", kcalPerKg: 3980, gramsPerCup: 127, protein: 40, fat: 18, fiber: 4, moisture: 10 },
+  { name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941, gramsPerCup: 111, protein: 34, fat: 20, fiber: 3.5, moisture: 10 },
+  { name: "Fromm Adult Gold", mode: "perKg", kcalPerKg: 3820, gramsPerCup: 103, protein: 32, fat: 18, fiber: 4.5, moisture: 10 },
+  { name: "N&D Prime Chicken & Pomegranate - Adult", mode: "perKg", kcalPerKg: 4396, gramsPerCup: 98, protein: 36, fat: 18, fiber: 2.9, moisture: 8, ash: 7.8 },
 ];
 
 // The ENERGY fields that define a food's caloric density, independent of any ration. Used as
