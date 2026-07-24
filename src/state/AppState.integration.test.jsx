@@ -169,6 +169,65 @@ describe("AppState integration: real mutations through the hook, exported/import
     expect(a.apiRef.current.activeCatId).toBe(localActive); // unchanged by the import
   });
 
+  it("importing onto a fresh install (still on Biscuit the demo) auto-switches to the imported cat", async () => {
+    const a = await renderApp();
+    act(() => a.apiRef.current.addCat());
+    act(() => a.apiRef.current.updateCatProfile(a.apiRef.current.activeCatId, { name: "Mithril" }));
+    const exportedFromA = a.apiRef.current.exportData();
+    a.unmount();
+    cleanup();
+    clearStorage();
+
+    const b = await renderApp();
+    // fresh install starts on the demo cat
+    const activeBefore = b.apiRef.current.catsSummary.find((c) => c.id === b.apiRef.current.activeCatId);
+    expect(activeBefore.demo).toBe(true);
+
+    act(() => b.apiRef.current.importData(JSON.parse(exportedFromA)));
+    const activeAfter = b.apiRef.current.catsSummary.find((c) => c.id === b.apiRef.current.activeCatId);
+    expect(activeAfter.demo).toBeFalsy();
+    expect(activeAfter.name).toBe("Mithril");
+  });
+
+  it("importing multiple cats onto a fresh install switches to the alphabetically-first by name", async () => {
+    const a = await renderApp();
+    act(() => a.apiRef.current.addCat());
+    act(() => a.apiRef.current.updateCatProfile(a.apiRef.current.activeCatId, { name: "Zoe" }));
+    act(() => a.apiRef.current.addCat());
+    act(() => a.apiRef.current.updateCatProfile(a.apiRef.current.activeCatId, { name: "Anna" }));
+    const exportedFromA = a.apiRef.current.exportData();
+    a.unmount();
+    cleanup();
+    clearStorage();
+
+    const b = await renderApp();
+    act(() => b.apiRef.current.importData(JSON.parse(exportedFromA)));
+    const active = b.apiRef.current.catsSummary.find((c) => c.id === b.apiRef.current.activeCatId);
+    expect(active.name).toBe("Anna");
+  });
+
+  it("a legacy export (customized skin/unit, settingsModAt 0) carries those over import to a fresh install", async () => {
+    const a = await renderApp();
+    act(() => a.apiRef.current.addCat());
+    act(() => a.apiRef.current.updateCatProfile(a.apiRef.current.activeCatId, { name: "Mithril" }));
+    const blob = JSON.parse(a.apiRef.current.exportData());
+    // Simulate pre-timestamp legacy data: genuine customizations, but the 0 stamp of that era.
+    blob.skin = "tidepool";
+    blob.unit = "lb";
+    blob.settingsModAt = 0;
+    a.unmount();
+    cleanup();
+    clearStorage();
+
+    const b = await renderApp();
+    expect(b.apiRef.current.skin).toBe("original"); // fresh install defaults
+    expect(b.apiRef.current.unit).toBe("kg");
+
+    act(() => b.apiRef.current.importData(blob));
+    expect(b.apiRef.current.skin).toBe("tidepool"); // legacy customization won over the default
+    expect(b.apiRef.current.unit).toBe("lb");
+  });
+
   it("re-importing one's own just-taken export is a no-op (idempotent through the real seam)", async () => {
     const { apiRef } = await renderApp();
     act(() => apiRef.current.addCat());

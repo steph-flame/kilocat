@@ -35,6 +35,26 @@ const cleanFood = (f) => { const s = cleanName(f); return s.name == null ? s : m
 // piece of state since deleteCat mutates both together (see lib/catStore.js's deleteCat).
 const makeInitialCatsState = () => ({ activeCatId: DEMO_CAT_ID, cats: {}, deletedCats: {} });
 
+// Legacy self-heal for the shared settings bundle (skin/unit/estimator/fridgeDays), which merges
+// last-writer-wins by `settingsModAt`. Settings picked BEFORE settingsModAt existed carry a 0
+// timestamp — indistinguishable, to the merge, from a never-configured fresh install (also 0).
+// On a tie the merge keeps local, so a real customization at 0 loses to a pristine default at 0:
+// exactly the "my colour scheme / weight units didn't carry over on import" bug. Fix at the root:
+// any blob whose settings differ from the defaults but whose settingsModAt is 0/missing is stamped
+// at 1 — older than any genuine timestamped edit (so a later real change still wins), but newer
+// than a pristine 0 (so a customized legacy blob beats fresh defaults). Idempotent; leaves an
+// already-stamped bundle and a genuinely-default bundle untouched.
+const LEGACY_SETTINGS_STAMP = 1;
+const settingsAreDefault = (b) =>
+  (b.skin == null || b.skin === DEFAULT_SKIN) &&
+  (b.unit == null || b.unit === "kg") &&
+  (b.estimator == null || b.estimator === "v3") &&
+  (b.fridgeDays == null || b.fridgeDays === 3);
+const backfillSettingsModAt = (blob) => {
+  if (!blob || typeof blob !== "object" || blob.settingsModAt || settingsAreDefault(blob)) return blob;
+  return { ...blob, settingsModAt: LEGACY_SETTINGS_STAMP };
+};
+
 // Fill in a per-cat record from (possibly partial/imported) data, defaulting anything
 // missing and running the food cleanup on every food-shaped field. stateModAt/deletedEntries
 // default to 0/{} — a cat with no stamp is treated as the oldest possible edit (see
@@ -167,7 +187,7 @@ export function AppProvider({ children }) {
     if (resolved) setUnitState(resolved);
     const resolvedEstimator = resolveEstimator(d.estimator, activeCatId && cats[activeCatId]?.expSettings?.algo);
     if (resolvedEstimator) setEstimatorState(resolvedEstimator);
-    setSettingsModAt(typeof d.settingsModAt === "number" ? d.settingsModAt : 0);
+    setSettingsModAt(backfillSettingsModAt(d).settingsModAt || 0);
     if (d.litterRobot !== undefined) setLitterRobotState(migrateConnection(d.litterRobot));
   };
 
@@ -203,7 +223,24 @@ export function AppProvider({ children }) {
       const hasCat = Object.keys(migrated.cats[migrated.activeCatId] || {}).length > 0;
       incoming = hasCat ? migrated : { ...migrated, cats: {} };
     }
-    hydrate(mergeV2(persistData, incoming));
+    // Heal a pre-timestamp legacy file (non-default skin/unit but settingsModAt 0) BEFORE the
+    // merge, or its real settings would tie a fresh install's defaults and lose. See
+    // backfillSettingsModAt. persistData (local) is already healed on load via hydrate.
+    const merged = mergeV2(persistData, backfillSettingsModAt(incoming));
+    // If the user is still on Biscuit the demo (the default for a fresh install — mergeV2 keeps
+    // activeCatId LOCAL, so it's DEMO_CAT_ID here), don't leave them staring at the demo after
+    // an import that just brought in real cats. Switch to the alphabetically-first imported cat
+    // (by name, id as a stable tiebreak). Only fires when local was on the demo — an import
+    // never yanks the active selection away from a real cat the user already picked.
+    if (merged.activeCatId === DEMO_CAT_ID) {
+      const visible = visibleCats(merged);
+      const nameOf = (id) => (visible[id].profile?.name || "").trim().toLowerCase();
+      const firstByName = Object.keys(visible).sort(
+        (a, b) => nameOf(a).localeCompare(nameOf(b)) || a.localeCompare(b)
+      )[0];
+      if (firstByName) merged.activeCatId = firstByName;
+    }
+    hydrate(merged);
   };
 
   // Foods enter the library only on an explicit save click (see saveFood) — never
