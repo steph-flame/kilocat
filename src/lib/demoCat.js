@@ -11,7 +11,7 @@
 // start, weightLog, intakeLog, tr, expSettings }. AppState treats it as a read-only stand-in
 // for a real cat: every mutation seam no-ops while it's active (see updateActiveCat).
 
-import { blankFood } from "./foods.js";
+import { blankFood, kcalPerG } from "./foods.js";
 import { WEIGH_SOURCES } from "./expenditure.js";
 import { freshProfile, defaultTr, defaultExpSettings, DEMO_CAT_ID as DEMO_ID } from "./catStore.js";
 
@@ -100,8 +100,12 @@ function buildWeightLog(rand, startDate, nextId) {
 }
 
 // ~215 ± 12 kcal/day, split across two meals — enough, and dense enough (no missing days),
-// for the v3 expenditure estimator to fully converge over the 56-day window.
-function buildIntakeLog(rand, startDate, foodNames, nextId) {
+// for the v3 expenditure estimator to fully converge over the 56-day window. Each meal records
+// grams too (derived from the food's own energy density, kcalPerG), so the Log summary's
+// by-weight and macro breakdowns have real mass to work with on the demo cat — a dry kibble
+// meal is far fewer grams than a wet meal of the same calories, which is exactly the point.
+function buildIntakeLog(rand, startDate, foods, nextId) {
+  const gramsFor = (food, kcal) => { const d = kcalPerG(food); return d > 0 ? Math.round(kcal / d) : null; };
   const entries = [];
   for (let day = 0; day < HISTORY_DAYS; day++) {
     const date = addDaysISO(startDate, day);
@@ -109,8 +113,8 @@ function buildIntakeLog(rand, startDate, foodNames, nextId) {
     const split = 0.42 + rand() * 0.16; // ~42-58% at the morning meal
     const morning = Math.round(total * split);
     const evening = total - morning;
-    entries.push({ id: nextId(), date, kcal: morning, name: foodNames.dry, grams: null });
-    entries.push({ id: nextId(), date, kcal: evening, name: foodNames.wet, grams: null });
+    entries.push({ id: nextId(), date, kcal: morning, name: foods.dry.name, grams: gramsFor(foods.dry, morning), kcalPerG: kcalPerG(foods.dry) });
+    entries.push({ id: nextId(), date, kcal: evening, name: foods.wet.name, grams: gramsFor(foods.wet, evening), kcalPerG: kcalPerG(foods.wet) });
   }
   return entries;
 }
@@ -120,7 +124,7 @@ function buildIntakeLog(rand, startDate, foodNames, nextId) {
 function buildRation(nextId) {
   const dry = { ...blankFood(), id: nextId(), name: "Orijen Fit & Trim", mode: "perKg", kcalPerKg: 3700, gramsPerCup: 120, pct: 65 };
   const wet = { ...blankFood(), id: nextId(), name: "Tiki Cat After Dark Chicken & Quail Egg — 2.8 oz can", mode: "perUnit", kcalPerUnit: 66, gramsPerUnit: 79, pct: 35 };
-  return { ration: [dry, wet], names: { dry: dry.name, wet: wet.name } };
+  return { ration: [dry, wet], foods: { dry, wet } };
 }
 
 export function buildDemoCat(today) {
@@ -128,14 +132,14 @@ export function buildDemoCat(today) {
   let n = 0;
   const nextId = () => `demo-${n++}`; // deterministic, not uid()'s Math.random
   const startDate = addDaysISO(today, -(HISTORY_DAYS - 1));
-  const { ration, names } = buildRation(nextId);
+  const { ration, foods } = buildRation(nextId);
 
   return {
     profile: buildProfile(today),
     ration,
     start: ration.map((f) => ({ ...f, id: nextId() })),
     weightLog: buildWeightLog(rand, startDate, nextId),
-    intakeLog: buildIntakeLog(rand, startDate, names, nextId),
+    intakeLog: buildIntakeLog(rand, startDate, foods, nextId),
     intakeDayStatus: {}, // Biscuit's log is always complete — never flagged, never mutated
     tr: defaultTr(),
     expSettings: defaultExpSettings(),

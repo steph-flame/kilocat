@@ -34,9 +34,15 @@ import { formatDayLabel, STRIP_RANGES, DEFAULT_STRIP_RANGE, stripRangeWindow, st
 const WEIGHT_ROW_H = 30; // top mini-row: weight dot-line, its own implicit scale
 const ROW_GAP = 6; // faint divider sits centered in this gap
 const INTAKE_ROW_H = 40; // bottom mini-row: intake bars, its own implicit scale
-const STRIP_H = WEIGHT_ROW_H + ROW_GAP + INTAKE_ROW_H;
 
-export default function DayStrip({ days, data = {}, selected, onSelect, unit = "kg" }) {
+// `mode` selects which series the strip draws: "intake" (Food tab) or "weight" (Weight tab)
+// each show a single row on their own scale; "both" keeps the original stacked two-row strip.
+export default function DayStrip({ days, data = {}, selected, onSelect, unit = "kg", mode = "both" }) {
+  const showWeight = mode !== "intake";
+  const showIntake = mode !== "weight";
+  const weightH = showWeight ? WEIGHT_ROW_H : 0;
+  const rowGap = showWeight && showIntake ? ROW_GAP : 0;
+  const STRIP_H = weightH + rowGap + (showIntake ? INTAKE_ROW_H : 0);
   const [range, setRange] = useState(DEFAULT_STRIP_RANGE); // session-only zoom level, not persisted
   const [hoverDay, setHoverDay] = useState(null);
   const [showHint, setShowHint] = useState(true);
@@ -64,7 +70,7 @@ export default function DayStrip({ days, data = {}, selected, onSelect, unit = "
 
   // Intake row geometry (bottom): bars grow up from the row's own floor.
   const iPadTop = 4, iPadBottom = 3;
-  const intakeTop = WEIGHT_ROW_H + ROW_GAP;
+  const intakeTop = weightH + rowGap;
   const barAreaH = INTAKE_ROW_H - iPadTop - iPadBottom;
   const kcalVals = days.map((d) => data[d]?.kcal).filter((v) => v != null && v > 0);
   const kcalHi = kcalVals.length ? Math.max(...kcalVals) : 0;
@@ -75,7 +81,7 @@ export default function DayStrip({ days, data = {}, selected, onSelect, unit = "
   const wVals = days.map((d) => data[d]?.weightKg).filter((v) => v != null);
   const [wLoRaw, wHiRaw] = wVals.length ? extent(wVals) : [0, 1];
   const wPad = (wHiRaw - wLoRaw) * 0.25 || 0.1;
-  const wY = linScale([wLoRaw - wPad, wHiRaw + wPad], [WEIGHT_ROW_H - wPadBottom, wPadTop]);
+  const wY = linScale([wLoRaw - wPad, wHiRaw + wPad], [weightH - wPadBottom, wPadTop]);
 
   const linePts = days
     .map((d, i) => (data[d]?.weightKg != null ? `${xAt(i).toFixed(1)},${wY(data[d].weightKg).toFixed(1)}` : null))
@@ -132,13 +138,17 @@ export default function DayStrip({ days, data = {}, selected, onSelect, unit = "
       {/* One legend line per mini-row, in the same top-to-bottom order as the rows themselves
           (weight row above intake row below) — each chip reads as "above" its own row even
           though both sit outside the scroller (so they stay visible while the strip scrolls). */}
-      <div className="mt-1 text-xs" style={{ color: C.sub }}>
-        <StripChip shape="line" color={CHART.weight} label={`weight · ${weightLabel(unit)}`} />
-      </div>
-      <div className="flex items-center justify-between flex-wrap gap-x-3 gap-y-1 mt-0.5">
-        <StripChip shape="bar" color={CHART.intake} label="intake · kcal" />
-        {peakKcal > 0 && <span style={{ color: C.faint }} className="text-xs font-mono">peak {r0(peakKcal)} kcal</span>}
-      </div>
+      {showWeight && (
+        <div className="mt-1 text-xs" style={{ color: C.sub }}>
+          <StripChip shape="line" color={CHART.weight} label={`weight · ${weightLabel(unit)}`} />
+        </div>
+      )}
+      {showIntake && (
+        <div className="flex items-center justify-between flex-wrap gap-x-3 gap-y-1 mt-0.5">
+          <StripChip shape="bar" color={CHART.intake} label="intake · kcal" />
+          {peakKcal > 0 && <span style={{ color: C.faint }} className="text-xs font-mono">peak {r0(peakKcal)} kcal</span>}
+        </div>
+      )}
 
       <div
         ref={scrollerRef}
@@ -155,9 +165,11 @@ export default function DayStrip({ days, data = {}, selected, onSelect, unit = "
             {days.map((d, i) => d === hoverDay && d !== selected && (
               <rect key={`hov-${d}`} x={i * colW + 1} y={0} width={Math.max(colW - 2, 0)} height={STRIP_H} rx={5} fill={C.spruceSoft} opacity="0.5" />
             ))}
-            {/* faint divider between the two rows — the "split cleanly" seam */}
-            <line x1={0} y1={WEIGHT_ROW_H + ROW_GAP / 2} x2={totalW} y2={WEIGHT_ROW_H + ROW_GAP / 2} stroke={C.line} strokeWidth="1" />
-            {days.map((d, i) => {
+            {/* faint divider between the two rows — the "split cleanly" seam (only when both show) */}
+            {showWeight && showIntake && (
+              <line x1={0} y1={weightH + rowGap / 2} x2={totalW} y2={weightH + rowGap / 2} stroke={C.line} strokeWidth="1" />
+            )}
+            {showIntake && days.map((d, i) => {
               const kcal = data[d]?.kcal;
               if (kcal == null || kcal <= 0) return null;
               const h = Math.max(barH(kcal), 1.5);
@@ -167,8 +179,8 @@ export default function DayStrip({ days, data = {}, selected, onSelect, unit = "
                 ? <rect key={d} x={xAt(i) - barW / 2} y={y} width={barW} height={h} fill="none" stroke={CHART.intake} strokeWidth="1" rx="1" />
                 : <rect key={d} x={xAt(i) - barW / 2} y={y} width={barW} height={h} fill={CHART.intake} rx="1" />;
             })}
-            {wVals.length > 1 && <polyline points={linePts} fill="none" stroke={CHART.weight} strokeWidth="1" strokeDasharray="1.5 2" opacity="0.75" />}
-            {wVals.length > 0 && days.map((d, i) => data[d]?.weightKg != null && (
+            {showWeight && wVals.length > 1 && <polyline points={linePts} fill="none" stroke={CHART.weight} strokeWidth="1" strokeDasharray="1.5 2" opacity="0.75" />}
+            {showWeight && wVals.length > 0 && days.map((d, i) => data[d]?.weightKg != null && (
               <circle key={`w-${d}`} cx={xAt(i)} cy={wY(data[d].weightKg)} r="1.6" fill={CHART.weight} />
             ))}
           </svg>

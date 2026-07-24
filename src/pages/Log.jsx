@@ -115,12 +115,13 @@ export default function Log() {
           </div>
         </div>
 
-        <DayStrip days={stripDays} data={stripData} selected={viewedDate} onSelect={jumpTo} unit={unit} />
+        <LogTabs tab={tab} onTab={setTab} />
+
+        <DayStrip days={stripDays} data={stripData} selected={viewedDate} onSelect={jumpTo} unit={unit}
+          mode={tab === "food" ? "intake" : "weight"} />
 
         <DayPagerHeader date={viewedDate} todayStr={todayStr} onPrev={goPrev} onNext={goNext}
           canPrev={canGoPrev(viewedDate, minDate)} canNext={canGoNext(viewedDate, todayStr)} />
-
-        <LogTabs tab={tab} onTab={setTab} />
 
         <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
           {tab === "food" ? (
