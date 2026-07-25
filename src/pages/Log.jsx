@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { ChevronLeft, ChevronRight, Scale, Activity, NotebookPen, Plus, X, PieChart } from "lucide-react";
-import { C } from "../theme.js";
+import { C, MACRO } from "../theme.js";
 import { num, r0, r1 } from "../lib/util.js";
 import { kcalPerG, kcalFromGrams, isValidQty } from "../lib/foods.js";
 import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../lib/foodStats.js";
@@ -255,7 +255,7 @@ function Legend({ color, label, pct }) {
 // Where the viewed day's (or trailing week's) calories and grams actually came from: the wet/dry
 // split and the per-food shares, computed from the intake log (see lib/foodStats.js). Read-only —
 // a lens on what's already logged, so it shows for the demo cat too.
-const MACRO_COLORS = { protein: C.spruce, fat: C.amber, carb: C.sub };
+const MACRO_COLORS = MACRO; // protein/fat/carb — see theme.js MACRO (fixed distinct triad)
 
 function FoodSummary({ items, library, viewedDate }) {
   const [range, setRange] = useState("day"); // "day" | "week"

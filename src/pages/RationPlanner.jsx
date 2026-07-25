@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, Scale, Info, ChevronDown, ChevronRight, ChevronLeft, ArrowRight, Activity, NotebookPen } from "lucide-react";
-import { C } from "../theme.js";
+import { C, MACRO } from "../theme.js";
 import { num, r0, r1 } from "../lib/util.js";
 import { transitionAmount, isCompleteFood, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { resolveTarget } from "../lib/targeting.js";
@@ -345,7 +345,7 @@ export default function RationPlanner() {
 // dry-matter protein/fat gated against AAFCO minimums for the cat's life stage. Renders nothing
 // until at least one blend food carries enough GA to analyze. Colors match the Log summary
 // (protein=spruce, fat=amber, carb=neutral); the numbers carry the meaning, not the colors.
-const BLEND_MACRO = { protein: C.spruce, fat: C.amber, carb: C.sub };
+const BLEND_MACRO = MACRO; // protein/fat/carb — shared distinct triad, see theme.js MACRO
 function aafcoMark(status) {
   if (status === "ok") return { sym: "✓", color: C.ok, text: "" };
   if (status === "near") return { sym: "⚠", color: C.warn, text: " near min" };

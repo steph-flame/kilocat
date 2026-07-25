@@ -156,3 +156,13 @@ export const CHART = {
   intake: "var(--intake)",
   expenditure: "var(--data1)",
 };
+
+// Macronutrient categorical colors — protein/fat/carb. A FIXED, mutually-distinct triad, NOT
+// skin tokens: the three sit adjacent in one stacked bar and their whole job is to be told apart
+// at a glance, which the old spruce/amber/gray trio failed at (two muted accents + a neutral read
+// as one smear). Chosen as a deliberate LIGHTNESS LADDER as well as distinct hues — deep blue
+// (~7:1 on white) / mauve (~4:1) / gold (~2:1) — so adjacent segments separate by both hue and
+// luminance, which keeps them distinguishable under color-vision deficiency and at segment edges
+// (pairwise luminance contrast ≥1.75). Card is white in every skin, so fixed hues render
+// consistently; legends also name each macro in text, so color is never the sole channel.
+export const MACRO = { protein: "#1D5C94", fat: "#E7A63C", carb: "#B95FA8" };
