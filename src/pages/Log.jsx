@@ -259,6 +259,7 @@ const MACRO_COLORS = { protein: C.spruce, fat: C.amber, carb: C.sub };
 
 function FoodSummary({ items, library, viewedDate }) {
   const [range, setRange] = useState("day"); // "day" | "week"
+  const [basis, setBasis] = useState("calories"); // "calories" | "weight" — flips the whole card
   const windowItems = useMemo(() => {
     if (range === "day") return { list: items.filter((e) => e.date === viewedDate), days: 1 };
     const { start, end } = trailingWindow(viewedDate, 7);
@@ -268,11 +269,35 @@ function FoodSummary({ items, library, viewedDate }) {
   const macros = useMemo(() => macroBreakdown(windowItems.list, library, windowItems.days), [windowItems, library]);
 
   const { totals, byType, byFood, wetPctKcal, dryPctKcal, wetPctGrams, dryPctGrams, perDay, isEmpty } = summary;
-  const unkPctKcal = totals.kcal > 0 ? r0((byType.unknown.kcal / totals.kcal) * 100) : 0;
+  const byKcal = basis === "calories";
+  const week = range === "week";
+  const val = (o) => (byKcal ? o.kcal : o.grams); // pick the active metric off any {kcal,grams}
+  const basisTotal = val(totals);
+  const pctOf = (part) => (basisTotal > 0 ? r0((part / basisTotal) * 100) : 0);
+
+  const wetPct = byKcal ? wetPctKcal : wetPctGrams;
+  const dryPct = byKcal ? dryPctKcal : dryPctGrams;
+  const unkPct = pctOf(val(byType.unknown));
+  const totalLabel = byKcal
+    ? `${r0(totals.kcal)} kcal${week ? ` · ≈${r0(perDay.kcal)}/day` : ""}`
+    : `${r0(totals.grams)} g${week ? ` · ≈${r0(perDay.grams)}/day` : ""}`;
+  const basisWord = byKcal ? "calories" : "weight";
+  const foods = useMemo(
+    () => [...byFood].sort((a, b) => (byKcal ? b.kcal - a.kcal : b.grams - a.grams)),
+    [byFood, byKcal]
+  );
+
+  // Macro section: caloric split (%) on the calories basis, absolute macro GRAMS on the weight
+  // basis (per-day when averaging a week, matching the header's ≈/day framing).
+  const mg = macros.grams; // window totals: { protein, fat, carb, moisture }
+  const macroSum = mg.protein + mg.fat + mg.carb;
+  const gPct = (x) => (macroSum > 0 ? (x / macroSum) * 100 : 0);
+  const perDayG = (x) => r1(x / macros.nDays);
+  const gShown = (x) => (week ? perDayG(x) : r1(x));
 
   return (
     <section style={{ background: C.card, borderColor: C.line }} className="border rounded-2xl p-4 sm:p-5 mb-4">
-      <div className="flex items-center justify-between mb-3 gap-2">
+      <div className="flex items-center justify-between mb-2 gap-2">
         <h2 className="font-medium inline-flex items-center gap-1.5"><PieChart size={15} style={{ color: C.amber }} /> Where it came from</h2>
         <div role="tablist" aria-label="Summary window" className="flex gap-1 text-xs font-mono shrink-0">
           {[["day", "day"], ["week", "7-day avg"]].map(([key, label]) => (
@@ -283,59 +308,85 @@ function FoodSummary({ items, library, viewedDate }) {
         </div>
       </div>
 
+      {/* Basis flip — drives every section below (calories vs weight/grams). */}
+      <div role="tablist" aria-label="Measure by" className="flex gap-1 mb-3 text-xs font-mono">
+        {[["calories", "calories"], ["weight", "weight"]].map(([key, label]) => (
+          <button key={key} role="tab" aria-selected={basis === key} onClick={() => setBasis(key)}
+            style={{ borderColor: basis === key ? C.amber : C.line, background: basis === key ? C.amberSoft : "transparent", color: basis === key ? C.amber : C.sub }}
+            className="border rounded-lg px-3 py-1">{label}</button>
+        ))}
+      </div>
+
       {isEmpty ? (
         <p style={{ color: C.faint }} className="text-xs py-2">Nothing logged {range === "day" ? "this day" : "in the last 7 days"} to summarize.</p>
       ) : (
         <>
           <div className="flex items-center justify-between text-xs mb-1 gap-2">
-            <span style={{ color: C.sub }} className="font-mono uppercase tracking-wide">Wet vs dry · calories</span>
-            <span style={{ color: C.faint }} className="tabular-nums shrink-0">{r0(totals.kcal)} kcal{range === "week" ? ` · ≈${r0(perDay.kcal)}/day` : ""}</span>
+            <span style={{ color: C.sub }} className="font-mono uppercase tracking-wide">Wet vs dry · {basisWord}</span>
+            <span style={{ color: C.faint }} className="tabular-nums shrink-0">{totalLabel}</span>
           </div>
           <div className="flex h-3 rounded-full overflow-hidden mb-1.5" style={{ background: C.line }}>
-            <Seg pct={wetPctKcal} color={WET_COLOR} />
-            <Seg pct={dryPctKcal} color={DRY_COLOR} />
-            <Seg pct={unkPctKcal} color={UNK_COLOR} />
+            <Seg pct={wetPct} color={WET_COLOR} />
+            <Seg pct={dryPct} color={DRY_COLOR} />
+            <Seg pct={unkPct} color={UNK_COLOR} />
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs mb-3" style={{ color: C.sub }}>
-            <Legend color={WET_COLOR} label="Wet" pct={wetPctKcal} />
-            <Legend color={DRY_COLOR} label="Dry" pct={dryPctKcal} />
-            {unkPctKcal > 0 && <Legend color={UNK_COLOR} label="Other" pct={unkPctKcal} />}
-            <span style={{ color: C.faint }} className="tabular-nums">by weight: {r0(wetPctGrams)}% wet · {r0(dryPctGrams)}% dry</span>
+            <Legend color={WET_COLOR} label="Wet" pct={wetPct} />
+            <Legend color={DRY_COLOR} label="Dry" pct={dryPct} />
+            {unkPct > 0 && <Legend color={UNK_COLOR} label="Other" pct={unkPct} />}
           </div>
 
-          <div style={{ color: C.sub }} className="text-xs font-mono uppercase tracking-wide mb-1.5">By food · calories</div>
+          <div style={{ color: C.sub }} className="text-xs font-mono uppercase tracking-wide mb-1.5">By food · {basisWord}</div>
           <div className="space-y-1.5">
-            {byFood.map((f) => (
-              <div key={f.name}>
-                <div className="flex items-center justify-between text-xs gap-2">
-                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                    <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: typeColor(f.type) }} />
-                    <span style={{ color: C.ink }} className="truncate" title={f.name}>{f.name}</span>
-                  </span>
-                  <span className="shrink-0 tabular-nums" style={{ color: C.sub }}>{r0(f.kcalPct)}%<span style={{ color: C.faint }}> · {r0(f.gramsPct)}% g</span></span>
+            {foods.map((f) => {
+              const pct = byKcal ? f.kcalPct : f.gramsPct;
+              return (
+                <div key={f.name}>
+                  <div className="flex items-center justify-between text-xs gap-2">
+                    <span className="inline-flex items-center gap-1.5 min-w-0">
+                      <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: typeColor(f.type) }} />
+                      <span style={{ color: C.ink }} className="truncate" title={f.name}>{f.name}</span>
+                    </span>
+                    <span className="shrink-0 tabular-nums" style={{ color: C.sub }}>
+                      {r0(pct)}%<span style={{ color: C.faint }}> · {byKcal ? `${r0(f.kcal)} kcal` : `${r0(f.grams)} g`}</span>
+                    </span>
+                  </div>
+                  <div className="flex h-1.5 rounded-full overflow-hidden mt-0.5" style={{ background: C.line }}>
+                    <Seg pct={pct} color={typeColor(f.type)} />
+                  </div>
                 </div>
-                <div className="flex h-1.5 rounded-full overflow-hidden mt-0.5" style={{ background: C.line }}>
-                  <Seg pct={f.kcalPct} color={typeColor(f.type)} />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {macros.hasData && (
             <div className="mt-4 pt-3 border-t" style={{ borderColor: C.line }}>
               <div className="flex items-center justify-between text-xs mb-1 gap-2">
-                <span style={{ color: C.sub }} className="font-mono uppercase tracking-wide">Macros · calories</span>
-                <span style={{ color: C.faint }} className="tabular-nums shrink-0">{r0(macros.moisturePctByWeight)}% water by wt</span>
+                <span style={{ color: C.sub }} className="font-mono uppercase tracking-wide">Macros · {basisWord}</span>
+                <span style={{ color: C.faint }} className="tabular-nums shrink-0">
+                  {byKcal ? `${r0(macros.moisturePctByWeight)}% water by wt` : `${gShown(mg.moisture)} g water${week ? "/day" : ""}`}
+                </span>
               </div>
               <div className="flex h-3 rounded-full overflow-hidden mb-1.5" style={{ background: C.line }}>
-                <Seg pct={macros.caloric.protein} color={MACRO_COLORS.protein} />
-                <Seg pct={macros.caloric.fat} color={MACRO_COLORS.fat} />
-                <Seg pct={macros.caloric.carb} color={MACRO_COLORS.carb} />
+                <Seg pct={byKcal ? macros.caloric.protein : gPct(mg.protein)} color={MACRO_COLORS.protein} />
+                <Seg pct={byKcal ? macros.caloric.fat : gPct(mg.fat)} color={MACRO_COLORS.fat} />
+                <Seg pct={byKcal ? macros.caloric.carb : gPct(mg.carb)} color={MACRO_COLORS.carb} />
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs" style={{ color: C.sub }}>
-                <Legend color={MACRO_COLORS.protein} label="Protein" pct={macros.caloric.protein} />
-                <Legend color={MACRO_COLORS.fat} label="Fat" pct={macros.caloric.fat} />
-                <Legend color={MACRO_COLORS.carb} label="Carb" pct={macros.caloric.carb} />
+                {byKcal ? (
+                  <>
+                    <Legend color={MACRO_COLORS.protein} label="Protein" pct={macros.caloric.protein} />
+                    <Legend color={MACRO_COLORS.fat} label="Fat" pct={macros.caloric.fat} />
+                    <Legend color={MACRO_COLORS.carb} label="Carb" pct={macros.caloric.carb} />
+                  </>
+                ) : (
+                  <>
+                    <MacroGram color={MACRO_COLORS.protein} label="Protein" grams={gShown(mg.protein)} />
+                    <MacroGram color={MACRO_COLORS.fat} label="Fat" grams={gShown(mg.fat)} />
+                    <MacroGram color={MACRO_COLORS.carb} label="Carb" grams={gShown(mg.carb)} />
+                    {week && <span style={{ color: C.faint }}>per day</span>}
+                  </>
+                )}
               </div>
               {macros.coverageKcalPct < 99 && (
                 <p style={{ color: C.faint }} className="text-xs mt-1.5">
@@ -347,6 +398,14 @@ function FoodSummary({ items, library, viewedDate }) {
         </>
       )}
     </section>
+  );
+}
+
+function MacroGram({ color, label, grams }) {
+  return (
+    <span className="inline-flex items-center gap-1 tabular-nums">
+      <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} /> {label} {grams} g
+    </span>
   );
 }
 

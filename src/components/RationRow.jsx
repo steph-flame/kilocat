@@ -4,6 +4,7 @@ import { num } from "../lib/util.js";
 import { kcalPerG, libEntry } from "../lib/foods.js";
 import { Field, NumInput } from "./primitives.jsx";
 import FoodSearch from "./FoodSearch.jsx";
+import GuaranteedAnalysis from "./GuaranteedAnalysis.jsx";
 
 /* ---------- one food row, used by every list ---------- */
 export default function RationRow({ f, target, onSet, onSlidePct, onPrefill, onRemove, fridgeDays, searchFoods, onSave, saved, canSave }) {
@@ -47,6 +48,7 @@ export default function RationRow({ f, target, onSet, onSlidePct, onPrefill, onR
           <Field key={k} label={lbl} suffix={suf}><NumInput value={f[k]} onChange={(v) => onSet(f.id, k, v)} step={step} /></Field>
         ))}
       </div>
+      <GuaranteedAnalysis food={f} onEditField={(k, v) => onSet(f.id, k, v)} />
       <div className="mt-3 flex items-center gap-3">
         <input type="range" min="0" max="100" step="1" value={num(f.pct)} onChange={(e) => (onSlidePct ? onSlidePct(f.id, Number(e.target.value)) : onSet(f.id, "pct", Number(e.target.value)))} className="flex-1" style={{ accentColor: C.amber }}
           aria-label={`${f.name || "food"} share of the ration`} aria-valuetext={`${num(f.pct)} percent`} />

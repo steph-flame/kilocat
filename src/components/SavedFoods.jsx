@@ -1,18 +1,8 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, X, FlaskConical } from "lucide-react";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { C } from "../theme.js";
 import { Field, NumInput } from "./primitives.jsx";
-import { macroProfile } from "../lib/foods.js";
-
-// The five guaranteed-analysis fields off a standard cat-food label (as-fed %). Carbs (NFE) and
-// the caloric split are derived from these — see macroProfile — so they aren't entered directly.
-const GA_FIELDS = [
-  ["protein", "Protein"],
-  ["fat", "Fat"],
-  ["fiber", "Fiber"],
-  ["moisture", "Moisture"],
-  ["ash", "Ash"],
-];
+import GuaranteedAnalysis from "./GuaranteedAnalysis.jsx";
 
 // The library manager: foods you explicitly save (the bookmark on a food row) live here,
 // starter foods included, and every field stays editable. Editing a saved food changes what
@@ -49,11 +39,9 @@ export default function SavedFoods({ library }) {
 }
 
 function SavedFoodCard({ f, library }) {
-  const [showGA, setShowGA] = useState(false);
   const energyFields = f.mode === "perKg"
     ? [["kcalPerKg", "Energy", "kcal/kg", "10"], ["gramsPerCup", "Grams per cup", "g (opt)", "1"]]
     : [["kcalPerUnit", "Energy per can", "kcal", "1"], ["gramsPerUnit", "Grams per can", "g", "1"]];
-  const prof = macroProfile(f);
 
   return (
     <div style={{ borderColor: C.line }} className="border rounded-xl p-3">
@@ -81,30 +69,7 @@ function SavedFoodCard({ f, library }) {
         ))}
       </div>
 
-      <button onClick={() => setShowGA((s) => !s)} style={{ color: showGA ? C.spruce : C.sub }} className="mt-2 inline-flex items-center gap-1 text-xs font-mono">
-        <FlaskConical size={12} /> Nutrition (guaranteed analysis){prof ? "" : " — add"} {showGA ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-      </button>
-
-      {showGA && (
-        <div className="mt-2">
-          <div className="grid grid-cols-3 gap-2">
-            {GA_FIELDS.map(([k, lbl]) => (
-              <Field key={k} label={lbl} suffix="%">
-                <NumInput value={f[k] ?? ""} onChange={(v) => library.edit(f.id, { [k]: v })} step="0.1" />
-              </Field>
-            ))}
-          </div>
-          {prof ? (
-            <div style={{ color: C.sub }} className="text-xs mt-2 leading-relaxed">
-              <span className="font-mono">Carbs (NFE) ≈ {prof.carb}%</span> as-fed.{" "}
-              Calories: <b style={{ color: C.ink }}>{prof.caloric.protein}%</b> protein · <b style={{ color: C.ink }}>{prof.caloric.fat}%</b> fat · <b style={{ color: C.ink }}>{prof.caloric.carb}%</b> carb.
-              <div style={{ color: C.faint }} className="mt-0.5">Dry-matter: {prof.dryMatter.protein}% protein · {prof.dryMatter.fat}% fat · {prof.dryMatter.carb}% carb.</div>
-            </div>
-          ) : (
-            <p style={{ color: C.faint }} className="text-xs mt-2">Enter at least protein and fat to see carbs and the caloric split. Values are the as-fed percentages off the label.</p>
-          )}
-        </div>
-      )}
+      <GuaranteedAnalysis food={f} onEditField={(k, v) => library.edit(f.id, { [k]: v })} />
     </div>
   );
 }
