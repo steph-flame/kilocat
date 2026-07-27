@@ -25,3 +25,6 @@ public/seed.html
 
 # Local data exports (may contain credentials) — never commit
 cat-data-*.json
+
+# Design handoff reference (kept on disk, not in git — large binaries)
+design_handoff_kilocat_redesign/
