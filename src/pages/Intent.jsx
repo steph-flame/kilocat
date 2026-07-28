@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { computeIntent, recommendedZone } from "../lib/intent.js";
+import { bcsToPct, pctToBcs } from "../lib/nutrition.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 
@@ -43,20 +44,30 @@ export default function Intent() {
   const measuredKcal = expenditure.enoughData ? r0(expenditure.kcal) : null;
   const formulaKcal = r0(t.refs.maintain);
   const defaultBasis = measuredKcal == null ? "formula" : expSettings.energyBasis === "formula" ? "formula" : "measured";
-  const zone = recommendedZone(t.pctOver);
-  const zoneMid = zone ? Math.round(((zone.lo + zone.hi) / 2) * 10) / 10 : 0;
-  const defaultRate = expSettings.ratePctPerWeek != null ? expSettings.ratePctPerWeek : zoneMid;
 
   // Local override so the controls respond instantly (and the demo cat, whose writes no-op, is
   // still interactive). Reset when the active cat changes. Write-through persists for real cats.
   const [ov, setOv] = useState({});
   useEffect(() => setOv({}), [activeCatId]);
+
+  // Body condition is the PRIMARY input here (the redesign drops the old pct/goal machinery), so
+  // derive a BCS consistent with the cat's actual condition and snap the % + ideal weight to the
+  // 1-9 grid — otherwise an off-grid stored pctOver (e.g. the demo's 12%) would show "BCS 5, 12%
+  // over", which is the contradiction you spotted. Everything downstream uses these snapped values.
+  const bcs = ov.bcs ?? pctToBcs(t.pctOver);
+  const pctOver = bcsToPct(bcs);
+  const idealWeight = currentWeight.kg > 0 ? currentWeight.kg / (1 + pctOver / 100) : currentWeight.kg;
+  const setBcsValue = (n) => { setOv((o) => ({ ...o, bcs: n })); if (!isDemo) setBcs(n); };
+
+  const zone = recommendedZone(pctOver);
+  const zoneMid = zone ? Math.round(((zone.lo + zone.hi) / 2) * 10) / 10 : 0;
+  const defaultRate = expSettings.ratePctPerWeek != null ? expSettings.ratePctPerWeek : zoneMid;
   const basis = ov.basis ?? defaultBasis;
   const rate = ov.rate ?? defaultRate;
   const setBasis = (b) => { setOv((o) => ({ ...o, basis: b })); setExpSettings({ energyBasis: b }); };
   const setRate = (v) => { const rr = Math.round(v * 10) / 10; setOv((o) => ({ ...o, rate: rr })); setExpSettings({ ratePctPerWeek: rr }); };
 
-  const intent = computeIntent({ basis, ratePctPerWeek: rate, measuredKcal, formulaKcal, currentKg: currentWeight.kg, idealKg: t.idealWeight, pctOver: t.pctOver });
+  const intent = computeIntent({ basis, ratePctPerWeek: rate, measuredKcal, formulaKcal, currentKg: currentWeight.kg, idealKg: idealWeight, pctOver });
   const showW = (kg) => `${(toDisplayWeight(kg, unit)).toFixed(2)} ${weightLabel(unit)}`;
 
   // rate slider geometry: −2…+2 mapped to 0…100%
@@ -68,8 +79,6 @@ export default function Intent() {
     ? "holds steady"
     : `${intent.rate < 0 ? "loses" : "gains"} ${weeklyG} g/wk`;
   const weeksLine = intent.weeksToIdeal ? `ideal in ${r0(intent.weeksToIdeal)} weeks` : "not moving toward ideal";
-
-  const bcs = p.bcs || 5;
 
   return (
     <div style={{ background: A.pageFill, minHeight: "100%", fontFamily: TYPE.sans, color: A.ink, paddingBottom: 28 }}>
@@ -113,7 +122,7 @@ export default function Intent() {
               BCS {bcs}<span style={{ fontSize: 12, color: A.body }}>/9</span>
             </div>
             <div style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.bodyOnFill, textAlign: "right" }}>
-              {t.pctOver > 0 ? `${r0(t.pctOver)}% over` : t.pctOver < 0 ? `${r0(-t.pctOver)}% under` : "at ideal"} · ideal {showW(t.idealWeight)}
+              {pctOver > 0 ? `${r0(pctOver)}% over` : pctOver < 0 ? `${r0(-pctOver)}% under` : "at ideal"} · ideal {showW(idealWeight)}
             </div>
           </div>
 
@@ -128,9 +137,9 @@ export default function Intent() {
             {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => {
               const on = n === bcs;
               return (
-                <button key={n} onClick={() => !isDemo && setBcs(n)} aria-pressed={on} aria-label={`Body condition ${n} of 9`}
+                <button key={n} onClick={() => setBcsValue(n)} aria-pressed={on} aria-label={`Body condition ${n} of 9`}
                   style={{ fontFamily: TYPE.mono, fontSize: 12, padding: "8px 0", borderRadius: 7, border: "none",
-                    background: on ? A.cellSel.bg : A.cellUnsel.bg, color: on ? A.cellSel.text : A.cellUnsel.text, fontWeight: on ? 700 : 400, cursor: isDemo ? "default" : "pointer" }}>
+                    background: on ? A.cellSel.bg : A.cellUnsel.bg, color: on ? A.cellSel.text : A.cellUnsel.text, fontWeight: on ? 700 : 400, cursor: "pointer" }}>
                   {n}
                 </button>
               );
@@ -186,7 +195,7 @@ export default function Intent() {
               <span style={{ fontFamily: TYPE.mono, color: A.caution.text, fontWeight: 700 }}>!</span>
               <span style={{ fontSize: 12, color: A.caution.text, lineHeight: 1.4 }}>
                 {intent.contraIndicated
-                  ? `${p.name || "This cat"} is ${t.pctOver > 0 ? `${r0(t.pctOver)}% over` : `${r0(-t.pctOver)}% under`} ideal, so the shaded zone recommends a ${t.pctOver > 0 ? "loss" : "gain"}. The slider still runs the full range — set the other direction if you mean to, and Kilocat will ask you to confirm.`
+                  ? `${p.name || "This cat"} is ${pctOver > 0 ? `${r0(pctOver)}% over` : `${r0(-pctOver)}% under`} ideal, so the shaded zone recommends a ${pctOver > 0 ? "loss" : "gain"}. The slider still runs the full range — set the other direction if you mean to, and Kilocat will ask you to confirm.`
                   : `That rate is outside the recommended zone for BCS ${bcs}. It's allowed — just gentler or faster than the usual advice.`}
               </span>
             </div>
