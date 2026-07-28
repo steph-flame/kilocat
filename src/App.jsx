@@ -12,6 +12,7 @@ import Bowl from "./pages/Bowl.jsx";
 import Today from "./pages/Today.jsx";
 import RationPlanner from "./pages/RationPlanner.jsx";
 import Expenditure from "./pages/Expenditure.jsx";
+import Trend from "./pages/Trend.jsx";
 import Log from "./pages/Log.jsx";
 import Cats from "./pages/Cats.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -22,7 +23,7 @@ import Settings from "./pages/Settings.jsx";
 // its transition schedule is migrated. (#/intent and #/bowl kept as aliases.)
 const PAGES = {
   home: Home, today: Today, calories: Intent, intent: Intent, ration: Bowl, bowl: Bowl,
-  "ration-classic": RationPlanner, expenditure: Expenditure, log: Log, cats: Cats, settings: Settings,
+  "ration-classic": RationPlanner, trend: Trend, expenditure: Trend, "expenditure-classic": Expenditure, log: Log, cats: Cats, settings: Settings,
 };
 
 // Compact app-shell header: a settings link, plus the cat switcher — dense to match the rest
