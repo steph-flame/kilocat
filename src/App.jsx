@@ -9,6 +9,7 @@ import CatMenu from "./components/CatMenu.jsx";
 import Home from "./pages/Home.jsx";
 import Intent from "./pages/Intent.jsx";
 import Bowl from "./pages/Bowl.jsx";
+import Today from "./pages/Today.jsx";
 import RationPlanner from "./pages/RationPlanner.jsx";
 import Expenditure from "./pages/Expenditure.jsx";
 import Log from "./pages/Log.jsx";
@@ -20,7 +21,7 @@ import Settings from "./pages/Settings.jsx";
 // the other but neither forces you through it. The classic planner stays at #/ration-classic until
 // its transition schedule is migrated. (#/intent and #/bowl kept as aliases.)
 const PAGES = {
-  home: Home, calories: Intent, intent: Intent, ration: Bowl, bowl: Bowl,
+  home: Home, today: Today, calories: Intent, intent: Intent, ration: Bowl, bowl: Bowl,
   "ration-classic": RationPlanner, expenditure: Expenditure, log: Log, cats: Cats, settings: Settings,
 };
 
