@@ -7,7 +7,7 @@ import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../li
 import { groupByDay, median, localDateOf, manualWeighInStamp } from "../lib/series.js";
 import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, dayStripWindow, formatDayLabel } from "../lib/dayPager.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
-import { toDisplayWeight, fromDisplayWeight, weightLabel } from "../lib/units.js";
+import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import { useApp } from "../state/AppState.jsx";
 import FoodSearch from "../components/FoodSearch.jsx";
@@ -448,7 +448,7 @@ function WeightLog({ log, unit, lastMethod, onMethod, viewedDate, isToday, isDem
           </div>
 
           <div className="flex items-end gap-2">
-            <div className="w-24"><Field label="Weight" suffix={weightLabel(unit)}><NumInput value={val} onChange={setVal} step={unit === "lb" ? "0.05" : "0.01"} /></Field></div>
+            <div className="w-24"><Field label="Weight" suffix={weightLabel(unit)}><NumInput value={val} onChange={setVal} step="0.01" /></Field></div>
             <button onClick={addEntry} style={{ background: C.spruce }} className="rounded-lg p-2 text-white shrink-0 mb-0.5"><Plus size={16} /></button>
           </div>
 
@@ -466,7 +466,7 @@ function WeightLog({ log, unit, lastMethod, onMethod, viewedDate, isToday, isDem
                 {dayItems.length} read{dayItems.length === 1 ? "" : "s"}
                 {dayItems.some((e) => e.source === WEIGH_SOURCES.litterRobot) && <span style={{ color: C.faint }} className="text-xs">· auto</span>}
               </span>
-              <span style={{ color: C.ink }} className="tabular-nums">{r1(toDisplayWeight(dayKg, unit))} {weightLabel(unit)}<span style={{ color: C.faint }} className="text-xs"> avg</span></span>
+              <span style={{ color: C.ink }} className="tabular-nums">{fmtWeight(dayKg, unit)} {weightLabel(unit)}<span style={{ color: C.faint }} className="text-xs"> avg</span></span>
             </div>
             <div className="pl-1 py-1 space-y-0.5">
               {dayItems.map((en) => (
@@ -475,7 +475,7 @@ function WeightLog({ log, unit, lastMethod, onMethod, viewedDate, isToday, isDem
                     {en.method ? methodLabel(en.method) : "—"}{en.source === WEIGH_SOURCES.litterRobot ? " · auto" : ""}
                     {en.ts != null && <span style={{ color: C.faint }}> · {new Date(en.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
                   </span>
-                  <span className="flex items-center gap-2"><span style={{ color: C.sub }} className="tabular-nums">{r1(toDisplayWeight(num(en.kg), unit))} {weightLabel(unit)}</span>
+                  <span className="flex items-center gap-2"><span style={{ color: C.sub }} className="tabular-nums">{fmtWeight(num(en.kg), unit)} {weightLabel(unit)}</span>
                     {!isDemo && <button onClick={() => log.remove(en.id)} style={{ color: C.faint }} aria-label="Remove this weigh-in"><X size={12} /></button>}</span>
                 </div>
               ))}

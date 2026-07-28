@@ -10,18 +10,33 @@ export const kcalPerG = (f) =>
   f.mode === "perKg" ? num(f.kcalPerKg) / 1000
     : (num(f.gramsPerUnit) > 0 ? num(f.kcalPerUnit) / num(f.gramsPerUnit) : 0);
 
-// Wet vs dry. The honest discriminator is moisture: wet food is ~75-82% water, dry kibble
-// ~6-10%, and nothing real sits near the 50% line, so once a food carries a moisture % we
-// trust it. Before macros are entered we fall back to the packaging shape — a food priced
-// per-unit is a can/pouch (wet); per-kg is kibble measured by the cup (dry). This is only a
-// heuristic (a per-kg raw/freeze-dried food could be moist), which is exactly why an explicit
-// moisture value overrides it. Returns "wet" | "dry".
+export const FOOD_TYPES = ["wet", "dry", "treat"];
+
+// Food type. An EXPLICIT `type` ('wet' | 'dry' | 'treat') always wins — it's the only way to mark
+// a treat, since a treat can't be inferred from packaging or moisture (it's just a small per-unit
+// item). With no explicit type we fall back to the honest discriminator, moisture (wet food is
+// ~75-82% water, dry kibble ~6-10%, nothing real sits near the 50% line), and before macros are
+// entered, to packaging shape (per-unit = can/pouch = wet; per-kg = kibble by the cup = dry).
 export const WET_MOISTURE_PCT = 50;
 export const foodType = (f) => {
+  if (f?.type === "wet" || f?.type === "dry" || f?.type === "treat") return f.type;
   const m = num(f?.moisture);
   if (m > 0) return m >= WET_MOISTURE_PCT ? "wet" : "dry";
   return f?.mode === "perUnit" ? "wet" : "dry";
 };
+
+// A treat is priced per treat: mode 'perUnit' with kcalPerUnit = kcal/treat, gramsPerUnit = the
+// treat's weight. Energy density (kcalPerG, kcal/kg) then follows exactly as for a can. This
+// converts between the two ways a treat label states energy — "1 kcal/treat" and "3423 kcal/kg" —
+// so entering either fills the other. Give it {kcalPerTreat, gramsPerTreat} and/or kcalPerKg;
+// returns the completed { kcalPerUnit, gramsPerUnit, kcalPerKg }.
+export function treatEnergy({ kcalPerTreat, gramsPerTreat, kcalPerKg }) {
+  const kt = num(kcalPerTreat), gt = num(gramsPerTreat), kk = num(kcalPerKg);
+  // grams/treat unknown but both energies known → derive the treat weight.
+  const grams = gt > 0 ? gt : kt > 0 && kk > 0 ? (kt / kk) * 1000 : 0;
+  const perKg = kk > 0 ? kk : kt > 0 && grams > 0 ? (kt / grams) * 1000 : 0;
+  return { kcalPerUnit: kt, gramsPerUnit: r1(grams), kcalPerKg: r0(perKg) };
+}
 
 // Modified-Atwater factors for pet food (kcal per gram of each macro) — lower than human Atwater
 // (4/9/4) to reflect pet-diet digestibility. The standard basis for turning a guaranteed analysis
@@ -107,7 +122,7 @@ export function waterfall(rows, id, raw) {
   return out;
 }
 
-export const blankFood = () => ({ id: uid(), name: "", mode: "perKg", kcalPerKg: "", gramsPerCup: "", kcalPerUnit: "", gramsPerUnit: "", protein: "", fat: "", fiber: "", moisture: "", ash: "", pct: 0 });
+export const blankFood = () => ({ id: uid(), name: "", mode: "perKg", type: "", kcalPerKg: "", gramsPerCup: "", kcalPerUnit: "", gramsPerUnit: "", protein: "", fat: "", fiber: "", moisture: "", ash: "", pct: 0 });
 
 // The macro profile of a whole RATION — a blend of foods, each with a caloric share `pct`.
 // Guaranteed-analysis percentages are per gram, so the foods are combined on a MASS basis: a
@@ -288,10 +303,10 @@ export function backfillBuiltinMacros(f) {
 
 // A library food -> the fields to drop onto a ration row (leaves name/pct to the caller
 // so an exact-name match refills macros without clobbering an in-progress %/name).
-export const libEntry = (food) => ({ name: food.name, mode: food.mode, ...macrosOf(food) });
+export const libEntry = (food) => ({ name: food.name, mode: food.mode, type: food.type ?? "", ...macrosOf(food) });
 
 // A ration/start row -> a library entry (strip the ration-only fields).
-export const toLibraryEntry = (f) => ({ name: f.name.trim(), mode: f.mode, ...macrosOf(f) });
+export const toLibraryEntry = (f) => ({ name: f.name.trim(), mode: f.mode, type: f.type ?? "", ...macrosOf(f) });
 
 // A row is worth remembering once it has a name and an energy value for its mode.
 export const isCompleteFood = (f) =>

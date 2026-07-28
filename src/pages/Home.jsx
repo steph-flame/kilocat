@@ -3,7 +3,7 @@ import { Scale, Activity, NotebookPen, ChevronRight, Settings as SettingsIcon, C
 import { C } from "../theme.js";
 import { useApp } from "../state/AppState.jsx";
 import { r0, r1, clamp } from "../lib/util.js";
-import { toDisplayWeight, weightLabel, weeklyRate } from "../lib/units.js";
+import { toDisplayWeight, weightLabel, weeklyRate, fmtWeight } from "../lib/units.js";
 import { resolveTarget } from "../lib/targeting.js";
 import { RATE } from "../lib/weightPlan.js";
 import { dispensedToday, bowlFillPct, bowlZones, bowlStatus } from "../lib/dispenseProgress.js";
@@ -25,7 +25,7 @@ const greeting = () => {
 export default function Home() {
   const { p, t, today, expenditure, weightLog, intakeLog, expSettings, currentWeight, ration, unit, catsSummary, activeCatId, switchCat, addCat } = useApp();
   const wLbl = weightLabel(unit);
-  const showW = (kg, d = 1) => `${(d === 1 ? r1 : r0)(toDisplayWeight(kg, unit))} ${wLbl}`;
+  const showW = (kg, d = 1) => `${d === 1 ? fmtWeight(kg, unit) : r0(toDisplayWeight(kg, unit))} ${wLbl}`;
   const name = p.name || "Your cat";
 
   const kitten = t.stage !== "adult";

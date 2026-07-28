@@ -1,16 +1,27 @@
+import { useState } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
 import { foodType, kcalPerG, libEntry, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
+import { num } from "../lib/util.js";
 import FoodSearch from "../components/FoodSearch.jsx";
+import GuaranteedAnalysis from "../components/GuaranteedAnalysis.jsx";
 
 // Ration — Step 2 of 2: The bowl. Split the Intent target across N foods, each fixed / share /
 // remainder. One basis for everything: % of the full target (see lib/bowl.js).
 
 const r0 = (n) => Math.round(n);
+const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`); // grams to 1 decimal, trimmed
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 const MODES = [["fixed", "fixed"], ["share", "share"], ["remainder", "rest"]];
-const dotColor = (f) => (f.mode === "fixed" ? A.food.treat : foodType(f) === "wet" ? A.food.wet : A.food.dry);
+const TYPES = [["wet", "wet"], ["dry", "dry"], ["treat", "treat"]];
+const dotColor = (f) => { const ty = foodType(f); return ty === "treat" ? A.food.treat : ty === "wet" ? A.food.wet : A.food.dry; };
+// energy fields per food type (all accept decimals). treats are priced per treat.
+const ENERGY_FIELDS = {
+  dry: [["kcalPerKg", "Energy", "kcal/kg"], ["gramsPerCup", "Grams / cup", "g"]],
+  wet: [["kcalPerUnit", "Energy / can", "kcal"], ["gramsPerUnit", "Grams / can", "g"]],
+  treat: [["kcalPerUnit", "Energy / treat", "kcal"], ["gramsPerUnit", "Weight / treat", "g"]],
+};
 
 function Card({ children, style }) {
   return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
@@ -49,69 +60,10 @@ export default function Bowl() {
           {ration.items.length === 0 && (
             <p style={{ fontSize: 12, color: A.muted, padding: "14px 0" }}>No foods yet — add one below.</p>
           )}
-          {ration.items.map((f, i) => {
-            const row = byId[f.id] || { kcal: 0, grams: null, pct: 0 };
-            const mode = f.mode || "share";
-            const color = dotColor(f);
-            return (
-              <div key={f.id} style={{ borderTop: i === 0 ? "none" : `1px solid ${A.hairline}`, padding: "12px 0" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 999, background: color, flex: "none" }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <FoodSearch value={f.name} search={library.search}
-                      onChangeName={(v) => ration.setField(f.id, "name", v)}
-                      onPick={(food) => ration.patch(f.id, libEntry(food))} />
-                  </div>
-                  <button onClick={() => ration.remove(f.id)} aria-label="Remove food" style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 15 }}>×</button>
-                </div>
-
-                {/* mode selector */}
-                <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
-                  {MODES.map(([m, lbl]) => {
-                    const on = mode === m;
-                    const c = A.mode[m];
-                    return (
-                      <button key={m} onClick={() => setMode(f.id, m)} aria-pressed={on}
-                        style={{ fontFamily: TYPE.mono, fontSize: 10, letterSpacing: ".08em", textTransform: "uppercase", borderRadius: 6, padding: "4px 8px",
-                          border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? c.bg : "transparent", color: on ? c.text : A.muted, cursor: "pointer" }}>
-                        {lbl}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* per-mode controls */}
-                {mode === "share" && (
-                  <>
-                    <input type="range" min={0} max={100} step={1} value={r0(f.pct) || 0}
-                      onChange={(e) => ration.setField(f.id, "pct", Number(e.target.value))}
-                      aria-label={`${f.name || "food"} share`}
-                      style={{ width: "100%", marginTop: 8, accentColor: color }} />
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 2 }}>
-                      <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body }}>{r0(row.pct)}% of {target} · {r0(row.kcal)} kcal</span>
-                      <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{row.grams != null ? `${r0(row.grams)} g` : "—"}</span>
-                    </div>
-                  </>
-                )}
-                {mode === "fixed" && (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
-                    <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body, display: "inline-flex", alignItems: "baseline", gap: 5 }}>
-                      taken off the top ·
-                      <input type="number" value={f.fixedKcal ?? ""} onChange={(e) => ration.setField(f.id, "fixedKcal", e.target.value === "" ? "" : Number(e.target.value))}
-                        aria-label="fixed kcal" style={{ width: 44, fontFamily: TYPE.mono, fontSize: 13, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "right" }} /> kcal
-                    </span>
-                    <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{row.grams != null ? `${r0(row.grams)} g` : "—"}</span>
-                  </div>
-                )}
-                {mode === "remainder" && (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
-                    <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body }}>absorbs what's left · {r0(row.pct)}% · {r0(row.kcal)} kcal</span>
-                    <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{row.grams != null ? `${r0(row.grams)} g` : "—"}</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {ration.items.map((f, i) => (
+            <BowlRow key={f.id} f={f} row={byId[f.id] || { kcal: 0, grams: null, pct: 0 }} target={target}
+              first={i === 0} library={library} ration={ration} setMode={setMode} />
+          ))}
 
           <button onClick={() => ration.add()} style={{ width: "100%", marginTop: 6, border: `1px dashed ${A.cardBorder}`, borderRadius: 12, background: "transparent", color: A.body, fontFamily: TYPE.sans, fontSize: 12.5, padding: "10px 0", cursor: "pointer" }}>
             + Add a food
@@ -154,6 +106,125 @@ export default function Bowl() {
           </a>
         </div>
       </div>
+    </div>
+  );
+}
+
+const numInline = { width: 46, fontFamily: TYPE.mono, fontSize: 13, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "right", padding: "1px 2px" };
+
+function AmountRow({ left, grams }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 2 }}>
+      <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body }}>{left}</span>
+      <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{g1(grams)}</span>
+    </div>
+  );
+}
+
+function BowlRow({ f, row, target, first, library, ration, setMode }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const mode = f.mode || "share";
+  const type = foodType(f);
+  const color = dotColor(f);
+  const patch = (obj) => ration.setItems((fs) => fs.map((x) => (x.id === f.id ? { ...x, ...obj } : x)));
+  const setType = (ty) => patch({ type: ty, mode: ty === "dry" ? "perKg" : "perUnit" });
+  // A treat is given by count; its fixed kcal follows the per-treat energy.
+  const setTreatCount = (c) => patch({ treatCount: c, fixedKcal: c === "" ? "" : num(c) * num(f.kcalPerUnit) });
+
+  return (
+    <div style={{ borderTop: first ? "none" : `1px solid ${A.hairline}`, padding: "12px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 9, height: 9, borderRadius: 999, background: color, flex: "none" }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FoodSearch value={f.name} search={library.search}
+            onChangeName={(v) => ration.setField(f.id, "name", v)}
+            onPick={(food) => ration.patch(f.id, libEntry(food))} />
+        </div>
+        <button onClick={() => ration.remove(f.id)} aria-label="Remove food" style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 15 }}>×</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 5, marginTop: 8, alignItems: "center" }}>
+        {MODES.map(([m, lbl]) => {
+          const on = mode === m; const c = A.mode[m];
+          return (
+            <button key={m} onClick={() => setMode(f.id, m)} aria-pressed={on}
+              style={{ fontFamily: TYPE.mono, fontSize: 10, letterSpacing: ".08em", textTransform: "uppercase", borderRadius: 6, padding: "4px 8px",
+                border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? c.bg : "transparent", color: on ? c.text : A.muted, cursor: "pointer" }}>{lbl}</button>
+          );
+        })}
+        <button onClick={() => setShowDetails((s) => !s)} style={{ marginLeft: "auto", fontFamily: TYPE.mono, fontSize: 10, color: showDetails ? A.ink : A.muted, background: "none", border: "none", cursor: "pointer" }}>
+          {showDetails ? "details ▾" : "details ▸"}
+        </button>
+      </div>
+
+      {mode === "share" && (
+        <>
+          <input type="range" min={0} max={100} step={1} value={r0(f.pct) || 0}
+            onChange={(e) => ration.setField(f.id, "pct", Number(e.target.value))}
+            aria-label={`${f.name || "food"} share`} style={{ width: "100%", marginTop: 8, accentColor: color }} />
+          <AmountRow left={`${r0(row.pct)}% of ${target} · ${r0(row.kcal)} kcal`} grams={row.grams} />
+        </>
+      )}
+      {mode === "fixed" && type === "treat" && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
+          <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body, display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+            <input type="number" step="any" min="0" value={f.treatCount ?? ""} onChange={(e) => setTreatCount(e.target.value === "" ? "" : Number(e.target.value))} aria-label="number of treats" style={numInline} />
+            treats · {r0(row.kcal)} kcal
+          </span>
+          <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{g1(row.grams)}</span>
+        </div>
+      )}
+      {mode === "fixed" && type !== "treat" && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
+          <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body, display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+            off the top ·
+            <input type="number" step="any" min="0" value={f.fixedKcal ?? ""} onChange={(e) => ration.setField(f.id, "fixedKcal", e.target.value === "" ? "" : Number(e.target.value))} aria-label="fixed kcal" style={numInline} /> kcal
+          </span>
+          <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{g1(row.grams)}</span>
+        </div>
+      )}
+      {mode === "remainder" && (
+        <AmountRow left={`absorbs what's left · ${r0(row.pct)}% · ${r0(row.kcal)} kcal`} grams={row.grams} />
+      )}
+
+      {showDetails && <FoodDetails f={f} type={type} patch={patch} setType={setType} ration={ration} />}
+    </div>
+  );
+}
+
+function FoodDetails({ f, type, patch, setType, ration }) {
+  const perKg = kcalPerG(f) * 1000;
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${A.cardBorder}` }}>
+      <div style={label({ marginBottom: 6 })}>Type</div>
+      <div style={{ display: "flex", gap: 5 }}>
+        {TYPES.map(([ty, lbl]) => {
+          const on = type === ty;
+          return (
+            <button key={ty} onClick={() => setType(ty)} aria-pressed={on}
+              style={{ fontFamily: TYPE.mono, fontSize: 11, borderRadius: 999, padding: "4px 12px", cursor: "pointer",
+                border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? A.ink : "transparent", color: on ? A.card : A.body }}>{lbl}</button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
+        {ENERGY_FIELDS[type].map(([k, lbl, suf]) => (
+          <label key={k} style={{ display: "block" }}>
+            <span style={label({ fontSize: 10 })}>{lbl}</span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 3 }}>
+              <input type="number" step="any" min="0" value={f[k] ?? ""} onChange={(e) => patch({ [k]: e.target.value === "" ? "" : Number(e.target.value) })}
+                aria-label={lbl} style={{ width: "100%", fontFamily: TYPE.mono, fontSize: 15, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, padding: "2px 0" }} />
+              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{suf}</span>
+            </div>
+          </label>
+        ))}
+      </div>
+      {type === "treat" && perKg > 0 && (
+        <div style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted, marginTop: 8 }}>≈ {r0(perKg)} kcal/kg</div>
+      )}
+
+      <GuaranteedAnalysis food={f} onEditField={(k, v) => patch({ [k]: v })} />
     </div>
   );
 }

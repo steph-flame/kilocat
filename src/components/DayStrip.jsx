@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { C, CHART } from "../theme.js";
 import { extent, linScale } from "../lib/scale.js";
 import { r0, r1 } from "../lib/util.js";
-import { toDisplayWeight, weightLabel } from "../lib/units.js";
+import { toDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
 import { formatDayLabel, STRIP_RANGES, DEFAULT_STRIP_RANGE, stripRangeWindow, stripColumnWidth, stripPeakKcal } from "../lib/dayPager.js";
 
 // The Log page's archive-navigation strip: one column per day EVER logged (see Log.jsx's
@@ -93,7 +93,7 @@ export default function DayStrip({ days, data = {}, selected, onSelect, unit = "
     const w = data[d]?.weightKg;
     const bits = [formatDayLabel(d, days[days.length - 1])];
     bits.push(kcal != null ? `${r0(kcal)} kcal${data[d]?.imputed ? " (incomplete)" : ""}` : "no intake logged");
-    if (w != null) bits.push(`${r1(toDisplayWeight(w, unit))} ${weightLabel(unit)}`);
+    if (w != null) bits.push(`${fmtWeight(w, unit)} ${weightLabel(unit)}`);
     return bits.join(", ");
   };
 

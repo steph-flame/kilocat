@@ -4,7 +4,7 @@ import { C, CHART } from "../theme.js";
 import { r0, r1 } from "../lib/util.js";
 import { planWeightChange, autoDirection, DIRECTIONS, RATE } from "../lib/weightPlan.js";
 import { buildDailyFrame, RANGES } from "../lib/timeline.js";
-import { toDisplayWeight, weightLabel, weeklyRate, round5 } from "../lib/units.js";
+import { toDisplayWeight, weightLabel, weeklyRate, round5, fmtWeight } from "../lib/units.js";
 import { floorSdKcal } from "../lib/expenditure.js";
 import { dailyReduce, median } from "../lib/series.js";
 import { useApp } from "../state/AppState.jsx";
@@ -20,7 +20,7 @@ export default function Expenditure() {
   const kitten = t.stage !== "adult"; // stage, not a raw age check — catches a newborn (dob = today, age 0) too
   const algoName = { v3: "unobserved-components", v2: "Kalman filter", v1: "EWMA + regression" }[estimator];
   const wLbl = weightLabel(unit);
-  const showW = (kg, d = 1) => `${(d === 1 ? r1 : r0)(toDisplayWeight(kg, unit))} ${wLbl}`;
+  const showW = (kg, d = 1) => `${d === 1 ? fmtWeight(kg, unit) : r0(toDisplayWeight(kg, unit))} ${wLbl}`;
 
   const maintenance = e.enoughData ? e.kcal : t.refs.maintain;
   const dir = expSettings.direction && expSettings.direction !== "auto" ? expSettings.direction : autoDirection(t.pctOver);

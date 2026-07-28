@@ -4,7 +4,7 @@ import { C, MACRO } from "../theme.js";
 import { num, r0, r1 } from "../lib/util.js";
 import { transitionAmount, isCompleteFood, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { resolveTarget } from "../lib/targeting.js";
-import { toDisplayWeight, fromDisplayWeight, weightLabel } from "../lib/units.js";
+import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
 import { useApp } from "../state/AppState.jsx";
 import RationRow from "../components/RationRow.jsx";
 import SavedFoods from "../components/SavedFoods.jsx";
@@ -25,7 +25,7 @@ export default function RationPlanner() {
 
   const { age, w: wkg, goalId } = t;
   const wLbl = weightLabel(unit);
-  const showW = (kg) => `${r1(toDisplayWeight(kg, unit))} ${wLbl}`;
+  const showW = (kg) => `${fmtWeight(kg, unit)} ${wLbl}`;
   const submitWeight = () => { if (num(wInput) > 0) { logWeight({ kg: fromDisplayWeight(num(wInput), unit) }); setWInput(""); } };
 
   // Energy basis: the vet formula (default) or the measured expenditure. When "measured" is

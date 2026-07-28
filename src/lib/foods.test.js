@@ -3,7 +3,7 @@ import {
   distribute, waterfall, transitionAmount, kcalPerG, kcalFromGrams, isValidQty,
   upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed, dedupeFoods, canonicalFoodName,
   migrateLegacyFood, ensureBuiltins, macroProfile, backfillBuiltinMacros, blankFood, BUILTIN_FOODS, FOOD_NUM_KEYS,
-  rationMacroProfile, aafcoCheck,
+  rationMacroProfile, aafcoCheck, treatEnergy, foodType,
 } from "./foods.js";
 
 const sum = (a) => a.reduce((s, x) => s + x, 0);
@@ -200,7 +200,7 @@ describe("isCompleteFood gates auto-save", () => {
   });
   it("toLibraryEntry drops the ration-only fields (id, pct) and trims the name", () => {
     const e = toLibraryEntry({ id: "z", name: "A ", mode: "perKg", kcalPerKg: 1, gramsPerCup: 2, kcalPerUnit: "", gramsPerUnit: "", pct: 50 });
-    expect(e).toEqual({ name: "A", mode: "perKg", kcalPerKg: 1, gramsPerCup: 2, kcalPerUnit: "", gramsPerUnit: "", protein: "", fat: "", fiber: "", moisture: "", ash: "" });
+    expect(e).toEqual({ name: "A", mode: "perKg", type: "", kcalPerKg: 1, gramsPerCup: 2, kcalPerUnit: "", gramsPerUnit: "", protein: "", fat: "", fiber: "", moisture: "", ash: "" });
   });
 });
 
@@ -294,5 +294,22 @@ describe("aafcoCheck (dry-matter minimums)", () => {
   it("returns null for an unknown value", () => {
     expect(aafcoCheck({ protein: 0 }, "adult").protein).toBe(null);
     expect(aafcoCheck({}, "adult").fat).toBe(null);
+  });
+});
+
+describe("food type + treats", () => {
+  it("an explicit type wins over the moisture/mode heuristic", () => {
+    expect(foodType({ type: "treat", mode: "perUnit" })).toBe("treat");
+    expect(foodType({ type: "dry", mode: "perUnit", moisture: 78 })).toBe("dry");
+    expect(foodType({ mode: "perUnit" })).toBe("wet"); // no explicit type -> heuristic
+  });
+  it("treatEnergy converts between kcal/treat and kcal/kg", () => {
+    // 1 kcal/treat + 3423 kcal/kg -> treat weighs 1/3423*1000 ≈ 0.29 g
+    const a = treatEnergy({ kcalPerTreat: 1, kcalPerKg: 3423 });
+    expect(a.kcalPerUnit).toBe(1);
+    expect(a.gramsPerUnit).toBeCloseTo(0.3, 1);
+    // given kcal/treat + grams/treat -> derive kcal/kg
+    const b = treatEnergy({ kcalPerTreat: 1, gramsPerTreat: 0.29 });
+    expect(b.kcalPerKg).toBe(Math.round((1 / 0.29) * 1000)); // ~3448
   });
 });

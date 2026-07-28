@@ -300,7 +300,8 @@ function combineFoodEntry(a, b) {
   const id = combineField(a.id, b.id, isBlankStr);
   const name = combineField(stripKind(a.name), stripKind(b.name), isBlankStr);
   const mode = combineField(a.mode, b.mode, isBlankStr);
-  const out = { id, name, mode };
+  const type = combineField(a.type, b.type, isBlankStr); // wet/dry/treat — travels like mode
+  const out = { id, name, mode, type };
   for (const k of FOOD_NUM_KEYS) out[k] = combineField(a[k], b[k], isBlankNum);
   return out;
 }
