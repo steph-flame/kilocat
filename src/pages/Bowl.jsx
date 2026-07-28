@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
-import { foodType, kcalPerG, libEntry, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
+import { foodType, kcalPerG, libEntry, blankFood, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { num } from "../lib/util.js";
+import { DEMO_CAT_ID } from "../lib/catStore.js";
 import FoodSearch from "../components/FoodSearch.jsx";
 import GuaranteedAnalysis from "../components/GuaranteedAnalysis.jsx";
 
@@ -27,8 +28,29 @@ function Card({ children, style }) {
   return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
 
+// Biscuit the demo cat is never a stored cat, so real ration writes no-op on her — which made
+// every control on this screen feel dead. Give the demo a session-local, editable copy so the
+// whole screen is clickable (nothing persists, same as every other demo edit). Real cats use the
+// live ration unchanged.
+function useEditableRation(ration, isDemo, activeCatId) {
+  const [localItems, setLocalItems] = useState(null);
+  useEffect(() => { setLocalItems(isDemo ? ration.items : null); /* reset on cat switch */ }, [activeCatId, isDemo]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!isDemo) return ration;
+  const items = localItems ?? ration.items;
+  const setItems = (u) => setLocalItems((prev) => { const base = prev ?? ration.items; return typeof u === "function" ? u(base) : u; });
+  return {
+    items, setItems,
+    setField: (id, k, v) => setItems((fs) => fs.map((f) => (f.id === id ? { ...f, [k]: v } : f))),
+    add: () => setItems((fs) => [...fs, blankFood()]),
+    remove: (id) => setItems((fs) => fs.filter((f) => f.id !== id)),
+    patch: (id, obj) => setItems((fs) => fs.map((f) => (f.id === id ? { ...f, ...obj } : f))),
+  };
+}
+
 export default function Bowl() {
-  const { intent, ration, library, t, tr } = useApp();
+  const { intent, ration: liveRation, library, t, tr, activeCatId } = useApp();
+  const isDemo = activeCatId === DEMO_CAT_ID;
+  const ration = useEditableRation(liveRation, isDemo, activeCatId);
   const target = r0(intent.target);
   const dist = distributeBowl(ration.items, target);
   const byId = Object.fromEntries(dist.rows.map((r) => [r.id, r]));
