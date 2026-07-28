@@ -15,7 +15,10 @@ import Log from "./pages/Log.jsx";
 import Cats from "./pages/Cats.jsx";
 import Settings from "./pages/Settings.jsx";
 
-const PAGES = { home: Home, intent: Intent, bowl: Bowl, ration: RationPlanner, expenditure: Expenditure, log: Log, cats: Cats, settings: Settings };
+// Redesign migration: the "ration" nav now leads to the new Intent → Bowl flow (Almanac). The
+// classic planner is kept at #/ration-classic until its remaining bits (the transition schedule)
+// are migrated, so nothing is lost.
+const PAGES = { home: Home, intent: Intent, ration: Intent, bowl: Bowl, "ration-classic": RationPlanner, expenditure: Expenditure, log: Log, cats: Cats, settings: Settings };
 
 // Compact app-shell header: a settings link, plus the cat switcher — dense to match the rest
 // of the chrome (banners, nav rows). Always shown, even with one cat: "+ add a cat" needs to
