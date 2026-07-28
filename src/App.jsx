@@ -6,6 +6,7 @@ import { useHashRoute } from "./hooks/useHashRoute.js";
 import { platformInstallHint, isStandalone, isBannerDismissed, dismissBanner } from "./lib/pwa.js";
 import { DEMO_CAT_ID } from "./lib/demoCat.js";
 import CatMenu from "./components/CatMenu.jsx";
+import TabBar from "./components/TabBar.jsx";
 import Home from "./pages/Home.jsx";
 import Intent from "./pages/Intent.jsx";
 import Bowl from "./pages/Bowl.jsx";
@@ -79,21 +80,26 @@ function Router() {
   const installPlatform = installNudgePlatform();
   const isDemo = activeCatId === DEMO_CAT_ID;
   return (
-    <>
-      <Header catsSummary={catsSummary} activeCatId={activeCatId} switchCat={switchCat} addCat={addCat} />
-      {!storageOk && (
-        <Banner tone="warn">This browser isn't letting the app save (private mode?). Changes won't persist — use Export in Settings to keep your data.</Banner>
-      )}
-      {isDemo && !demoBannerClosed && (
-        <Banner onClose={() => setDemoBannerClosed(true)}>You're looking at Biscuit, the demo cat — everything here is sample data. Add your own cat from the name menu ↑.</Banner>
-      )}
-      {!installNudgeClosed && installPlatform && (
-        <Banner onClose={() => { dismissBanner(); setInstallNudgeClosed(true); }}>
-          {INSTALL_NUDGE_COPY[installPlatform]}
-        </Banner>
-      )}
-      <Page />
-    </>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div style={{ flex: "none" }}>
+        <Header catsSummary={catsSummary} activeCatId={activeCatId} switchCat={switchCat} addCat={addCat} />
+        {!storageOk && (
+          <Banner tone="warn">This browser isn't letting the app save (private mode?). Changes won't persist — use Export in Settings to keep your data.</Banner>
+        )}
+        {isDemo && !demoBannerClosed && (
+          <Banner onClose={() => setDemoBannerClosed(true)}>You're looking at Biscuit, the demo cat — everything here is sample data. Add your own cat from the name menu ↑.</Banner>
+        )}
+        {!installNudgeClosed && installPlatform && (
+          <Banner onClose={() => { dismissBanner(); setInstallNudgeClosed(true); }}>
+            {INSTALL_NUDGE_COPY[installPlatform]}
+          </Banner>
+        )}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <Page />
+      </div>
+      <TabBar route={route} />
+    </div>
   );
 }
 
