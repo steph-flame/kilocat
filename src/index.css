@@ -39,3 +39,37 @@ select:focus-visible,
     animation-duration: 0.01ms !important;
   }
 }
+
+/* Almanac rate slider (redesign) — a thin bar handle over a transparent native track, so a
+   custom track + recommended-zone band can be drawn behind it (see Intent screen). The thin
+   handle is deliberate: it never covers the shaded recommended zone. */
+.rate-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.rate-slider::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 30px;
+}
+.rate-slider::-moz-range-track {
+  background: transparent;
+  height: 30px;
+}
+.rate-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 6px;
+  height: 26px;
+  margin-top: 2px;
+  border-radius: 3px;
+  background: #191c12;
+  border: none;
+}
+.rate-slider::-moz-range-thumb {
+  width: 6px;
+  height: 26px;
+  border-radius: 3px;
+  background: #191c12;
+  border: none;
+}
