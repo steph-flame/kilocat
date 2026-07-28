@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
-import { computeIntent, recommendedZone } from "../lib/intent.js";
-import { bcsToPct, pctToBcs } from "../lib/nutrition.js";
+import { resolveIntent } from "../lib/intent.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 
@@ -41,33 +40,19 @@ export default function Intent() {
   const { p, t, expenditure, expSettings, setExpSettings, currentWeight, unit, setBcs, activeCatId, today } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
 
-  const measuredKcal = expenditure.enoughData ? r0(expenditure.kcal) : null;
-  const formulaKcal = r0(t.refs.maintain);
-  const defaultBasis = measuredKcal == null ? "formula" : expSettings.energyBasis === "formula" ? "formula" : "measured";
-
   // Local override so the controls respond instantly (and the demo cat, whose writes no-op, is
   // still interactive). Reset when the active cat changes. Write-through persists for real cats.
+  // resolveIntent is the shared resolver (see lib/intent.js) — Bowl/Today/Trend read the same one,
+  // and it treats BCS as primary, snapping % + ideal weight to the 1-9 grid (which is why "BCS 5,
+  // 12% over" can't happen). override feeds the in-progress values in for instant feedback.
   const [ov, setOv] = useState({});
   useEffect(() => setOv({}), [activeCatId]);
+  const intent = resolveIntent({ t, expenditure, currentWeightKg: currentWeight.kg, expSettings, override: ov });
+  const { bcs, pctOver, idealKg: idealWeight, measuredKcal, formulaKcal, basis, zone } = intent;
 
-  // Body condition is the PRIMARY input here (the redesign drops the old pct/goal machinery), so
-  // derive a BCS consistent with the cat's actual condition and snap the % + ideal weight to the
-  // 1-9 grid — otherwise an off-grid stored pctOver (e.g. the demo's 12%) would show "BCS 5, 12%
-  // over", which is the contradiction you spotted. Everything downstream uses these snapped values.
-  const bcs = ov.bcs ?? pctToBcs(t.pctOver);
-  const pctOver = bcsToPct(bcs);
-  const idealWeight = currentWeight.kg > 0 ? currentWeight.kg / (1 + pctOver / 100) : currentWeight.kg;
   const setBcsValue = (n) => { setOv((o) => ({ ...o, bcs: n })); if (!isDemo) setBcs(n); };
-
-  const zone = recommendedZone(pctOver);
-  const zoneMid = zone ? Math.round(((zone.lo + zone.hi) / 2) * 10) / 10 : 0;
-  const defaultRate = expSettings.ratePctPerWeek != null ? expSettings.ratePctPerWeek : zoneMid;
-  const basis = ov.basis ?? defaultBasis;
-  const rate = ov.rate ?? defaultRate;
   const setBasis = (b) => { setOv((o) => ({ ...o, basis: b })); setExpSettings({ energyBasis: b }); };
   const setRate = (v) => { const rr = Math.round(v * 10) / 10; setOv((o) => ({ ...o, rate: rr })); setExpSettings({ ratePctPerWeek: rr }); };
-
-  const intent = computeIntent({ basis, ratePctPerWeek: rate, measuredKcal, formulaKcal, currentKg: currentWeight.kg, idealKg: idealWeight, pctOver });
   const showW = (kg) => `${(toDisplayWeight(kg, unit)).toFixed(2)} ${weightLabel(unit)}`;
 
   // rate slider geometry: −2…+2 mapped to 0…100%
@@ -222,7 +207,7 @@ export default function Intent() {
 
         {/* advance */}
         <div style={{ padding: "4px 18px 0" }}>
-          <a href="#/ration" style={{ display: "block", textAlign: "center", background: A.good, color: A.card, fontFamily: TYPE.sans, fontSize: 13.5, fontWeight: 600, borderRadius: 14, padding: "13px 0", textDecoration: "none" }}>
+          <a href="#/bowl" style={{ display: "block", textAlign: "center", background: A.good, color: A.card, fontFamily: TYPE.sans, fontSize: 13.5, fontWeight: 600, borderRadius: 14, padding: "13px 0", textDecoration: "none" }}>
             Next — split it into food ›
           </a>
         </div>

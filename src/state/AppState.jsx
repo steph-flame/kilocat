@@ -16,6 +16,7 @@ import {
 } from "../lib/catStore.js";
 import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
+import { resolveIntent } from "../lib/intent.js";
 import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../lib/mergeData.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
@@ -357,6 +358,13 @@ export function AppProvider({ children }) {
     return ucEstimateExpenditure(w, i, opts); // v3 (default)
   }, [weightLog.items, intakeLog.items, intakeDayStatus, estimator, t.refs.maintain, today]);
 
+  // The single resolved "current target" (redesign) — basis + signed rate → target/floor/rate,
+  // on ρ=7800. One source of truth so Intent, Bowl, Today and Trend never disagree (see lib/intent.js).
+  const intent = useMemo(
+    () => resolveIntent({ t, expenditure, currentWeightKg: currentWeight.kg, expSettings: activeCat.expSettings }),
+    [t, expenditure, currentWeight.kg, activeCat.expSettings]
+  );
+
   // Profile helpers (unchanged semantics, just centralized).
   const ageUnit = p.ageUnit || "months";
   const ageDisplay = dobMissing ? null : ageUnit === "years" ? r1(effAgeMonths / 12) : r1(effAgeMonths); // never a fabricated age
@@ -539,7 +547,7 @@ export function AppProvider({ children }) {
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
-    t, expenditure,
+    t, expenditure, intent,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,
     exportData: () => JSON.stringify(persistData, null, 2),
     importData,

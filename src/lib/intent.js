@@ -12,7 +12,7 @@
 // (The design handoff annotated ~1960 here; that is a mockup slip — 4× below the defensible
 // tissue-density range and never present in this codebase. Formula over numbers.)
 
-import { RER } from "./nutrition.js";
+import { RER, bcsToPct, pctToBcs } from "./nutrition.js";
 import { KCAL_PER_KG } from "./expenditure.js";
 import { num } from "./util.js";
 
@@ -80,4 +80,24 @@ export function computeIntent({ basis, ratePctPerWeek, measuredKcal, formulaKcal
     zone, inZone, contraIndicated,
     aboveFloorBy: target - floorKcal,
   };
+}
+
+// The one place the whole app resolves "the current target" from stored settings + derived data,
+// so Intent, Bowl, Today and Trend can never disagree. Body condition is treated as primary here
+// (BCS derived from actual condition, % + ideal snapped to the 1-9 grid). `override` lets the
+// Intent screen feed in-progress, not-yet-persisted values (basis/rate/bcs) for instant feedback;
+// everyone else passes none and gets the persisted result.
+export function resolveIntent({ t, expenditure, currentWeightKg, expSettings = {}, override = {} }) {
+  const W = num(currentWeightKg);
+  const measuredKcal = expenditure && expenditure.enoughData ? Math.round(expenditure.kcal) : null;
+  const formulaKcal = Math.round(num(t.refs.maintain));
+  const basis = override.basis ?? (measuredKcal == null ? "formula" : expSettings.energyBasis === "formula" ? "formula" : "measured");
+  const bcs = override.bcs ?? pctToBcs(t.pctOver);
+  const pctOver = bcsToPct(bcs);
+  const idealKg = W > 0 ? W / (1 + pctOver / 100) : W;
+  const zone = recommendedZone(pctOver);
+  const defaultRate = expSettings.ratePctPerWeek != null ? expSettings.ratePctPerWeek : zone ? Math.round(((zone.lo + zone.hi) / 2) * 10) / 10 : 0;
+  const rate = override.rate ?? defaultRate;
+  const result = computeIntent({ basis, ratePctPerWeek: rate, measuredKcal, formulaKcal, currentKg: W, idealKg, pctOver });
+  return { ...result, bcs, pctOver, idealKg, measuredKcal, formulaKcal };
 }

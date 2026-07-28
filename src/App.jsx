@@ -8,13 +8,14 @@ import { DEMO_CAT_ID } from "./lib/demoCat.js";
 import CatMenu from "./components/CatMenu.jsx";
 import Home from "./pages/Home.jsx";
 import Intent from "./pages/Intent.jsx";
+import Bowl from "./pages/Bowl.jsx";
 import RationPlanner from "./pages/RationPlanner.jsx";
 import Expenditure from "./pages/Expenditure.jsx";
 import Log from "./pages/Log.jsx";
 import Cats from "./pages/Cats.jsx";
 import Settings from "./pages/Settings.jsx";
 
-const PAGES = { home: Home, intent: Intent, ration: RationPlanner, expenditure: Expenditure, log: Log, cats: Cats, settings: Settings };
+const PAGES = { home: Home, intent: Intent, bowl: Bowl, ration: RationPlanner, expenditure: Expenditure, log: Log, cats: Cats, settings: Settings };
 
 // Compact app-shell header: a settings link, plus the cat switcher — dense to match the rest
 // of the chrome (banners, nav rows). Always shown, even with one cat: "+ add a cat" needs to
