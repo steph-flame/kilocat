@@ -20,21 +20,21 @@ export const RATE_MAX = 2; // %/wk magnitude cap (AAHA/APOP safe ceiling for cat
 export const RATE_STEP = 0.1; // slider snaps to 0.1
 const clampMag = (n, m) => Math.max(-m, Math.min(m, n));
 
-// Advisory recommended rate zone from body condition (% over ideal). Overweight → a loss zone,
-// underweight → a gain zone, at-ideal → null (hold). Returned as SIGNED { lo, hi } %/wk. Advisory
-// ONLY — it shades the slider and drives the caution copy, but never clamps the control. The
-// BCS-6 case (10% over) is −1.0…−0.5, matching the handoff; severity widens/quickens it.
+// Advisory recommended rate zone from body condition (% over ideal). Overweight → a gentle loss
+// zone, underweight → a gentle gain zone, at-ideal → null (hold). SIGNED { lo, hi } %/wk. Advisory
+// ONLY — it shades the slider and drives the caution copy, never clamps the control (the hard cap
+// is RATE_MAX below).
+//
+// The band is the SAME regardless of how far from ideal the cat is: ~0.5–1%/wk, the standard
+// conservative clinical target for feline weight change (AAHA Weight-Management Guidelines; APOP).
+// Being heavier means the journey takes LONGER, not that each week can safely be faster — the
+// hepatic-lipidosis risk that sets the ceiling is driven by the rate, not the starting weight. So
+// there is deliberately no per-BCS gradient. Anything up to the 2%/wk cap is reachable, but that
+// end is for veterinary supervision, which the out-of-zone caution says.
 export function recommendedZone(pctOver) {
   const over = num(pctOver);
-  if (over > 2) {
-    if (over >= 30) return { lo: -2.0, hi: -1.0 };
-    if (over >= 20) return { lo: -1.5, hi: -0.75 };
-    return { lo: -1.0, hi: -0.5 };
-  }
-  if (over < -2) {
-    if (over <= -20) return { lo: 1.0, hi: 2.0 };
-    return { lo: 0.5, hi: 1.0 };
-  }
+  if (over > 2) return { lo: -1.0, hi: -0.5 }; // overweight — gentle, sustainable loss
+  if (over < -2) return { lo: 0.5, hi: 1.0 }; // underweight — gentle gain
   return null; // at ideal — hold
 }
 

@@ -70,9 +70,9 @@ export default function Intent() {
       <div style={{ maxWidth: 430, margin: "0 auto" }}>
         {/* kicker + heading */}
         <div style={{ padding: "18px 24px 0" }}>
-          <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>Step 1 of 2 · intent</div>
+          <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>calorie plan</div>
           <h1 style={{ fontFamily: TYPE.serif, fontWeight: 400, fontSize: 25, lineHeight: 1.24, letterSpacing: "-.012em", margin: "10px 0 16px", color: A.ink }}>
-            What are we asking of {p.name || "your cat"}?
+            How much should {p.name || "your cat"} eat?
           </h1>
         </div>
 
@@ -205,10 +205,10 @@ export default function Intent() {
           </div>
         </Card>
 
-        {/* advance */}
-        <div style={{ padding: "4px 18px 0" }}>
-          <a href="#/bowl" style={{ display: "block", textAlign: "center", background: A.good, color: A.card, fontFamily: TYPE.sans, fontSize: 13.5, fontWeight: 600, borderRadius: 14, padding: "13px 0", textDecoration: "none" }}>
-            Next — split it into food ›
+        {/* cross-link to the (independent) ration page — not a mandatory next step */}
+        <div style={{ padding: "6px 24px 0", textAlign: "center" }}>
+          <a href="#/ration" style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.good, fontWeight: 600, textDecoration: "none" }}>
+            Split it into food ›
           </a>
         </div>
       </div>

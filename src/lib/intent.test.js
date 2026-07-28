@@ -9,9 +9,9 @@ describe("recommendedZone (advisory, from % over ideal)", () => {
   it("BCS 6 (10% over) recommends −1.0…−0.5 %/wk — matches the handoff", () => {
     expect(recommendedZone(10)).toEqual({ lo: -1.0, hi: -0.5 });
   });
-  it("widens/quickens with severity, flips to gain when underweight, holds at ideal", () => {
-    expect(recommendedZone(22)).toEqual({ lo: -1.5, hi: -0.75 });
-    expect(recommendedZone(35)).toEqual({ lo: -2.0, hi: -1.0 });
+  it("is the same conservative band regardless of how overweight (no per-BCS gradient)", () => {
+    expect(recommendedZone(22)).toEqual({ lo: -1.0, hi: -0.5 });
+    expect(recommendedZone(35)).toEqual({ lo: -1.0, hi: -0.5 });
     expect(recommendedZone(-10)).toEqual({ lo: 0.5, hi: 1.0 });
     expect(recommendedZone(0)).toBe(null);
   });

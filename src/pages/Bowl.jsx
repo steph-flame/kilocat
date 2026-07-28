@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
-import { foodType, kcalPerG, libEntry, blankFood, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
+import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { num } from "../lib/util.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
+import { BookmarkPlus, BookmarkCheck } from "lucide-react";
 import FoodSearch from "../components/FoodSearch.jsx";
 import GuaranteedAnalysis from "../components/GuaranteedAnalysis.jsx";
 
@@ -48,12 +49,13 @@ function useEditableRation(ration, isDemo, activeCatId) {
 }
 
 export default function Bowl() {
-  const { intent, ration: liveRation, library, t, tr, activeCatId } = useApp();
+  const { intent, ration: liveRation, library, t, tr, activeCatId, saveFood } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const ration = useEditableRation(liveRation, isDemo, activeCatId);
   const target = r0(intent.target);
   const dist = distributeBowl(ration.items, target);
   const byId = Object.fromEntries(dist.rows.map((r) => [r.id, r]));
+  const savedNames = new Set((library.foods || []).map((x) => x.name.trim().toLowerCase()));
 
   // exactly one remainder — promoting one demotes any other.
   const setMode = (id, mode) => ration.setItems((fs) => fs.map((f) => {
@@ -69,13 +71,16 @@ export default function Bowl() {
     <div style={{ background: A.pageFill, minHeight: "100%", fontFamily: TYPE.sans, color: A.ink, paddingBottom: 28 }}>
       <div style={{ maxWidth: 430, margin: "0 auto" }}>
         <div style={{ padding: "18px 24px 0" }}>
-          <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>Step 2 of 2 · the bowl</div>
+          <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>the ration</div>
           <h1 style={{ fontFamily: TYPE.serif, fontWeight: 400, fontSize: 25, lineHeight: 1.24, letterSpacing: "-.012em", margin: "10px 0 6px" }}>
             How should {target} kcal be split?
           </h1>
-          <p style={{ fontSize: 12.5, color: A.bodyOnFill, margin: "0 0 14px", lineHeight: 1.45 }}>
+          <p style={{ fontSize: 12.5, color: A.bodyOnFill, margin: "0 0 6px", lineHeight: 1.45 }}>
             Any number of foods. Each takes a <b style={{ fontWeight: 600 }}>share</b>, a <b style={{ fontWeight: 600 }}>fixed amount</b>, or <b style={{ fontWeight: 600 }}>whatever is left</b>.
           </p>
+          <a href="#/calories" style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textDecoration: "none", display: "inline-block", marginBottom: 14 }}>
+            {target} kcal from your calorie plan · adjust ›
+          </a>
         </div>
 
         <Card style={{ padding: "4px 16px 14px" }}>
@@ -84,7 +89,8 @@ export default function Bowl() {
           )}
           {ration.items.map((f, i) => (
             <BowlRow key={f.id} f={f} row={byId[f.id] || { kcal: 0, grams: null, pct: 0 }} target={target}
-              first={i === 0} library={library} ration={ration} setMode={setMode} />
+              first={i === 0} library={library} ration={ration} setMode={setMode}
+              saveFood={saveFood} saved={savedNames.has((f.name || "").trim().toLowerCase())} />
           ))}
 
           <button onClick={() => ration.add()} style={{ width: "100%", marginTop: 6, border: `1px dashed ${A.cardBorder}`, borderRadius: 12, background: "transparent", color: A.body, fontFamily: TYPE.sans, fontSize: 12.5, padding: "10px 0", cursor: "pointer" }}>
@@ -120,11 +126,10 @@ export default function Bowl() {
           </Card>
         )}
 
-        {/* footer */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 24px 0", gap: 12 }}>
-          <a href="#/intent" style={{ fontFamily: TYPE.mono, fontSize: 11.5, color: A.bodyOnFill, textDecoration: "none" }}>‹ Step 1 · intent</a>
+        {/* footer — the ration saves live as you edit; this just leaves the page */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "4px 24px 0" }}>
           <a href="#/" style={{ background: A.good, color: A.card, fontFamily: TYPE.sans, fontSize: 13, fontWeight: 600, borderRadius: 14, padding: "12px 20px", textDecoration: "none" }}>
-            Save this ration
+            Done ›
           </a>
         </div>
       </div>
@@ -143,7 +148,7 @@ function AmountRow({ left, grams }) {
   );
 }
 
-function BowlRow({ f, row, target, first, library, ration, setMode }) {
+function BowlRow({ f, row, target, first, library, ration, setMode, saveFood, saved }) {
   const [showDetails, setShowDetails] = useState(false);
   const mode = f.mode || "share";
   const type = foodType(f);
@@ -162,6 +167,12 @@ function BowlRow({ f, row, target, first, library, ration, setMode }) {
             onChangeName={(v) => ration.setField(f.id, "name", v)}
             onPick={(food) => ration.patch(f.id, libEntry(food))} />
         </div>
+        <button onClick={() => isCompleteFood(f) && saveFood?.(f)} disabled={!isCompleteFood(f)}
+          title={saved ? "Saved to your foods" : isCompleteFood(f) ? "Save to your foods (with its type, energy & analysis)" : "Add a name and energy first"}
+          aria-label="Save food to your library"
+          style={{ color: saved ? A.good : isCompleteFood(f) ? A.muted : A.cardBorder, border: "none", background: "none", cursor: isCompleteFood(f) ? "pointer" : "default", padding: 0, display: "inline-flex" }}>
+          {saved ? <BookmarkCheck size={16} /> : <BookmarkPlus size={16} />}
+        </button>
         <button onClick={() => ration.remove(f.id)} aria-label="Remove food" style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 15 }}>×</button>
       </div>
 
