@@ -4,7 +4,8 @@ import { A, TYPE } from "../almanac.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp } from "../lib/series.js";
 import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayLabel } from "../lib/dayPager.js";
 import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../lib/foodStats.js";
-import { kcalPerG } from "../lib/foods.js";
+import { kcalPerG, foodType } from "../lib/foods.js";
+import { distributeBowl } from "../lib/bowl.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
 import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
@@ -12,7 +13,10 @@ import FoodSearch from "../components/FoodSearch.jsx";
 
 const r0 = (n) => Math.round(n);
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`);
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
+const Em = ({ children }) => <strong style={{ fontWeight: 500, boxShadow: `inset 0 -7px 0 ${A.underline}` }}>{children}</strong>;
+const stepAmount = (s) => (s.mode === "fixed" && s.type === "treat" && num(s.treatCount) ? `${Number(num(s.treatCount).toFixed(1))} treat${num(s.treatCount) === 1 ? "" : "s"}` : g1(s.grams));
 function Card({ children, style }) {
   return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
@@ -34,7 +38,7 @@ function useEditableLog(log, isDemo, activeCatId) {
 }
 
 export default function LogPage() {
-  const { p, intent, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings } = useApp();
+  const { p, intent, ration, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const intakeLog = useEditableLog(liveIntake, isDemo, activeCatId);
   const weightLog = useEditableLog(liveWeight, isDemo, activeCatId);
@@ -87,7 +91,7 @@ export default function LogPage() {
         </div>
 
         {tab === "food"
-          ? <FoodTab {...{ intakeLog, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay }} />
+          ? <FoodTab {...{ intakeLog, ration, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay }} />
           : <WeightTab {...{ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings }} />}
       </div>
     </div>
@@ -143,7 +147,7 @@ function KcalChart({ intakeItems, days, selected, onSelect, target, dayStatus, t
 }
 
 /* ---------- food tab ---------- */
-function FoodTab({ intakeLog, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay }) {
+function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay }) {
   const [name, setName] = useState("");
   const [kcalG, setKcalG] = useState(0);
   const [grams, setGrams] = useState("");
@@ -160,6 +164,18 @@ function FoodTab({ intakeLog, library, viewedDate, todayStr, target, isDemo, isT
   const total = dayItems.reduce((s, e) => s + num(e.kcal), 0);
   const flagged = intakeDayStatus[viewedDate] === "incomplete";
 
+  // Tonight's bowl (the old Today screen, folded in): shown on today's view before anything's
+  // logged. "Log it" fills the day from the ration split in one tap.
+  const steps = useMemo(() => {
+    const dist = distributeBowl(ration.items, target);
+    return dist.rows.filter((s) => s.kcal > 0).map((s) => {
+      const f = ration.items.find((x) => x.id === s.id) || {};
+      return { ...s, type: foodType(f), mode: f.mode || "share", treatCount: f.treatCount };
+    }).sort((a, b) => (a.mode === "remainder" ? 1 : 0) - (b.mode === "remainder" ? 1 : 0));
+  }, [ration.items, target]);
+  const showTonight = isToday && steps.length > 0 && dayItems.length === 0;
+  const logTonight = () => steps.forEach((s) => intakeLog.add({ date: viewedDate, kcal: r0(s.kcal), grams: s.grams != null ? Number(s.grams.toFixed(1)) : null, name: s.name || null, kcalPerG: s.grams > 0 ? s.kcal / s.grams : null }));
+
   const add = () => {
     if (num(kcal) > 0) {
       intakeLog.add({ date: viewedDate, kcal: r0(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null });
@@ -169,6 +185,16 @@ function FoodTab({ intakeLog, library, viewedDate, todayStr, target, isDemo, isT
 
   return (
     <>
+      {showTonight && (
+        <Card>
+          <div style={label({ marginBottom: 6 })}>Tonight's bowl · {target} kcal</div>
+          <p style={{ fontFamily: TYPE.serif, fontSize: 19, lineHeight: 1.36, margin: 0, color: A.ink }}>
+            Feed {steps.map((s, i) => <span key={s.id}><Em>{stepAmount(s)}</Em> of {s.name || "food"}{i < steps.length - 1 ? (i === steps.length - 2 ? ", and " : ", ") : "."}</span>)}
+          </p>
+          <button onClick={logTonight} style={{ marginTop: 12, width: "100%", background: A.ink, color: A.card, border: "none", borderRadius: 12, padding: "11px 0", fontFamily: TYPE.sans, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Log it ✓</button>
+        </Card>
+      )}
+
       <Card style={{ padding: "12px 16px" }}>
         <KcalChart intakeItems={intakeLog.items} days={days} selected={viewedDate} onSelect={selectDay} target={target} dayStatus={intakeDayStatus} todayStr={todayStr} />
       </Card>

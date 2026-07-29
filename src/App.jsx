@@ -7,10 +7,8 @@ import { platformInstallHint, isStandalone, isBannerDismissed, dismissBanner } f
 import { DEMO_CAT_ID } from "./lib/demoCat.js";
 import CatMenu from "./components/CatMenu.jsx";
 import TabBar from "./components/TabBar.jsx";
-import Home from "./pages/Home.jsx";
 import Intent from "./pages/Intent.jsx";
 import Bowl from "./pages/Bowl.jsx";
-import Today from "./pages/Today.jsx";
 import RationPlanner from "./pages/RationPlanner.jsx";
 import Expenditure from "./pages/Expenditure.jsx";
 import Trend from "./pages/Trend.jsx";
@@ -24,7 +22,7 @@ import Settings from "./pages/Settings.jsx";
 // the other but neither forces you through it. The classic planner stays at #/ration-classic until
 // its transition schedule is migrated. (#/intent and #/bowl kept as aliases.)
 const PAGES = {
-  home: Home, today: Today, calories: Intent, intent: Intent, ration: Bowl, bowl: Bowl,
+  home: LogPage, today: LogPage, calories: Intent, intent: Intent, ration: Bowl, bowl: Bowl,
   "ration-classic": RationPlanner, trend: Trend, expenditure: Trend, "expenditure-classic": Expenditure, log: LogPage, "log-classic": Log, cats: Cats, settings: Settings,
 };
 
@@ -77,7 +75,7 @@ function Router() {
   const [demoBannerClosed, setDemoBannerClosed] = useState(false);
   const [installNudgeClosed, setInstallNudgeClosed] = useState(false);
   if (!loaded) return <div style={{ background: C.paper, minHeight: "100%" }} className="w-full" />;
-  const Page = PAGES[route] || Home;
+  const Page = PAGES[route] || LogPage;
   const installPlatform = installNudgePlatform();
   const isDemo = activeCatId === DEMO_CAT_ID;
   return (
