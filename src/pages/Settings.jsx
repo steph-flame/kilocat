@@ -238,7 +238,7 @@ function SkinSwatch({ name, tokens, active, onClick }) {
 // Connected: robot list, mapping section (one row per Whisker pet + per LR4-generation robot),
 // last sync, sync-now, disconnect. Errors surface as their own .message (LitterRobotError from
 // lib/litterRobot.js already turns raw Cognito/AppSync failures into something legible).
-function LitterRobotCard({ connection, catsSummary, connectStart, connectFinish, disconnect, syncNow, setPetMapping, setRobotMapping }) {
+export function LitterRobotCard({ connection, catsSummary, connectStart, connectFinish, disconnect, syncNow, setPetMapping, setRobotMapping }) {
   // Lives here (not inside LRDisconnected) because connectFinish() sets `connection` truthy
   // synchronously, before its returned first-sync promise resolves — LRDisconnected unmounts
   // (swapped for LRConnected) well before that promise settles, so the result has to land on a
