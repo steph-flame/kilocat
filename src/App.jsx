@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Info, X, Settings as SettingsIcon } from "lucide-react";
-import { C } from "./theme.js";
+import { X } from "lucide-react";
+import { A, TYPE } from "./almanac.js";
 import { AppProvider, useApp } from "./state/AppState.jsx";
 import { useHashRoute } from "./hooks/useHashRoute.js";
 import { platformInstallHint, isStandalone, isBannerDismissed, dismissBanner } from "./lib/pwa.js";
 import { DEMO_CAT_ID } from "./lib/demoCat.js";
-import CatMenu from "./components/CatMenu.jsx";
 import TabBar from "./components/TabBar.jsx";
+import Sidebar from "./components/Sidebar.jsx";
 import Intent from "./pages/Intent.jsx";
 import Bowl from "./pages/Bowl.jsx";
 import RationPlanner from "./pages/RationPlanner.jsx";
@@ -31,26 +31,44 @@ const PAGES = {
 // Compact app-shell header: a settings link, plus the cat switcher — dense to match the rest
 // of the chrome (banners, nav rows). Always shown, even with one cat: "+ add a cat" needs to
 // be reachable from here regardless of cat count.
+// Almanac top bar: just the active cat, a tap away from switching. Settings moved to the More tab,
+// so there's nothing else to carry up here.
 function Header({ catsSummary, activeCatId, switchCat, addCat }) {
+  const [open, setOpen] = useState(false);
+  const active = catsSummary.find((c) => c.id === activeCatId);
+  const multi = catsSummary.length > 1;
   return (
-    <div style={{ borderColor: C.line, background: C.paper }} className="w-full border-b">
-      <div className="max-w-xl mx-auto px-4 py-1.5 flex items-center justify-between text-xs font-mono">
-        <CatMenu variant="chip" catsSummary={catsSummary} activeCatId={activeCatId} switchCat={switchCat} addCat={addCat} />
-        <a href="#/settings" style={{ color: C.sub }} className="inline-flex items-center gap-1 hover:underline"><SettingsIcon size={12} /> settings</a>
-      </div>
+    <div style={{ background: A.pageFill, borderBottom: `1px solid ${A.tabBorder}`, padding: "8px 20px", position: "relative", display: "flex", alignItems: "center" }}>
+      <button onClick={() => multi ? setOpen((o) => !o) : (window.location.hash = "#/cats")}
+        style={{ fontFamily: TYPE.mono, fontSize: 12, fontWeight: 600, color: A.good, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+        {active?.name || "your cat"}{multi ? " ▾" : ""}
+      </button>
+      {open && multi && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 55 }} />
+          <div style={{ position: "absolute", top: "100%", left: 14, zIndex: 60, marginTop: 2, background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 12, padding: 5, minWidth: 170, boxShadow: "0 8px 24px rgba(25,28,18,.10)" }}>
+            {catsSummary.map((c) => (
+              <button key={c.id} onClick={() => { switchCat(c.id); setOpen(false); }}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", borderRadius: 8, fontFamily: TYPE.sans, fontSize: 13, color: A.ink, background: c.id === activeCatId ? A.track : "transparent", border: "none", cursor: "pointer" }}>
+                {c.name || "unnamed"}{c.demo ? " · demo" : ""}
+              </button>
+            ))}
+            <button onClick={() => { addCat(); setOpen(false); }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", borderRadius: 8, fontFamily: TYPE.sans, fontSize: 13, color: A.good, background: "none", border: "none", cursor: "pointer" }}>+ add a cat</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
 function Banner({ children, tone, onClose }) {
-  const bg = tone === "warn" ? C.warnSoft : C.spruceSoft;
-  const fg = tone === "warn" ? C.warn : C.spruce;
+  const c = tone === "warn" ? A.caution : { bg: "#E6EFE6", text: A.good };
   return (
-    <div style={{ background: bg, color: fg }} className="w-full text-xs">
-      <div className="max-w-xl mx-auto px-4 py-2 flex items-start gap-2">
-        <Info size={14} className="shrink-0 mt-0.5" />
-        <span className="flex-1 leading-snug">{children}</span>
-        {onClose && <button onClick={onClose} aria-label="Dismiss" style={{ color: fg }} className="shrink-0"><X size={14} /></button>}
+    <div style={{ background: c.bg, color: c.text, fontFamily: TYPE.sans, fontSize: 12.5 }}>
+      <div style={{ maxWidth: 460, margin: "0 auto", padding: "8px 20px", display: "flex", alignItems: "flex-start", gap: 8, lineHeight: 1.4 }}>
+        <span style={{ flex: 1 }}>{children}</span>
+        {onClose && <button onClick={onClose} aria-label="Dismiss" style={{ color: c.text, background: "none", border: "none", cursor: "pointer", flex: "none", marginTop: 1 }}><X size={14} /></button>}
       </div>
     </div>
   );
@@ -76,30 +94,46 @@ function Router() {
   const route = useHashRoute("home");
   const [demoBannerClosed, setDemoBannerClosed] = useState(false);
   const [installNudgeClosed, setInstallNudgeClosed] = useState(false);
-  if (!loaded) return <div style={{ background: C.paper, minHeight: "100%" }} className="w-full" />;
+  if (!loaded) return <div style={{ background: A.pageFill, minHeight: "100%" }} />;
   const Page = PAGES[route] || LogPage;
   const installPlatform = installNudgePlatform();
   const isDemo = activeCatId === DEMO_CAT_ID;
+  const banners = (
+    <>
+      {!storageOk && (
+        <Banner tone="warn">This browser isn't letting the app save (private mode?). Changes won't persist — use Export in More to keep your data.</Banner>
+      )}
+      {isDemo && !demoBannerClosed && (
+        <Banner onClose={() => setDemoBannerClosed(true)}>You're looking at Biscuit, the demo cat — everything here is sample data. Add your own cat from the cat menu.</Banner>
+      )}
+      {!installNudgeClosed && installPlatform && (
+        <Banner onClose={() => { dismissBanner(); setInstallNudgeClosed(true); }}>
+          {INSTALL_NUDGE_COPY[installPlatform]}
+        </Banner>
+      )}
+    </>
+  );
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ flex: "none" }}>
-        <Header catsSummary={catsSummary} activeCatId={activeCatId} switchCat={switchCat} addCat={addCat} />
-        {!storageOk && (
-          <Banner tone="warn">This browser isn't letting the app save (private mode?). Changes won't persist — use Export in Settings to keep your data.</Banner>
-        )}
-        {isDemo && !demoBannerClosed && (
-          <Banner onClose={() => setDemoBannerClosed(true)}>You're looking at Biscuit, the demo cat — everything here is sample data. Add your own cat from the name menu ↑.</Banner>
-        )}
-        {!installNudgeClosed && installPlatform && (
-          <Banner onClose={() => { dismissBanner(); setInstallNudgeClosed(true); }}>
-            {INSTALL_NUDGE_COPY[installPlatform]}
-          </Banner>
-        )}
+    <div className="h-full flex flex-col md:flex-row">
+      {/* desktop: left nav rail (>=768px) */}
+      <div className="hidden md:flex">
+        <Sidebar route={route} catsSummary={catsSummary} activeCatId={activeCatId} switchCat={switchCat} addCat={addCat} />
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        <Page />
+      {/* main column */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {/* mobile: top cat bar (desktop puts the cat in the sidebar) */}
+        <div className="flex-none md:hidden">
+          <Header catsSummary={catsSummary} activeCatId={activeCatId} switchCat={switchCat} addCat={addCat} />
+        </div>
+        <div className="flex-none">{banners}</div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <Page />
+        </div>
+        {/* mobile: bottom tab bar */}
+        <div className="md:hidden">
+          <TabBar route={route} />
+        </div>
       </div>
-      <TabBar route={route} />
     </div>
   );
 }

@@ -20,8 +20,12 @@ const OWNER = {
   settings: "more", cats: "more",
 };
 
+// Shared with the desktop Sidebar so both nav surfaces highlight consistently.
+export const tabForRoute = (route) => OWNER[route] || "log";
+export const NAV_TABS = TABS;
+
 export default function TabBar({ route }) {
-  const active = OWNER[route] || "today";
+  const active = OWNER[route] || "log";
   return (
     <nav aria-label="Sections" style={{ flex: "none", background: A.tabBar, borderTop: `1px solid ${A.tabBorder}`, padding: "10px 12px calc(10px + env(safe-area-inset-bottom, 8px))", display: "flex" }}>
       {TABS.map((t) => {
