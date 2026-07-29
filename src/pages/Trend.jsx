@@ -13,15 +13,27 @@ import { bcsToPct, pctToBcs } from "../lib/nutrition.js";
 const r0 = (n) => Math.round(n);
 const r1 = (n) => Math.round(n * 10) / 10;
 const VW = 360; // svg viewBox width
-const PADX = 6;
+const PADL = 38; // left gutter for the y-axis labels
+const PADR = 12; // right gutter (end-of-line labels)
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 const cap = { fontSize: 12, color: A.bodyOnFill, lineHeight: 1.45, margin: "8px 0 0" };
+const axisText = { fontFamily: TYPE.mono, fontSize: 9, fill: A.muted };
 
 function Card({ children, style }) {
   return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
-const xAt = (i, n) => (n <= 1 ? VW / 2 : PADX + (i / (n - 1)) * (VW - 2 * PADX));
+const xAt = (i, n) => (n <= 1 ? (PADL + VW - PADR) / 2 : PADL + (i / (n - 1)) * (VW - PADL - PADR));
 const dPath = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+const mmdd = (iso) => (iso ? `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}` : "");
+// A small x-axis date row under a chart (start … end).
+function XDates({ frame }) {
+  if (!frame.length) return null;
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", fontFamily: TYPE.mono, fontSize: 9, color: A.muted, padding: `2px ${PADR}px 0 ${PADL}px` }}>
+      <span>{mmdd(frame[0].date)}</span><span>{mmdd(frame[frame.length - 1].date)}</span>
+    </div>
+  );
+}
 
 const RANGES = [["3m", 90, "3m"], ["6m", 180, "6m"], ["all", null, "all"]];
 
@@ -100,7 +112,7 @@ export default function Trend() {
 
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Rate of change · %/wk</div>
-          <RateChart rates={rates} />
+          <RateChart rates={rates} frame={frame} />
           <p style={{ ...cap, fontSize: 11.5 }}>
             Currently {e.ratePctPerWeek < 0 ? "−" : e.ratePctPerWeek > 0 ? "+" : ""}{Math.abs(r1(e.ratePctPerWeek))}%/wk. The shaded band is the safe 0.5–2%/wk zone; above the dashed line she'd be gaining.
           </p>
@@ -141,7 +153,7 @@ function IntervalBar({ lo, hi, point }) {
 }
 
 function WeightChart({ frame, dots, idealKg, disp }) {
-  const H = 130, PADY = 10;
+  const H = 130, PADY = 12;
   const ws = frame.map((f) => f.w).filter((v) => v != null).map(disp);
   const dws = dots.map((d) => disp(d.kg));
   const all = [...ws, ...dws, disp(idealKg)].filter((v) => Number.isFinite(v));
@@ -151,39 +163,49 @@ function WeightChart({ frame, dots, idealKg, disp }) {
   const line = frame.map((f, i) => (f.w != null ? [xAt(i, frame.length), y(disp(f.w))] : null)).filter(Boolean);
   const idealY = y(disp(idealKg));
   const endI = frame.length - 1;
+  const f2 = (v) => Number(v.toFixed(2));
   return (
-    <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }} aria-hidden="true">
-      <line x1={PADX} y1={idealY} x2={VW - PADX} y2={idealY} stroke={A.chart.ideal} strokeWidth="1.6" strokeDasharray="5 4" />
-      {line.length > 1 && <path d={dPath(line)} fill="none" stroke={A.chart.trend} strokeWidth="2.2" />}
-      {dots.map((d, k) => <circle key={k} cx={xAt(d.i, frame.length)} cy={y(disp(d.kg))} r="3.2" fill={A.chart.weighDot} />)}
-      {frame[endI]?.w != null && <circle cx={xAt(endI, frame.length)} cy={y(disp(frame[endI].w))} r="4.5" fill={A.chart.endDot} />}
-    </svg>
+    <>
+      <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }} aria-hidden="true">
+        <text x={PADL - 5} y={y(hi) + 3} textAnchor="end" style={axisText}>{f2(hi)}</text>
+        <text x={PADL - 5} y={y(lo) + 3} textAnchor="end" style={axisText}>{f2(lo)}</text>
+        <line x1={PADL} y1={idealY} x2={VW - PADR} y2={idealY} stroke={A.chart.ideal} strokeWidth="1.6" strokeDasharray="5 4" />
+        <text x={VW - PADR} y={idealY - 3} textAnchor="end" style={{ ...axisText, fill: A.chart.ideal }}>ideal {f2(disp(idealKg))}</text>
+        {line.length > 1 && <path d={dPath(line)} fill="none" stroke={A.chart.trend} strokeWidth="2.2" />}
+        {dots.map((d, k) => <circle key={k} cx={xAt(d.i, frame.length)} cy={y(disp(d.kg))} r="3.2" fill={A.chart.weighDot} />)}
+        {frame[endI]?.w != null && <circle cx={xAt(endI, frame.length)} cy={y(disp(frame[endI].w))} r="4.5" fill={A.chart.endDot} />}
+      </svg>
+      <XDates frame={frame} />
+    </>
   );
 }
 
-function RateChart({ rates }) {
-  const H = 100, PADY = 10;
+function RateChart({ rates, frame }) {
+  const H = 104, PADY = 12;
   const vals = rates.map((r) => r.pctPerWeek).filter((v) => v != null);
   const lo = Math.min(-2.2, ...vals, 0);
   const hi = Math.max(0.6, ...vals, 0);
   const y = linScale([lo, hi], [H - PADY, PADY]);
   const line = rates.map((r, i) => (r.pctPerWeek != null ? [xAt(i, rates.length), y(r.pctPerWeek)] : null)).filter(Boolean);
-  // safe loss band −0.5..−2.0
   const bandTop = y(-0.5), bandBot = y(-2.0), zero = y(0);
   return (
-    <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }} aria-hidden="true">
-      <rect x={PADX} y={Math.min(bandTop, bandBot)} width={VW - 2 * PADX} height={Math.abs(bandBot - bandTop)} fill={A.chart.safeBand} opacity="0.13" />
-      <line x1={PADX} y1={zero} x2={VW - PADX} y2={zero} stroke={A.chart.zeroLine} strokeWidth="1" strokeDasharray="4 3" />
-      {line.length > 1 && <path d={dPath(line)} fill="none" stroke={A.chart.trend} strokeWidth="2" />}
-      <text x={VW - PADX} y={zero - 3} textAnchor="end" style={{ fontFamily: TYPE.mono, fontSize: 9, fill: A.muted }}>0</text>
-      <text x={VW - PADX} y={bandBot + 9} textAnchor="end" style={{ fontFamily: TYPE.mono, fontSize: 9, fill: A.muted }}>−2.0</text>
-    </svg>
+    <>
+      <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }} aria-hidden="true">
+        <rect x={PADL} y={Math.min(bandTop, bandBot)} width={VW - PADL - PADR} height={Math.abs(bandBot - bandTop)} fill={A.chart.safeBand} opacity="0.13" />
+        <line x1={PADL} y1={zero} x2={VW - PADR} y2={zero} stroke={A.chart.zeroLine} strokeWidth="1" strokeDasharray="4 3" />
+        {line.length > 1 && <path d={dPath(line)} fill="none" stroke={A.chart.trend} strokeWidth="2" />}
+        <text x={PADL - 5} y={y(hi) + 7} textAnchor="end" style={axisText}>+{hi.toFixed(1)}</text>
+        <text x={PADL - 5} y={zero + 3} textAnchor="end" style={{ ...axisText, fill: A.body }}>0</text>
+        <text x={PADL - 5} y={bandBot + 3} textAnchor="end" style={axisText}>−2.0</text>
+        <text x={VW - PADR} y={bandTop - 2} textAnchor="end" style={axisText}>safe zone</text>
+      </svg>
+      <XDates frame={frame} />
+    </>
   );
 }
 
 function EnergyChart({ frame, burn }) {
-  const H = 84, PADY = 8;
-  // weekly buckets (7-day), averaged intake over days that have a real kin
+  const H = 100, PADY = 12;
   const weeks = [];
   for (let i = 0; i < frame.length; i += 7) {
     const chunk = frame.slice(i, i + 7).filter((f) => f.kin != null && !f.kinImputed);
@@ -191,22 +213,29 @@ function EnergyChart({ frame, burn }) {
     const avg = chunk.reduce((s, f) => s + f.kin, 0) / chunk.length;
     weeks.push({ mid: i + Math.min(6, frame.length - 1 - i) / 2, delta: avg - burn });
   }
-  if (!weeks.length) return <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} />;
+  if (!weeks.length) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>Not enough complete days in range yet.</div>;
   const maxAbs = Math.max(40, ...weeks.map((w) => Math.abs(w.delta)));
   const y = linScale([-maxAbs, maxAbs], [H - PADY, PADY]);
   const base = y(0);
-  const bw = Math.min(26, (VW - 2 * PADX) / weeks.length - 4);
+  const bw = Math.min(26, (VW - PADL - PADR) / weeks.length - 4);
   return (
-    <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }} aria-hidden="true">
-      {weeks.map((w, k) => {
-        const cx = xAt(w.mid, frame.length);
-        const yv = y(w.delta);
-        const over = w.delta > 0;
-        return <rect key={k} x={cx - bw / 2} y={Math.min(base, yv)} width={bw} height={Math.abs(yv - base)} rx="2" fill={over ? A.chart.overBurn : A.chart.underBurn} />;
-      })}
-      <line x1={PADX} y1={base} x2={VW - PADX} y2={base} stroke={A.ink} strokeWidth="2" />
-      <text x={VW - PADX} y={base - 4} textAnchor="end" style={{ fontFamily: TYPE.mono, fontSize: 9, fill: A.muted }}>burn {burn}</text>
-    </svg>
+    <>
+      <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }} aria-hidden="true">
+        {weeks.map((w, k) => {
+          const cx = xAt(w.mid, frame.length);
+          const yv = y(w.delta);
+          return <rect key={k} x={cx - bw / 2} y={Math.min(base, yv)} width={bw} height={Math.abs(yv - base)} rx="2" fill={w.delta > 0 ? A.chart.overBurn : A.chart.underBurn} />;
+        })}
+        <line x1={PADL} y1={base} x2={VW - PADR} y2={base} stroke={A.ink} strokeWidth="2" />
+        {/* y-axis: kcal above/below the burn baseline */}
+        <text x={PADL - 5} y={PADY + 7} textAnchor="end" style={{ ...axisText, fill: A.chart.overBurnLabel }}>+{r0(maxAbs)}</text>
+        <text x={PADL - 5} y={base + 3} textAnchor="end" style={{ ...axisText, fill: A.ink }}>burn</text>
+        <text x={PADL - 5} y={H - PADY + 3} textAnchor="end" style={axisText}>−{r0(maxAbs)}</text>
+        <text x={VW - PADR} y={base - 4} textAnchor="end" style={axisText}>{burn} kcal</text>
+        <text x={PADL + 2} y={PADY + 7} style={{ ...axisText, fill: A.chart.overBurnLabel }}>over ▲</text>
+      </svg>
+      <XDates frame={frame} />
+    </>
   );
 }
 
