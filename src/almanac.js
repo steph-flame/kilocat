@@ -43,6 +43,13 @@ export const A = {
   /* ---- food dots ---- */
   food: { wet: "#1F5130", dry: "#C9A227", treat: "#8A5A2B", wet2: "#5B7CA8" },
 
+  /* ---- macronutrient triad (protein / fat / carb) ---- */
+  // An earth-pigment triad — pine-teal / ochre / clay-plum — distinct by hue AND lightness, so
+  // adjacent bar segments read apart, while staying in the same warm register as the palette
+  // (not the bright blue/gold/mauve that fought the cream). Legends name each, so colour is never
+  // the only channel.
+  macro: { protein: "#3B726B", fat: "#C68A3C", carb: "#9A5E6E" },
+
   /* ---- ration mode chips ---- */
   mode: {
     fixed: { bg: "#EDE8D8", text: "#3F4234" },

@@ -3,7 +3,7 @@ import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp } from "../lib/series.js";
 import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayLabel } from "../lib/dayPager.js";
-import { foodSummary } from "../lib/foodStats.js";
+import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../lib/foodStats.js";
 import { kcalPerG } from "../lib/foods.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
 import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
@@ -17,9 +17,27 @@ function Card({ children, style }) {
   return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
 
+// The demo cat's logs are regenerated each render, so real add/remove no-op — which made the demo
+// Log un-loggable. Give it a session-local overlay: added entries live in `extra`, and removing a
+// generated entry just hides it. Nothing persists (same as every demo edit); real cats pass through.
+function useEditableLog(log, isDemo, activeCatId) {
+  const [extra, setExtra] = useState([]);
+  const [hidden, setHidden] = useState([]);
+  useEffect(() => { setExtra([]); setHidden([]); }, [activeCatId, isDemo]);
+  if (!isDemo) return log;
+  return {
+    items: [...log.items.filter((e) => !hidden.includes(e.id)), ...extra],
+    add: (entry) => setExtra((xs) => [...xs, { id: `demo-${xs.length}-${entry.date}-${Math.round(num(entry.kcal))}-${xs.length}`, ...entry }]),
+    edit: (id, patch) => setExtra((xs) => xs.map((e) => (e.id === id ? { ...e, ...patch } : e))),
+    remove: (id) => setExtra((xs) => xs.some((e) => e.id === id) ? xs.filter((e) => e.id !== id) : (setHidden((h) => [...h, id]), xs)),
+  };
+}
+
 export default function LogPage() {
-  const { p, intent, intakeLog, weightLog, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings } = useApp();
+  const { p, intent, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
+  const intakeLog = useEditableLog(liveIntake, isDemo, activeCatId);
+  const weightLog = useEditableLog(liveWeight, isDemo, activeCatId);
   const todayStr = localDateOf(Date.now());
   const minDate = useMemo(() => earliestLoggedDay(weightLog.items, intakeLog.items, todayStr), [weightLog.items, intakeLog.items, todayStr]);
   const [viewedDate, setViewedDate] = useState(todayStr);
@@ -141,7 +159,6 @@ function FoodTab({ intakeLog, library, viewedDate, todayStr, target, isDemo, isT
   const dayItems = intakeLog.items.filter((e) => e.date === viewedDate);
   const total = dayItems.reduce((s, e) => s + num(e.kcal), 0);
   const flagged = intakeDayStatus[viewedDate] === "incomplete";
-  const sum = foodSummary(dayItems, library.foods, 1);
 
   const add = () => {
     if (num(kcal) > 0) {
@@ -149,7 +166,6 @@ function FoodTab({ intakeLog, library, viewedDate, todayStr, target, isDemo, isT
       setGrams(""); setKcal("");
     }
   };
-  const pct = (part) => (total > 0 ? (part / total) * 100 : 0);
 
   return (
     <>
@@ -163,24 +179,13 @@ function FoodTab({ intakeLog, library, viewedDate, todayStr, target, isDemo, isT
           <div style={{ fontFamily: TYPE.mono, fontSize: 30, fontWeight: 600 }}>{r0(total)}<span style={{ fontSize: 13, color: A.body }}> of {target} kcal</span></div>
           {dayItems.length > 0 && <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: flagged ? A.caution.text : A.good, fontWeight: 600 }}>{flagged ? "incomplete" : "complete day"}</span>}
         </div>
-        {total > 0 && (
-          <>
-            <div style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", marginTop: 10, background: A.track }}>
-              <span style={{ width: `${pct(sum.byType.wet.kcal)}%`, background: A.food.wet }} />
-              <span style={{ width: `${pct(sum.byType.dry.kcal)}%`, background: A.food.dry }} />
-              <span style={{ width: `${pct(sum.byType.treat.kcal)}%`, background: A.food.treat }} />
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 14px", marginTop: 6, fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>
-              <Dot c={A.food.wet} /> wet {r0(sum.byType.wet.kcal)}
-              <Dot c={A.food.dry} /> dry {r0(sum.byType.dry.kcal)}
-              {sum.byType.treat.kcal > 0 && <><Dot c={A.food.treat} /> treats {r0(sum.byType.treat.kcal)}</>}
-            </div>
-          </>
-        )}
       </Card>
 
+      {/* where it came from — the full summary (calories/weight flip, per-food, macros) */}
+      <DaySummary items={intakeLog.items} library={library.foods} viewedDate={viewedDate} />
+
       {/* add a meal */}
-      {!isDemo && (
+      {(
         <Card>
           <div style={label({ marginBottom: 8 })}>Add a meal</div>
           <div style={{ border: `1px solid ${A.cardBorder}`, borderRadius: 12, padding: 8, marginBottom: 8 }}>
@@ -215,7 +220,7 @@ function FoodTab({ intakeLog, library, viewedDate, todayStr, target, isDemo, isT
             <span style={{ color: A.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{en.name || "—"}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flex: "none" }}>
               <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>{en.grams != null ? `${Number(Number(en.grams).toFixed(1))} g · ` : ""}{r0(num(en.kcal))} kcal</span>
-              {!isDemo && <button onClick={() => intakeLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
+              {<button onClick={() => intakeLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
             </span>
           </div>
         ))}
@@ -238,7 +243,7 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
   };
   return (
     <>
-      {!isDemo && (
+      {(
         <Card>
           <div style={label({ marginBottom: 8 })}>Add a weigh-in</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
@@ -266,7 +271,7 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
             <span style={{ color: A.muted }}>{(WEIGH_METHODS[en.method] || WEIGH_METHODS[DEFAULT_METHOD]).label}{en.source === WEIGH_SOURCES.litterRobot ? " · auto" : ""}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
               <span style={{ color: A.body }}>{fmtWeight(num(en.kg), unit)} {weightLabel(unit)}</span>
-              {!isDemo && <button onClick={() => weightLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
+              {<button onClick={() => weightLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
             </span>
           </div>
         ))}
@@ -275,7 +280,119 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
   );
 }
 
-function Dot({ c }) { return <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 999, background: c, marginRight: -8 }} />; }
+function Dot({ c }) { return <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 999, background: c, marginRight: 4 }} />; }
+function Seg({ pct, color }) { return pct > 0 ? <span style={{ width: `${pct}%`, background: color, display: "block" }} /> : null; }
+function Toggle({ options, value, onChange, accent }) {
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {options.map(([k, l]) => {
+        const on = value === k;
+        return <button key={k} onClick={() => onChange(k)} aria-pressed={on}
+          style={{ fontFamily: TYPE.mono, fontSize: 10.5, borderRadius: 999, padding: "3px 9px", cursor: "pointer", border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? accent : "transparent", color: on ? A.card : A.muted }}>{l}</button>;
+      })}
+    </div>
+  );
+}
+
+/* ---------- day/week food summary: calories | weight flip, per-food, macros ---------- */
+const TYPE_COLOR = { wet: A.food.wet, dry: A.food.dry, treat: A.food.treat, unknown: A.muted };
+function DaySummary({ items, library, viewedDate }) {
+  const [range, setRange] = useState("day");
+  const [basis, setBasis] = useState("calories");
+  const win = useMemo(() => {
+    if (range === "day") return { list: items.filter((e) => e.date === viewedDate), days: 1 };
+    const { start, end } = trailingWindow(viewedDate, 7);
+    return { list: itemsInRange(items, start, end), days: 7 };
+  }, [items, viewedDate, range]);
+  const s = useMemo(() => foodSummary(win.list, library, win.days), [win, library]);
+  const m = useMemo(() => macroBreakdown(win.list, library, win.days), [win, library]);
+  const byKcal = basis === "calories";
+  const week = range === "week";
+  const val = (o) => (byKcal ? o.kcal : o.grams);
+  const totalV = val(s.totals);
+  const pctOf = (part) => (totalV > 0 ? r0((part / totalV) * 100) : 0);
+  const foods = useMemo(() => [...s.byFood].sort((a, b) => (byKcal ? b.kcal - a.kcal : b.grams - a.grams)), [s.byFood, byKcal]);
+  const mg = m.grams;
+  const macroSum = mg.protein + mg.fat + mg.carb;
+  const gShown = (x) => (week ? Number((x / m.nDays).toFixed(1)) : Number(x.toFixed(1)));
+
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+        <span style={label()}>Where it came from</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Toggle options={[["day", "day"], ["week", "7-day"]]} value={range} onChange={setRange} accent={A.good} />
+          <Toggle options={[["calories", "cal"], ["weight", "g"]]} value={basis} onChange={setBasis} accent={A.gold} />
+        </div>
+      </div>
+      {s.isEmpty ? (
+        <p style={{ fontSize: 12, color: A.muted }}>Nothing logged {week ? "in the last 7 days" : "this day"}.</p>
+      ) : (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted, marginBottom: 4 }}>
+            <span>Wet vs dry · {byKcal ? "calories" : "weight"}</span>
+            <span>{byKcal ? `${r0(s.totals.kcal)} kcal` : `${r0(s.totals.grams)} g`}{week ? "/wk" : ""}</span>
+          </div>
+          <div style={{ display: "flex", height: 11, borderRadius: 999, overflow: "hidden", background: A.track, marginBottom: 5 }}>
+            <Seg pct={pctOf(val(s.byType.wet))} color={A.food.wet} />
+            <Seg pct={pctOf(val(s.byType.dry))} color={A.food.dry} />
+            <Seg pct={pctOf(val(s.byType.treat))} color={A.food.treat} />
+            <Seg pct={pctOf(val(s.byType.unknown))} color={A.muted} />
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", fontFamily: TYPE.mono, fontSize: 11, color: A.muted, marginBottom: 12 }}>
+            {[["wet", "Wet"], ["dry", "Dry"], ["treat", "Treat"]].map(([k, l]) => pctOf(val(s.byType[k])) > 0 && <span key={k}><Dot c={A.food[k]} />{l} {pctOf(val(s.byType[k]))}%</span>)}
+          </div>
+
+          <div style={label({ marginBottom: 6 })}>By food · {byKcal ? "calories" : "weight"}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: m.hasData ? 12 : 0 }}>
+            {foods.map((f) => {
+              const pp = byKcal ? f.kcalPct : f.gramsPct;
+              return (
+                <div key={f.name}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, gap: 8 }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: A.ink }}><Dot c={TYPE_COLOR[f.type]} />{f.name}</span>
+                    <span style={{ fontFamily: TYPE.mono, color: A.body, flex: "none" }}>{r0(pp)}% · {byKcal ? `${r0(f.kcal)} kcal` : `${Number(f.grams.toFixed(1))} g`}</span>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 999, background: A.track, overflow: "hidden", marginTop: 2, display: "flex" }}><Seg pct={pp} color={TYPE_COLOR[f.type]} /></div>
+                </div>
+              );
+            })}
+          </div>
+
+          {m.hasData && (
+            <div style={{ borderTop: `1px solid ${A.hairline}`, paddingTop: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted, marginBottom: 4 }}>
+                <span>Macros · {byKcal ? "calories" : "weight"}</span>
+                <span>{byKcal ? `${r0(m.moisturePctByWeight)}% water` : `${gShown(mg.moisture)} g water${week ? "/day" : ""}`}</span>
+              </div>
+              <div style={{ display: "flex", height: 11, borderRadius: 999, overflow: "hidden", background: A.track, marginBottom: 5 }}>
+                <Seg pct={byKcal ? m.caloric.protein : (macroSum > 0 ? (mg.protein / macroSum) * 100 : 0)} color={A.macro.protein} />
+                <Seg pct={byKcal ? m.caloric.fat : (macroSum > 0 ? (mg.fat / macroSum) * 100 : 0)} color={A.macro.fat} />
+                <Seg pct={byKcal ? m.caloric.carb : (macroSum > 0 ? (mg.carb / macroSum) * 100 : 0)} color={A.macro.carb} />
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>
+                {byKcal ? (
+                  <>
+                    <span><Dot c={A.macro.protein} />Protein {m.caloric.protein}%</span>
+                    <span><Dot c={A.macro.fat} />Fat {m.caloric.fat}%</span>
+                    <span><Dot c={A.macro.carb} />Carb {m.caloric.carb}%</span>
+                  </>
+                ) : (
+                  <>
+                    <span><Dot c={A.macro.protein} />Protein {gShown(mg.protein)} g</span>
+                    <span><Dot c={A.macro.fat} />Fat {gShown(mg.fat)} g</span>
+                    <span><Dot c={A.macro.carb} />Carb {gShown(mg.carb)} g{week ? "/day" : ""}</span>
+                  </>
+                )}
+              </div>
+              {m.coverageKcalPct < 99 && <p style={{ fontSize: 11, color: A.muted, marginTop: 6 }}>Based on {r0(m.coverageKcalPct)}% of logged calories — add guaranteed-analysis to more foods.</p>}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
 function NumBox({ label: lbl, suf, value, onChange, step = "any" }) {
   return (
     <label style={{ display: "block" }}>
