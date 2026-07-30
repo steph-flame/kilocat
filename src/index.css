@@ -73,3 +73,31 @@ select:focus-visible,
   background: #191c12;
   border: none;
 }
+
+/* Almanac responsive page shell. On phones a page is a single centered ~448px column and the
+   inline card margins provide the gutters (these rules don't apply). On a wide screen the column
+   widens and its cards lay out two-up as a grid, so the desktop stops being a tall vertical pileup;
+   the grid gap replaces the cards' own margins, and anything tagged `.span-all` (heroes, controls,
+   full-width banners) stretches across both columns. Mark the wrapper `.alm-page .alm-grid`. */
+.alm-page {
+  max-width: 448px;
+  margin: 0 auto;
+}
+@media (min-width: 900px) {
+  .alm-page {
+    max-width: 960px;
+  }
+  .alm-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 8px 18px 12px;
+    align-items: start;
+  }
+  .alm-grid > * {
+    margin: 0 !important;
+  }
+  .alm-grid > .span-all {
+    grid-column: 1 / -1;
+  }
+}

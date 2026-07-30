@@ -17,8 +17,8 @@ const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`);
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 const Em = ({ children }) => <strong style={{ fontWeight: 500, boxShadow: `inset 0 -7px 0 ${A.underline}` }}>{children}</strong>;
 const stepAmount = (s) => (s.splitMode === "fixed" && s.type === "treat" && num(s.treatCount) ? `${Number(num(s.treatCount).toFixed(1))} treat${num(s.treatCount) === 1 ? "" : "s"}` : g1(s.grams));
-function Card({ children, style }) {
-  return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
+function Card({ children, style, className }) {
+  return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
 
 // The demo cat's logs are regenerated each render, so real add/remove no-op — which made the demo
@@ -67,9 +67,9 @@ export default function LogPage() {
 
   return (
     <div style={{ background: A.pageFill, minHeight: "100%", fontFamily: TYPE.sans, color: A.ink, paddingBottom: 28 }}>
-      <div style={{ maxWidth: 430, margin: "0 auto" }}>
+      <div className="alm-page alm-grid">
         {/* day navigator */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px 8px" }}>
+        <div className="span-all" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px 8px" }}>
           <NavArrow dir="prev" onClick={() => go(-1)} disabled={!canGoPrev(viewedDate, minDate)} />
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 15, fontWeight: 600 }}>{label2}</div>
@@ -79,7 +79,7 @@ export default function LogPage() {
         </div>
 
         {/* sub-tabs */}
-        <div style={{ display: "flex", gap: 8, padding: "0 18px 12px" }}>
+        <div className="span-all" style={{ display: "flex", gap: 8, padding: "0 18px 12px" }}>
           {[["food", "Food"], ["weight", "Weight"]].map(([k, l]) => {
             const on = tab === k;
             return (
@@ -186,7 +186,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
   return (
     <>
       {showTonight && (
-        <Card>
+        <Card className="span-all">
           <div style={label({ marginBottom: 6 })}>Tonight's bowl · {target} kcal</div>
           <p style={{ fontFamily: TYPE.serif, fontSize: 19, lineHeight: 1.36, margin: 0, color: A.ink }}>
             Feed {steps.map((s, i) => <span key={s.id}><Em>{stepAmount(s)}</Em> of {s.name || "food"}{i < steps.length - 1 ? (i === steps.length - 2 ? ", and " : ", ") : "."}</span>)}
@@ -195,7 +195,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
         </Card>
       )}
 
-      <Card style={{ padding: "12px 16px" }}>
+      <Card className="span-all" style={{ padding: "12px 16px" }}>
         <KcalChart intakeItems={intakeLog.items} days={days} selected={viewedDate} onSelect={selectDay} target={target} dayStatus={intakeDayStatus} todayStr={todayStr} />
       </Card>
 
@@ -271,7 +271,7 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
   return (
     <>
       {(
-        <Card>
+        <Card className="span-all">
           <div style={label({ marginBottom: 8 })}>Add a weigh-in</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
             {Object.entries(WEIGH_METHODS).map(([k, m]) => (
@@ -286,7 +286,7 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
           </div>
         </Card>
       )}
-      <Card>
+      <Card className="span-all">
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: dayItems.length ? 8 : 0 }}>
           <span style={label()}>{dayItems.length} read{dayItems.length === 1 ? "" : "s"}</span>
           {dayKg != null && <span style={{ fontFamily: TYPE.mono, fontSize: 14, color: A.ink }}>{fmtWeight(dayKg, unit)} {weightLabel(unit)} avg</span>}

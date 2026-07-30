@@ -19,8 +19,8 @@ const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing
 const cap = { fontSize: 12, color: A.bodyOnFill, lineHeight: 1.45, margin: "8px 0 0" };
 const axisText = { fontFamily: TYPE.mono, fontSize: 9, fill: A.muted };
 
-function Card({ children, style }) {
-  return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
+function Card({ children, style, className }) {
+  return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
 const xAt = (i, n) => (n <= 1 ? (PADL + VW - PADR) / 2 : PADL + (i / (n - 1)) * (VW - PADL - PADR));
 const dPath = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
@@ -105,8 +105,8 @@ export default function Trend() {
 
   return (
     <div style={{ background: A.pageFill, minHeight: "100%", fontFamily: TYPE.sans, color: A.ink, paddingBottom: 28 }}>
-      <div style={{ maxWidth: 430, margin: "0 auto" }}>
-        <div style={{ padding: "18px 24px 0" }}>
+      <div className="alm-page alm-grid">
+        <div className="span-all" style={{ padding: "18px 24px 0" }}>
           <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>trend · measured</div>
           <h1 style={{ fontFamily: TYPE.serif, fontWeight: 400, fontSize: 25, lineHeight: 1.26, letterSpacing: "-.012em", margin: "10px 0 4px" }}>
             {p.name || "Your cat"} burns about {burn} kcal a day.
@@ -115,7 +115,7 @@ export default function Trend() {
         </div>
 
         {/* estimate card */}
-        <Card>
+        <Card className="span-all">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <div style={{ fontFamily: TYPE.mono, fontSize: 40, fontWeight: 600, color: A.ink, lineHeight: 1 }}>{burn}</div>
             <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textAlign: "right" }}>±{pm} kcal<br />95% interval</div>
@@ -125,7 +125,7 @@ export default function Trend() {
         </Card>
 
         {/* shared range control — outside the charts, governs all three */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 18px 12px" }}>
+        <div className="span-all" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 18px 12px" }}>
           <span style={label({ color: A.labelOnFill })}>Charts below show</span>
           <div style={{ display: "flex", gap: 5 }}>
             {RANGES.map(([key, , lbl]) => (
@@ -135,6 +135,12 @@ export default function Trend() {
             ))}
           </div>
         </div>
+
+        <Card style={{ padding: "12px 14px" }}>
+          <div style={label({ marginBottom: 4 })}>Measured burn · kcal/day</div>
+          <BurnChart frame={frame} />
+          <p style={{ ...cap, fontSize: 11.5 }}>The line is the day-by-day estimate; the shaded band is its 95% interval, which tightens as more weigh-ins pin down the trend.</p>
+        </Card>
 
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Weight · {weightLabel(unit)}</div>
@@ -153,11 +159,11 @@ export default function Trend() {
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Energy balance · kcal vs burn</div>
           <EnergyChart frame={frame} burn={e.kcal} />
-          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake against her {burn} kcal burn — below the line is a deficit (losing), above is a surplus. The dark line is the smoothed average.</p>
+          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake against <b style={{ fontWeight: 600 }}>that day's</b> estimated burn — the break-even line drifts as her weight (and maintenance) change, so it isn't pinned to today's {burn} kcal. Below the line is a deficit (losing), above is a surplus; the dark line is the smoothed average.</p>
         </Card>
 
         {e.missingIntake > 0 && (
-          <div style={{ background: A.caution.bg, border: `1px solid ${A.caution.border}`, borderRadius: 12, padding: "11px 13px", margin: "0 18px", display: "flex", gap: 8 }}>
+          <div className="span-all" style={{ background: A.caution.bg, border: `1px solid ${A.caution.border}`, borderRadius: 12, padding: "11px 13px", margin: "0 18px", display: "flex", gap: 8 }}>
             <span style={{ fontFamily: TYPE.mono, color: A.caution.text, fontWeight: 700 }}>!</span>
             <span style={{ fontSize: 12, color: A.caution.text, lineHeight: 1.4 }}>{r0(e.missingIntake * 100)}% of days in this range are incomplete. They're excluded from the estimate, which is why the band isn't tighter.</span>
           </div>
@@ -180,6 +186,46 @@ function IntervalBar({ lo, hi, point }) {
       <div style={{ display: "flex", justifyContent: "space-between", fontFamily: TYPE.mono, fontSize: 10, color: A.muted, marginTop: 3 }}>
         <span>{r0(lo - padKcal)}</span><span>{r0(lo)}–{r0(hi)}</span><span>{r0(hi + padKcal)}</span>
       </div>
+    </div>
+  );
+}
+
+// The measured-burn timeline: the per-day estimate as a line, wrapped in its 95% confidence band
+// (e ± 1.96·sd). Early history is wide; the band visibly narrows as weigh-ins accumulate — the
+// honest picture of how well we know the burn. This is the evidence behind the headline number.
+function BurnChart({ frame }) {
+  const K = 1.96;
+  const pts = frame.map((f, i) => (f.e != null ? { i, e: f.e, sd: Number.isFinite(f.sd) && f.sd >= 0 ? f.sd : 0, date: f.date } : null)).filter(Boolean);
+  const { idx, bind } = useHoverIndex(frame.length);
+  const H = 130, PADY = 12;
+  if (pts.length < 2) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>Not enough weigh-ins in range yet.</div>;
+  // scale from the band's own extent (e ± k·sd) — not intake — so the burn line and its interval
+  // fill the panel and the early-history widening reads clearly; a little padding top and bottom.
+  const [blo, bhi] = extent(pts.flatMap((p) => [p.e - K * p.sd, p.e + K * p.sd]));
+  const pad = (bhi - blo) * 0.12 || 10;
+  const [lo, hi] = [blo - pad, bhi + pad];
+  const y = linScale([lo, hi], [H - PADY, PADY]);
+  const x = (i) => xAt(i, frame.length);
+  const line = pts.map((p) => [x(p.i), y(p.e)]);
+  const top = pts.map((p) => [x(p.i), y(p.e + K * p.sd)]);
+  const bot = pts.map((p) => [x(p.i), y(p.e - K * p.sd)]);
+  const bandD = dPath(top) + " " + bot.reverse().map((p) => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + " Z";
+  const endI = pts[pts.length - 1].i;
+  const hp = idx != null ? pts.find((p) => p.i === idx) : null;
+  const hv = hp ? { x: x(hp.i), yv: y(hp.e), e: hp.e, sd: hp.sd, date: hp.date } : null;
+  return (
+    <div {...bind}>
+      {hv && <Tip vbx={hv.x}>{mmdd(hv.date)} · {r0(hv.e)} ±{r0(K * hv.sd)} kcal</Tip>}
+      <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }}>
+        <path d={bandD} fill={A.chart.expenditure || A.good} opacity="0.16" />
+        {hv && <HoverGuide x={hv.x} />}
+        <path d={dPath(line)} fill="none" stroke={A.chart.expenditure || A.good} strokeWidth="2.2" />
+        <circle cx={x(endI)} cy={y(pts[pts.length - 1].e)} r="4.5" fill={A.chart.expenditure || A.good} />
+        {hv && <circle cx={hv.x} cy={hv.yv} r="4" fill={A.ink} />}
+        <text x={PADL - 5} y={PADY + 7} textAnchor="end" style={axisText}>{r0(hi)}</text>
+        <text x={PADL - 5} y={H - PADY + 3} textAnchor="end" style={axisText}>{r0(lo)}</text>
+      </svg>
+      <XDates frame={frame} />
     </div>
   );
 }
@@ -251,8 +297,12 @@ function EnergyChart({ frame, burn }) {
   const { idx, bind } = useHoverIndex(frame.length);
   const H = 100, PADY = 12;
   const n = frame.length;
-  // one bar PER DAY: that day's logged intake minus the burn (skip missing/incomplete days).
-  const daily = frame.map((f) => (f.kin != null && !f.kinImputed ? f.kin - burn : null));
+  // one bar PER DAY: that day's logged intake minus THAT DAY'S estimated burn (skip
+  // missing/incomplete days). The burn isn't a constant — it drifts as the cat's weight (and so
+  // its maintenance) changes, so each day is measured against the frame's own expenditure for that
+  // day (f.e), falling back to the latest estimate only when a day has none. Using a single flat
+  // burn would misattribute a rising/falling baseline as a surplus/deficit.
+  const daily = frame.map((f) => (f.kin != null && !f.kinImputed ? f.kin - (Number.isFinite(f.e) ? f.e : burn) : null));
   if (!daily.some((d) => d != null)) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>No complete days in range yet.</div>;
   // smoothed running average (EWMA over the days that have data) — the line on top.
   const alpha = 0.2;
@@ -280,7 +330,7 @@ function EnergyChart({ frame, burn }) {
         <text x={PADL - 5} y={PADY + 7} textAnchor="end" style={{ ...axisText, fill: A.chart.overBurnLabel }}>+{r0(maxAbs)}</text>
         <text x={PADL - 5} y={base + 3} textAnchor="end" style={{ ...axisText, fill: A.ink }}>burn</text>
         <text x={PADL - 5} y={H - PADY + 3} textAnchor="end" style={axisText}>−{r0(maxAbs)}</text>
-        <text x={VW - PADR} y={base - 4} textAnchor="end" style={axisText}>{r0(burn)} kcal</text>
+        <text x={VW - PADR} y={base - 4} textAnchor="end" style={axisText}>≈{r0(burn)} kcal now</text>
       </svg>
       <XDates frame={frame} />
     </div>

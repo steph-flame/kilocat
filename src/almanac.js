@@ -68,6 +68,8 @@ export const A = {
     overBurnLabel: "#8A4A2E",
     neutralBar: "#C4D3C6", // safe band / neutral day bars
     zeroLine: "#8E9188", // "holding steady" dashed line
+    expenditure: "#1F5130", // measured-burn line + its 95% confidence band
+    safeBand: "#9EBBA3", // shaded safe rate-of-change zone
   },
 
   /* ---- selectors / sliders ---- */

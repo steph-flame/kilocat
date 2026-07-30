@@ -5,6 +5,7 @@ import { resolveIntent } from "../lib/intent.js";
 import { diffDays } from "../lib/series.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
+import BcsCat from "../components/BcsCat.jsx";
 
 // Ration — Step 1 of 2: Intent. Owns the basis and the signed rate, and nothing else. Everything
 // downstream (tonight's target, the safety floor, the Trend headline) follows from these two.
@@ -27,9 +28,9 @@ const BCS_DESC = {
   9: "Heavy fat over the ribs, spine and tail base. A distended belly and no waist. Obese.",
 };
 
-function Card({ children, style, inverted }) {
+function Card({ children, style, inverted, className }) {
   return (
-    <div style={{
+    <div className={className} style={{
       background: inverted ? A.inverted.bg : A.card,
       border: inverted ? "none" : `1px solid ${A.cardBorder}`,
       borderRadius: 20, padding: "16px 18px", margin: "0 18px 14px", ...style,
@@ -73,9 +74,9 @@ export default function Intent() {
 
   return (
     <div style={{ background: A.pageFill, minHeight: "100%", fontFamily: TYPE.sans, color: A.ink, paddingBottom: 28 }}>
-      <div style={{ maxWidth: 430, margin: "0 auto" }}>
+      <div className="alm-page alm-grid">
         {/* kicker + heading */}
-        <div style={{ padding: "18px 24px 0" }}>
+        <div className="span-all" style={{ padding: "18px 24px 0" }}>
           <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>calorie plan</div>
           <h1 style={{ fontFamily: TYPE.serif, fontWeight: 400, fontSize: 25, lineHeight: 1.24, letterSpacing: "-.012em", margin: "10px 0 16px", color: A.ink }}>
             How much should {p.name || "your cat"} eat?
@@ -117,9 +118,10 @@ export default function Intent() {
             </div>
           </div>
 
-          {/* reference image slot (licensed BCS chart goes here) */}
-          <div style={{ height: 168, borderRadius: 12, border: `1px dashed ${A.cardBorder}`, background: "#F3EFE2", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 12 }}>
-            <span style={label({ color: A.muted })}>BCS {bcs} reference image</span>
+          {/* parametric ink silhouette — morphs with the score, nothing to license */}
+          <div style={{ borderRadius: 12, border: `1px solid ${A.hairline}`, background: "#F3EFE2", padding: "14px 12px 6px", marginTop: 12 }}>
+            <BcsCat score={bcs} height={150} />
+            <div style={{ ...label({ fontSize: 10, letterSpacing: ".1em", color: A.muted }), textAlign: "center", marginTop: 2 }}>BCS {bcs} / 9</div>
           </div>
           <p style={{ fontSize: 12, color: A.bodyOnFill, marginTop: 10, lineHeight: 1.45 }}>{BCS_DESC[bcs]}</p>
 
@@ -219,7 +221,7 @@ export default function Intent() {
         </Card>
 
         {/* cross-link to the (independent) ration page — not a mandatory next step */}
-        <div style={{ padding: "6px 24px 0", textAlign: "center" }}>
+        <div className="span-all" style={{ padding: "6px 24px 0", textAlign: "center" }}>
           <a href="#/ration" style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.good, fontWeight: 600, textDecoration: "none" }}>
             Split it into food ›
           </a>

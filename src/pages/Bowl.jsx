@@ -27,8 +27,8 @@ const ENERGY_FIELDS = {
   treat: [["kcalPerUnit", "Calories / treat", "kcal"], ["kcalPerKg", "Calories / kg", "kcal/kg"]],
 };
 
-function Card({ children, style }) {
-  return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
+function Card({ children, style, className }) {
+  return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
 
 // Biscuit the demo cat is never a stored cat, so real ration writes no-op on her — which made
@@ -72,8 +72,8 @@ export default function Bowl() {
 
   return (
     <div style={{ background: A.pageFill, minHeight: "100%", fontFamily: TYPE.sans, color: A.ink, paddingBottom: 28 }}>
-      <div style={{ maxWidth: 430, margin: "0 auto" }}>
-        <div style={{ padding: "18px 24px 0" }}>
+      <div className="alm-page alm-grid">
+        <div className="span-all" style={{ padding: "18px 24px 0" }}>
           <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>the ration</div>
           <h1 style={{ fontFamily: TYPE.serif, fontWeight: 400, fontSize: 25, lineHeight: 1.24, letterSpacing: "-.012em", margin: "10px 0 6px" }}>
             How should {target} kcal be split?
@@ -131,7 +131,7 @@ export default function Bowl() {
         )}
 
         {/* footer — the ration saves live as you edit; this just leaves the page */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "4px 24px 0" }}>
+        <div className="span-all" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "4px 24px 0" }}>
           <a href="#/" style={{ background: A.good, color: A.card, fontFamily: TYPE.sans, fontSize: 13, fontWeight: 600, borderRadius: 14, padding: "12px 20px", textDecoration: "none" }}>
             Done ›
           </a>
