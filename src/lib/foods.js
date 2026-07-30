@@ -340,11 +340,31 @@ export function upsertFood(list, entry) {
   return next;
 }
 
-// Case-insensitive substring search over names; empty query returns all.
+// Case-insensitive, word-order-independent search over names. The query is split into tokens and
+// a food matches only if EVERY token appears somewhere in its name — so "lamb" finds "Tiki Cat
+// After Dark Chicken & Lamb", and "tiki lamb" finds it too regardless of the words' order. Results
+// are ranked so the most relevant surface first within any display cap: a name that starts with
+// the whole query beats one where a word merely starts with a token, which beats a mid-word hit;
+// shorter names break ties. Empty query returns the list unchanged.
 export function searchFoods(list, query) {
   const q = keyOf(query);
   if (!q) return list;
-  return list.filter((f) => f.name.toLowerCase().includes(q));
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const scored = [];
+  for (const f of list) {
+    const name = String(f.name || "").toLowerCase();
+    if (!tokens.every((t) => name.includes(t))) continue;
+    const words = name.split(/[^a-z0-9]+/).filter(Boolean);
+    let score = 0;
+    if (name.startsWith(q)) score += 100;
+    for (const t of tokens) {
+      if (words.some((w) => w.startsWith(t))) score += 10; // token begins a word
+      else score += 1; // token only appears mid-word
+    }
+    scored.push({ f, score, len: name.length });
+  }
+  scored.sort((a, b) => b.score - a.score || a.len - b.len || a.f.name.localeCompare(b.f.name));
+  return scored.map((s) => s.f);
 }
 
 // Drop a trailing "(dry)"/"(wet)" — noise, since the mode already says which.

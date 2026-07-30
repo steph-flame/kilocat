@@ -119,6 +119,36 @@ describe("food library", () => {
     expect(searchFoods(seed, "")).toHaveLength(seed.length);
     expect(searchFoods(seed, "zzz")).toHaveLength(0);
   });
+  it("matches a token anywhere in the name (not just as a prefix)", () => {
+    const list = [
+      { name: "Tiki Cat After Dark Chicken & Lamb" },
+      { name: "Instinct Original Chicken" },
+      { name: "Lamb & Rice Dinner" },
+    ];
+    expect(searchFoods(list, "lamb").map((f) => f.name)).toEqual([
+      "Lamb & Rice Dinner", // starts with the query → ranked first
+      "Tiki Cat After Dark Chicken & Lamb",
+    ]);
+  });
+  it("is word-order-independent across multiple tokens", () => {
+    const list = [
+      { name: "Tiki Cat After Dark Chicken & Lamb" },
+      { name: "Lamb & Rice Dinner" },
+    ];
+    expect(searchFoods(list, "lamb tiki").map((f) => f.name)).toEqual([
+      "Tiki Cat After Dark Chicken & Lamb",
+    ]);
+  });
+  it("ranks whole-name and word-start matches above mid-word hits", () => {
+    const list = [
+      { name: "Salmon Pate" }, // 'sal' mid-word? no — word-start
+      { name: "Wild-Caught Salmon" }, // word-start, longer
+      { name: "Unsalted Broth" }, // 'sal' only mid-word
+    ];
+    const out = searchFoods(list, "sal").map((f) => f.name);
+    expect(out[0]).toBe("Salmon Pate");
+    expect(out[out.length - 1]).toBe("Unsalted Broth");
+  });
   it("built-in names carry no (dry)/(wet) suffix", () => {
     expect(makeLibrarySeed().some((f) => /\((?:dry|wet)\)/i.test(f.name))).toBe(false);
   });

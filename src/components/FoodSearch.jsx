@@ -5,12 +5,26 @@ import { C } from "../theme.js";
 // Name field with live search over the saved-food library. Typing filters saved
 // foods by name; picking one prefills the row's macros. Typing a brand-new name is
 // fine too — it just sets the name; the bookmark button on the row saves it to the library.
+// Wrap each occurrence of a query token in the name so a mid-name match (e.g. "lamb" inside
+// "…Chicken & Lamb") is visibly why the row surfaced — not just prefix autocomplete.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function highlight(name, query) {
+  const tokens = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return name;
+  const re = new RegExp(`(${tokens.map(escapeRe).join("|")})`, "ig");
+  return String(name).split(re).map((part, i) =>
+    tokens.includes(part.toLowerCase())
+      ? <mark key={i} style={{ background: "transparent", color: C.spruce ?? "inherit", fontWeight: 700 }}>{part}</mark>
+      : part
+  );
+}
+
 export default function FoodSearch({ value, onChangeName, onPick, search }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const blurTimer = useRef(null);
 
-  const matches = (open ? search(value) : []).slice(0, 8);
+  const matches = (open ? search(value) : []).slice(0, 12);
   const show = open && matches.length > 0;
 
   const choose = (food) => {
@@ -62,7 +76,7 @@ export default function FoodSearch({ value, onChangeName, onPick, search }) {
                 style={{ background: i === active ? C.spruceSoft : "transparent", color: C.ink }}
                 className="w-full text-left px-3 py-2 text-sm break-words leading-snug"
               >
-                {f.name}
+                {highlight(f.name, value)}
               </button>
             </li>
           ))}
