@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { resolveIntent } from "../lib/intent.js";
+import { diffDays } from "../lib/series.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 
@@ -51,6 +52,11 @@ export default function Intent() {
   const { bcs, pctOver, idealKg: idealWeight, measuredKcal, formulaKcal, basis, zone } = intent;
 
   const setBcsValue = (n) => { setOv((o) => ({ ...o, bcs: n })); if (!isDemo) setBcs(n); };
+  // Nudge to re-assess body condition: as a cat slims, its BCS drops, so a stale score makes the
+  // ideal weight and safety floor drift with it. Prompt after ~4 weeks (or if never dated).
+  const bcsAgeDays = p.bcAsOf ? diffDays(p.bcAsOf, today) : null;
+  const bcsStale = ov.bcs == null && (bcsAgeDays == null || bcsAgeDays > 28);
+  const bcsWeeks = bcsAgeDays != null ? Math.round(bcsAgeDays / 7) : null;
   const setBasis = (b) => { setOv((o) => ({ ...o, basis: b })); setExpSettings({ energyBasis: b }); };
   const setRate = (v) => { const rr = Math.round(v * 10) / 10; setOv((o) => ({ ...o, rate: rr })); setExpSettings({ ratePctPerWeek: rr }); };
   const showW = (kg) => `${(toDisplayWeight(kg, unit)).toFixed(2)} ${weightLabel(unit)}`;
@@ -134,6 +140,13 @@ export default function Intent() {
             <span style={label({ fontSize: 10, letterSpacing: ".1em" })}>thin</span>
             <span style={label({ fontSize: 10, letterSpacing: ".1em" })}>heavy</span>
           </div>
+          {bcsStale && (
+            <p style={{ fontSize: 11.5, color: A.caution.text, background: A.caution.bg, border: `1px solid ${A.caution.border}`, borderRadius: 10, padding: "8px 11px", marginTop: 10, lineHeight: 1.4 }}>
+              {bcsWeeks == null
+                ? "Set her body condition — it sizes the ideal weight and the safety floor."
+                : `Last checked ${bcsWeeks} week${bcsWeeks === 1 ? "" : "s"} ago. As she slims her score drops, so re-check it — otherwise the ideal weight and floor drift down with her.`}
+            </p>
+          )}
         </Card>
 
         {/* 3 — rate of change */}

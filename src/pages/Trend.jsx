@@ -280,7 +280,7 @@ function EnergyChart({ frame, burn }) {
         <text x={PADL - 5} y={PADY + 7} textAnchor="end" style={{ ...axisText, fill: A.chart.overBurnLabel }}>+{r0(maxAbs)}</text>
         <text x={PADL - 5} y={base + 3} textAnchor="end" style={{ ...axisText, fill: A.ink }}>burn</text>
         <text x={PADL - 5} y={H - PADY + 3} textAnchor="end" style={axisText}>−{r0(maxAbs)}</text>
-        <text x={VW - PADR} y={base - 4} textAnchor="end" style={axisText}>{burn} kcal</text>
+        <text x={VW - PADR} y={base - 4} textAnchor="end" style={axisText}>{r0(burn)} kcal</text>
       </svg>
       <XDates frame={frame} />
     </div>
