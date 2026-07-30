@@ -205,6 +205,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
           <div style={{ fontFamily: TYPE.mono, fontSize: 30, fontWeight: 600 }}>{r0(total)}<span style={{ fontSize: 13, color: A.body }}> of {target} kcal</span></div>
           {dayItems.length > 0 && <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: flagged ? A.caution.text : A.good, fontWeight: 600 }}>{flagged ? "incomplete" : "complete day"}</span>}
         </div>
+        <a href="#/calories" style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.good, textDecoration: "none", marginTop: 4, display: "inline-block" }}>calorie plan · set the target ›</a>
       </Card>
 
       {/* where it came from — the full summary (calories/weight flip, per-food, macros) */}

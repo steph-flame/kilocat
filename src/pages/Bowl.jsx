@@ -78,8 +78,9 @@ export default function Bowl() {
           <p style={{ fontSize: 12.5, color: A.bodyOnFill, margin: "0 0 6px", lineHeight: 1.45 }}>
             Any number of foods. Each takes a <b style={{ fontWeight: 600 }}>share</b>, a <b style={{ fontWeight: 600 }}>fixed amount</b>, or <b style={{ fontWeight: 600 }}>whatever is left</b>.
           </p>
-          <a href="#/calories" style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textDecoration: "none", display: "inline-block", marginBottom: 14 }}>
-            {target} kcal from your calorie plan · adjust ›
+          <a href="#/calories" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textDecoration: "none", border: `1px solid ${A.cardBorder}`, borderRadius: 12, padding: "9px 13px", marginBottom: 14, background: A.card }}>
+            <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>Daily target <b style={{ color: A.ink, fontSize: 13, fontWeight: 600 }}>{target} kcal</b> · from the calorie plan</span>
+            <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.good, fontWeight: 600, flex: "none", marginLeft: 8 }}>edit ›</span>
           </a>
         </div>
 
