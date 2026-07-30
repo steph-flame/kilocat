@@ -35,7 +35,9 @@ export function treatEnergy({ kcalPerTreat, gramsPerTreat, kcalPerKg }) {
   // grams/treat unknown but both energies known → derive the treat weight.
   const grams = gt > 0 ? gt : kt > 0 && kk > 0 ? (kt / kk) * 1000 : 0;
   const perKg = kk > 0 ? kk : kt > 0 && grams > 0 ? (kt / grams) * 1000 : 0;
-  return { kcalPerUnit: kt, gramsPerUnit: r1(grams), kcalPerKg: r0(perKg) };
+  // keep the derived weight at full-ish precision so kcalPerG (= kcalPerUnit/gramsPerUnit) stays
+  // equal to the kcal/kg the owner typed, rather than drifting from a 1-decimal rounding.
+  return { kcalPerUnit: kt, gramsPerUnit: grams > 0 ? Math.round(grams * 1e4) / 1e4 : 0, kcalPerKg: r0(perKg) };
 }
 
 // Modified-Atwater factors for pet food (kcal per gram of each macro) — lower than human Atwater
