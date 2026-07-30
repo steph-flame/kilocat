@@ -67,7 +67,7 @@ function Tip({ vbx, children }) {
 }
 const HoverGuide = ({ x }) => <line x1={x} x2={x} y1={0} y2={999} stroke={A.cardBorder} strokeWidth="1" />;
 
-const RANGES = [["3m", 90, "3m"], ["6m", 180, "6m"], ["all", null, "all"]];
+const RANGES = [["1w", 7, "1w"], ["2w", 14, "2w"], ["1m", 30, "1m"], ["3m", 90, "3m"], ["6m", 180, "6m"], ["all", null, "all"]];
 
 export default function Trend() {
   const { p, t, expenditure: e, intakeLog, weightLog, intakeDayStatus, unit, today, currentWeight } = useApp();
@@ -125,9 +125,9 @@ export default function Trend() {
         </Card>
 
         {/* shared range control — outside the charts, governs all three */}
-        <div className="span-all" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 18px 12px" }}>
+        <div className="span-all" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", margin: "0 18px 12px" }}>
           <span style={label({ color: A.labelOnFill })}>Charts below show</span>
-          <div style={{ display: "flex", gap: 5 }}>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
             {RANGES.map(([key, , lbl]) => (
               <button key={key} onClick={() => setRange(key)} aria-pressed={range === key}
                 style={{ fontFamily: TYPE.mono, fontSize: 11, borderRadius: 999, padding: "3px 11px", cursor: "pointer",
