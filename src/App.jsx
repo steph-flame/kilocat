@@ -14,6 +14,7 @@ import Expenditure from "./pages/Expenditure.jsx";
 import Trend from "./pages/Trend.jsx";
 import Log from "./pages/Log.jsx";
 import LogPage from "./pages/LogPage.jsx";
+import TodayPage from "./pages/TodayPage.jsx";
 import Cats from "./pages/Cats.jsx";
 import Settings from "./pages/Settings.jsx";
 import MorePage from "./pages/MorePage.jsx";
@@ -25,7 +26,7 @@ import CatsPage from "./pages/CatsPage.jsx";
 // reference only — its transition schedule now lives in the new Ration (Bowl). (#/intent and #/bowl
 // kept as aliases.)
 const PAGES = {
-  home: LogPage, today: LogPage, calories: Intent, intent: Intent, ration: Bowl, bowl: Bowl,
+  home: TodayPage, today: TodayPage, calories: Intent, intent: Intent, ration: Bowl, bowl: Bowl,
   "ration-classic": RationPlanner, trend: Trend, expenditure: Trend, "expenditure-classic": Expenditure, log: LogPage, "log-classic": Log, cats: CatsPage, "cats-classic": Cats, settings: MorePage, "settings-classic": Settings,
 };
 
