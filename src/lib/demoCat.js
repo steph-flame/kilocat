@@ -113,8 +113,13 @@ function buildIntakeLog(rand, startDate, foods, nextId) {
     const split = 0.42 + rand() * 0.16; // ~42-58% at the morning meal
     const morning = Math.round(total * split);
     const evening = total - morning;
-    entries.push({ id: nextId(), date, kcal: morning, name: foods.dry.name, grams: gramsFor(foods.dry, morning), kcalPerG: kcalPerG(foods.dry) });
-    entries.push({ id: nextId(), date, kcal: evening, name: foods.wet.name, grams: gramsFor(foods.wet, evening), kcalPerG: kcalPerG(foods.wet) });
+    // A real time-of-day for each meal (breakfast ~7-9am, dinner ~5:30-8pm) so the Log shows when
+    // food was given, same as weigh-ins carry a ts.
+    const localMidnight = new Date(`${date}T00:00:00`).getTime();
+    const amTs = localMidnight + Math.round((7 + rand() * 2) * 3600000);
+    const pmTs = localMidnight + Math.round((17.5 + rand() * 2.5) * 3600000);
+    entries.push({ id: nextId(), date, ts: amTs, kcal: morning, name: foods.dry.name, grams: gramsFor(foods.dry, morning), kcalPerG: kcalPerG(foods.dry) });
+    entries.push({ id: nextId(), date, ts: pmTs, kcal: evening, name: foods.wet.name, grams: gramsFor(foods.wet, evening), kcalPerG: kcalPerG(foods.wet) });
   }
   return entries;
 }

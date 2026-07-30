@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
-import { groupByDay, median, localDateOf, manualWeighInStamp } from "../lib/series.js";
+import { groupByDay, median, localDateOf, manualWeighInStamp, manualEntryStamp } from "../lib/series.js";
 import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayLabel } from "../lib/dayPager.js";
 import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../lib/foodStats.js";
 import { kcalPerG, foodType } from "../lib/foods.js";
@@ -174,11 +174,11 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     }).sort((a, b) => (a.splitMode === "remainder" ? 1 : 0) - (b.splitMode === "remainder" ? 1 : 0));
   }, [ration.items, target]);
   const showTonight = isToday && steps.length > 0 && dayItems.length === 0;
-  const logTonight = () => steps.forEach((s) => intakeLog.add({ date: viewedDate, kcal: r0(s.kcal), grams: s.grams != null ? Number(s.grams.toFixed(1)) : null, name: s.name || null, kcalPerG: s.grams > 0 ? s.kcal / s.grams : null }));
+  const logTonight = () => steps.forEach((s) => intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(s.kcal), grams: s.grams != null ? Number(s.grams.toFixed(1)) : null, name: s.name || null, kcalPerG: s.grams > 0 ? s.kcal / s.grams : null }));
 
   const add = () => {
     if (num(kcal) > 0) {
-      intakeLog.add({ date: viewedDate, kcal: r0(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null });
+      intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null });
       setGrams(""); setKcal("");
     }
   };
@@ -223,7 +223,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
             <NumBox label="kcal" suf="kcal" value={kcal} onChange={setKcal} />
             <button onClick={add} style={{ background: A.good, color: A.card, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 18, cursor: "pointer" }}>+</button>
           </div>
-          <button onClick={() => intakeLog.add({ date: viewedDate, kcal: 0, grams: null, name: "nothing eaten" })}
+          <button onClick={() => intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: 0, grams: null, name: "nothing eaten" })}
             style={{ marginTop: 8, background: "none", border: "none", color: A.muted, fontFamily: TYPE.mono, fontSize: 11, textDecoration: "underline", cursor: "pointer" }}>
             nothing eaten {isToday ? "today" : "this day"}
           </button>
@@ -246,6 +246,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
           <div key={en.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 13 }}>
             <span style={{ color: A.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{en.name || "—"}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flex: "none" }}>
+              {en.ts != null && <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{new Date(en.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
               <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>{en.grams != null ? `${Number(Number(en.grams).toFixed(1))} g · ` : ""}{r0(num(en.kcal))} kcal</span>
               {<button onClick={() => intakeLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
             </span>

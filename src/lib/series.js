@@ -73,6 +73,11 @@ export function manualWeighInStamp(pickedDate, nowTs = Date.now()) {
   return pickedDate === localDateOf(nowTs) ? { date: pickedDate, ts: nowTs } : { date: pickedDate };
 }
 
+// The same { date, ts } logic for any manually-logged entry — meals as well as weigh-ins — so a
+// meal logged for today records the actual time it was given, while a backfilled past day is
+// date-only (the Log then shows a time for the former, nothing for the latter).
+export const manualEntryStamp = manualWeighInStamp;
+
 // Merge `patch` into the entry with matching id; every other entry is returned as the SAME
 // object reference (not a fresh copy) so a caller memoizing on entry identity doesn't see
 // spurious changes. Generic — the weight and intake logs' edit() both go through this.
