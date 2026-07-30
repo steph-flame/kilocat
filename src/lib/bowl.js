@@ -11,25 +11,28 @@
 import { kcalPerG } from "./foods.js";
 import { num } from "./util.js";
 
+// NB: the split mode lives in `splitMode` (fixed | share | remainder), NOT `mode` — `mode` is the
+// food's ENERGY mode (perKg | perUnit) that kcalPerG reads, and the two must never collide.
 export function distributeBowl(rows, target) {
   const T = Math.max(0, num(target));
   const list = rows || [];
+  const sm = (r) => r.splitMode || "share"; // default: a plain share food
 
-  const fixedKcal = list.filter((r) => r.mode === "fixed").reduce((s, r) => s + Math.max(0, num(r.fixedKcal)), 0);
-  const shareKcal = list.filter((r) => r.mode === "share").reduce((s, r) => s + (num(r.pct) / 100) * T, 0);
-  const hasRemainder = list.some((r) => r.mode === "remainder");
+  const fixedKcal = list.filter((r) => sm(r) === "fixed").reduce((s, r) => s + Math.max(0, num(r.fixedKcal)), 0);
+  const shareKcal = list.filter((r) => sm(r) === "share").reduce((s, r) => s + (num(r.pct) / 100) * T, 0);
+  const hasRemainder = list.some((r) => sm(r) === "remainder");
   const remainderKcal = Math.max(0, T - fixedKcal - shareKcal);
 
   let remainderGiven = false;
   const out = list.map((r) => {
-    const mode = r.mode || "share";
+    const splitMode = sm(r);
     let kcal;
-    if (mode === "fixed") kcal = Math.max(0, num(r.fixedKcal));
-    else if (mode === "remainder") { kcal = remainderGiven ? 0 : remainderKcal; remainderGiven = true; }
+    if (splitMode === "fixed") kcal = Math.max(0, num(r.fixedKcal));
+    else if (splitMode === "remainder") { kcal = remainderGiven ? 0 : remainderKcal; remainderGiven = true; }
     else kcal = (num(r.pct) / 100) * T;
-    const kpg = kcalPerG(r);
+    const kpg = kcalPerG(r); // reads r.mode (energy) — untouched by the split mode
     return {
-      id: r.id, name: r.name, mode, kcal,
+      id: r.id, name: r.name, splitMode, kcal,
       grams: kpg > 0 ? kcal / kpg : null,
       pct: T > 0 ? (kcal / T) * 100 : 0,
     };

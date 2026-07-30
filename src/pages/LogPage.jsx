@@ -16,7 +16,7 @@ const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`);
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 const Em = ({ children }) => <strong style={{ fontWeight: 500, boxShadow: `inset 0 -7px 0 ${A.underline}` }}>{children}</strong>;
-const stepAmount = (s) => (s.mode === "fixed" && s.type === "treat" && num(s.treatCount) ? `${Number(num(s.treatCount).toFixed(1))} treat${num(s.treatCount) === 1 ? "" : "s"}` : g1(s.grams));
+const stepAmount = (s) => (s.splitMode === "fixed" && s.type === "treat" && num(s.treatCount) ? `${Number(num(s.treatCount).toFixed(1))} treat${num(s.treatCount) === 1 ? "" : "s"}` : g1(s.grams));
 function Card({ children, style }) {
   return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
@@ -170,8 +170,8 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     const dist = distributeBowl(ration.items, target);
     return dist.rows.filter((s) => s.kcal > 0).map((s) => {
       const f = ration.items.find((x) => x.id === s.id) || {};
-      return { ...s, type: foodType(f), mode: f.mode || "share", treatCount: f.treatCount };
-    }).sort((a, b) => (a.mode === "remainder" ? 1 : 0) - (b.mode === "remainder" ? 1 : 0));
+      return { ...s, type: foodType(f), treatCount: f.treatCount };
+    }).sort((a, b) => (a.splitMode === "remainder" ? 1 : 0) - (b.splitMode === "remainder" ? 1 : 0));
   }, [ration.items, target]);
   const showTonight = isToday && steps.length > 0 && dayItems.length === 0;
   const logTonight = () => steps.forEach((s) => intakeLog.add({ date: viewedDate, kcal: r0(s.kcal), grams: s.grams != null ? Number(s.grams.toFixed(1)) : null, name: s.name || null, kcalPerG: s.grams > 0 ? s.kcal / s.grams : null }));

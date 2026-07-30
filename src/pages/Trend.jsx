@@ -153,7 +153,7 @@ export default function Trend() {
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Energy balance · kcal vs burn</div>
           <EnergyChart frame={frame} burn={e.kcal} />
-          <p style={{ ...cap, fontSize: 11.5 }}>Weekly-average intake against her {burn} kcal burn. Bars below are a deficit (losing); above, a surplus.</p>
+          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake against her {burn} kcal burn — below the line is a deficit (losing), above is a surplus. The dark line is the smoothed average.</p>
         </Card>
 
         {e.missingIntake > 0 && (
@@ -250,35 +250,37 @@ function RateChart({ rates, frame }) {
 function EnergyChart({ frame, burn }) {
   const { idx, bind } = useHoverIndex(frame.length);
   const H = 100, PADY = 12;
-  const weeks = [];
-  for (let i = 0; i < frame.length; i += 7) {
-    const chunk = frame.slice(i, i + 7).filter((f) => f.kin != null && !f.kinImputed);
-    if (!chunk.length) continue;
-    const avg = chunk.reduce((s, f) => s + f.kin, 0) / chunk.length;
-    weeks.push({ mid: i + Math.min(6, frame.length - 1 - i) / 2, delta: avg - burn, date: frame[i]?.date });
-  }
-  if (!weeks.length) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>Not enough complete days in range yet.</div>;
-  const maxAbs = Math.max(40, ...weeks.map((w) => Math.abs(w.delta)));
+  const n = frame.length;
+  // one bar PER DAY: that day's logged intake minus the burn (skip missing/incomplete days).
+  const daily = frame.map((f) => (f.kin != null && !f.kinImputed ? f.kin - burn : null));
+  if (!daily.some((d) => d != null)) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>No complete days in range yet.</div>;
+  // smoothed running average (EWMA over the days that have data) — the line on top.
+  const alpha = 0.2;
+  let ema = null;
+  const smooth = [];
+  daily.forEach((d, i) => { if (d == null) return; ema = ema == null ? d : alpha * d + (1 - alpha) * ema; smooth.push([xAt(i, n), i, ema]); });
+  const maxAbs = Math.max(40, ...daily.map((d) => (d == null ? 0 : Math.abs(d))), ...smooth.map((s) => Math.abs(s[2])));
   const y = linScale([-maxAbs, maxAbs], [H - PADY, PADY]);
   const base = y(0);
-  const bw = Math.min(26, (VW - PADL - PADR) / weeks.length - 4);
-  const hw = idx != null ? weeks.reduce((b, w) => (Math.abs(w.mid - idx) < Math.abs(b.mid - idx) ? w : b), weeks[0]) : null;
+  const bw = Math.max(1.5, (VW - PADL - PADR) / n - 1);
+  const smoothPts = smooth.map(([x, , v]) => [x, y(v)]);
+  const hv = idx != null && daily[idx] != null ? { x: xAt(idx, n), val: daily[idx], date: frame[idx].date } : null;
   return (
     <div {...bind}>
-      {hw && <Tip vbx={xAt(hw.mid, frame.length)}>wk of {mmdd(hw.date)} · {hw.delta > 0 ? "+" : "−"}{r0(Math.abs(hw.delta))} kcal</Tip>}
+      {hv && <Tip vbx={hv.x}>{mmdd(hv.date)} · {hv.val > 0 ? "+" : "−"}{r0(Math.abs(hv.val))} kcal</Tip>}
       <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }}>
-        {weeks.map((w, k) => {
-          const cx = xAt(w.mid, frame.length);
-          const yv = y(w.delta);
-          const on = hw && w.mid === hw.mid;
-          return <rect key={k} x={cx - bw / 2} y={Math.min(base, yv)} width={bw} height={Math.abs(yv - base)} rx="2" fill={w.delta > 0 ? A.chart.overBurn : A.chart.underBurn} opacity={hw && !on ? 0.5 : 1} />;
+        {daily.map((d, i) => {
+          if (d == null) return null;
+          const cx = xAt(i, n), yv = y(d);
+          return <rect key={i} x={cx - bw / 2} y={Math.min(base, yv)} width={bw} height={Math.max(0.5, Math.abs(yv - base))} fill={d > 0 ? A.chart.overBurn : A.chart.underBurn} opacity={hv && i !== idx ? 0.55 : 0.9} />;
         })}
-        <line x1={PADL} y1={base} x2={VW - PADR} y2={base} stroke={A.ink} strokeWidth="2" />
+        <line x1={PADL} y1={base} x2={VW - PADR} y2={base} stroke={A.chart.zeroLine} strokeWidth="1" strokeDasharray="4 3" />
+        {smoothPts.length > 1 && <path d={dPath(smoothPts)} fill="none" stroke={A.ink} strokeWidth="2" />}
+        {hv && <HoverGuide x={hv.x} />}
         <text x={PADL - 5} y={PADY + 7} textAnchor="end" style={{ ...axisText, fill: A.chart.overBurnLabel }}>+{r0(maxAbs)}</text>
         <text x={PADL - 5} y={base + 3} textAnchor="end" style={{ ...axisText, fill: A.ink }}>burn</text>
         <text x={PADL - 5} y={H - PADY + 3} textAnchor="end" style={axisText}>−{r0(maxAbs)}</text>
         <text x={VW - PADR} y={base - 4} textAnchor="end" style={axisText}>{burn} kcal</text>
-        <text x={PADL + 2} y={PADY + 7} style={{ ...axisText, fill: A.chart.overBurnLabel }}>over ▲</text>
       </svg>
       <XDates frame={frame} />
     </div>

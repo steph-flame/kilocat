@@ -287,6 +287,17 @@ function macrosOf(f) {
 
 const isBlankNum = (v) => !(num(v) > 0);
 
+// Heal ration rows written by the early Bowl, which stored the SPLIT mode (fixed/share/remainder)
+// in `mode` — the same field kcalPerG reads for the ENERGY mode (perKg/perUnit) — silently
+// clobbering it, so dry foods lost their grams. The energy *values* survived, so infer the energy
+// mode back from them and move the split mode to its own `splitMode` field. No-op once migrated.
+const SPLIT_MODES = ["fixed", "share", "remainder"];
+export function migrateSplitMode(f) {
+  if (!f || !SPLIT_MODES.includes(f.mode)) return f;
+  const energyMode = num(f.kcalPerKg) > 0 ? "perKg" : num(f.kcalPerUnit) > 0 || num(f.gramsPerUnit) > 0 ? "perUnit" : "perKg";
+  return { ...f, splitMode: f.splitMode || f.mode, mode: energyMode };
+}
+
 // Fill any blank energy/nutrition field on a food from the matching built-in (exact name, after
 // canonicalization), so a food saved before a built-in gained its macros picks them up on load —
 // WITHOUT ever overwriting a value the user actually entered. Non-built-in foods pass through.

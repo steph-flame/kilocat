@@ -59,10 +59,11 @@ export default function Bowl() {
   const byId = Object.fromEntries(dist.rows.map((r) => [r.id, r]));
   const savedNames = new Set((library.foods || []).map((x) => x.name.trim().toLowerCase()));
 
-  // exactly one remainder — promoting one demotes any other.
-  const setMode = (id, mode) => ration.setItems((fs) => fs.map((f) => {
-    if (f.id === id) return { ...f, mode };
-    if (mode === "remainder" && f.mode === "remainder") return { ...f, mode: "share" };
+  // exactly one remainder — promoting one demotes any other. NB: writes `splitMode`, NOT `mode`
+  // (that's the food's energy mode — perKg/perUnit — which kcalPerG reads; they must stay separate).
+  const setSplitMode = (id, splitMode) => ration.setItems((fs) => fs.map((f) => {
+    if (f.id === id) return { ...f, splitMode };
+    if (splitMode === "remainder" && f.splitMode === "remainder") return { ...f, splitMode: "share" };
     return f;
   }));
 
@@ -92,7 +93,7 @@ export default function Bowl() {
           )}
           {ration.items.map((f, i) => (
             <BowlRow key={f.id} f={f} row={byId[f.id] || { kcal: 0, grams: null, pct: 0 }} target={target}
-              first={i === 0} library={library} ration={ration} setMode={setMode}
+              first={i === 0} library={library} ration={ration} setSplitMode={setSplitMode}
               saveFood={saveFood} saved={savedNames.has((f.name || "").trim().toLowerCase())} />
           ))}
 
@@ -151,9 +152,9 @@ function AmountRow({ left, grams }) {
   );
 }
 
-function BowlRow({ f, row, target, first, library, ration, setMode, saveFood, saved }) {
+function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFood, saved }) {
   const [showDetails, setShowDetails] = useState(false);
-  const mode = f.mode || "share";
+  const splitMode = f.splitMode || "share";
   const type = foodType(f);
   const color = dotColor(f);
   const patch = (obj) => ration.setItems((fs) => fs.map((x) => (x.id === f.id ? { ...x, ...obj } : x)));
@@ -181,9 +182,9 @@ function BowlRow({ f, row, target, first, library, ration, setMode, saveFood, sa
 
       <div style={{ display: "flex", gap: 5, marginTop: 8, alignItems: "center" }}>
         {MODES.map(([m, lbl]) => {
-          const on = mode === m; const c = A.mode[m];
+          const on = splitMode === m; const c = A.mode[m];
           return (
-            <button key={m} onClick={() => setMode(f.id, m)} aria-pressed={on}
+            <button key={m} onClick={() => setSplitMode(f.id, m)} aria-pressed={on}
               style={{ fontFamily: TYPE.mono, fontSize: 10, letterSpacing: ".08em", textTransform: "uppercase", borderRadius: 6, padding: "4px 8px",
                 border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? c.bg : "transparent", color: on ? c.text : A.muted, cursor: "pointer" }}>{lbl}</button>
           );
@@ -193,7 +194,7 @@ function BowlRow({ f, row, target, first, library, ration, setMode, saveFood, sa
         </button>
       </div>
 
-      {mode === "share" && (
+      {splitMode === "share" && (
         <>
           <input type="range" min={0} max={100} step={1} value={r0(f.pct) || 0}
             onChange={(e) => ration.setField(f.id, "pct", Number(e.target.value))}
@@ -201,7 +202,7 @@ function BowlRow({ f, row, target, first, library, ration, setMode, saveFood, sa
           <AmountRow left={`${r0(row.pct)}% of ${target} · ${r0(row.kcal)} kcal`} grams={row.grams} />
         </>
       )}
-      {mode === "fixed" && type === "treat" && (
+      {splitMode === "fixed" && type === "treat" && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
           <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body, display: "inline-flex", alignItems: "baseline", gap: 5 }}>
             <input type="number" step="any" min="0" value={f.treatCount ?? ""} onChange={(e) => setTreatCount(e.target.value === "" ? "" : Number(e.target.value))} aria-label="number of treats" style={numInline} />
@@ -210,7 +211,7 @@ function BowlRow({ f, row, target, first, library, ration, setMode, saveFood, sa
           <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{g1(row.grams)}</span>
         </div>
       )}
-      {mode === "fixed" && type !== "treat" && (
+      {splitMode === "fixed" && type !== "treat" && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
           <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body, display: "inline-flex", alignItems: "baseline", gap: 5 }}>
             off the top ·
@@ -219,7 +220,7 @@ function BowlRow({ f, row, target, first, library, ration, setMode, saveFood, sa
           <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{g1(row.grams)}</span>
         </div>
       )}
-      {mode === "remainder" && (
+      {splitMode === "remainder" && (
         <AmountRow left={`absorbs what's left · ${r0(row.pct)}% · ${r0(row.kcal)} kcal`} grams={row.grams} />
       )}
 
