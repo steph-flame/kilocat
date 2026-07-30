@@ -21,8 +21,9 @@ import CatsPage from "./pages/CatsPage.jsx";
 
 // Redesign migration: two INDEPENDENT pages, not a wizard. #/calories is the calorie plan (basis +
 // rate → target); #/ration is the ration plan (split the target across foods). Each cross-links to
-// the other but neither forces you through it. The classic planner stays at #/ration-classic until
-// its transition schedule is migrated. (#/intent and #/bowl kept as aliases.)
+// the other but neither forces you through it. The classic planner remains at #/ration-classic as a
+// reference only — its transition schedule now lives in the new Ration (Bowl). (#/intent and #/bowl
+// kept as aliases.)
 const PAGES = {
   home: LogPage, today: LogPage, calories: Intent, intent: Intent, ration: Bowl, bowl: Bowl,
   "ration-classic": RationPlanner, trend: Trend, expenditure: Trend, "expenditure-classic": Expenditure, log: LogPage, "log-classic": Log, cats: CatsPage, "cats-classic": Cats, settings: MorePage, "settings-classic": Settings,

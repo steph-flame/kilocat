@@ -51,9 +51,10 @@ function useEditableRation(ration, isDemo, activeCatId) {
 }
 
 export default function Bowl() {
-  const { intent, ration: liveRation, library, t, tr, activeCatId, saveFood } = useApp();
+  const { p, intent, ration: liveRation, start: liveStart, library, t, tr, setTr, activeCatId, saveFood } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const ration = useEditableRation(liveRation, isDemo, activeCatId);
+  const start = useEditableRation(liveStart, isDemo, activeCatId);
   const target = r0(intent.target);
   const dist = distributeBowl(ration.items, target);
   const byId = Object.fromEntries(dist.rows.map((r) => [r.id, r]));
@@ -61,11 +62,20 @@ export default function Bowl() {
 
   // exactly one remainder — promoting one demotes any other. NB: writes `splitMode`, NOT `mode`
   // (that's the food's energy mode — perKg/perUnit — which kcalPerG reads; they must stay separate).
-  const setSplitMode = (id, splitMode) => ration.setItems((fs) => fs.map((f) => {
+  const makeSetSplitMode = (list) => (id, splitMode) => list.setItems((fs) => fs.map((f) => {
     if (f.id === id) return { ...f, splitMode };
     if (splitMode === "remainder" && f.splitMode === "remainder") return { ...f, splitMode: "share" };
     return f;
   }));
+  const setSplitMode = makeSetSplitMode(ration);
+  const setStartSplitMode = makeSetSplitMode(start);
+
+  // The demo cat isn't stored, so setTr no-ops on her — give the switching-foods toggle a
+  // session-local copy so the demo stays clickable. Real cats persist through setTr unchanged.
+  const [demoTr, setDemoTr] = useState(null);
+  useEffect(() => { setDemoTr(null); }, [activeCatId]);
+  const trEff = isDemo ? (demoTr ?? tr) : tr;
+  const setTrEff = isDemo ? (u) => setDemoTr((prev) => (typeof u === "function" ? u(prev ?? tr) : u)) : setTr;
 
   const prof = rationMacroProfile(ration.items);
   const aafco = prof ? aafcoCheck(prof.dryMatter, t.stage) : null;
@@ -130,6 +140,10 @@ export default function Bowl() {
           </Card>
         )}
 
+        {/* switching foods — the gradual ramp from the current blend to this ration */}
+        <Transition name={p?.name} start={start} setStartSplitMode={setStartSplitMode}
+          newRows={dist.rows} target={target} tr={trEff} setTr={setTrEff} library={library} saveFood={saveFood} savedNames={savedNames} />
+
         {/* footer — the ration saves live as you edit; this just leaves the page */}
         <div className="span-all" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "4px 24px 0" }}>
           <a href="#/" style={{ background: A.good, color: A.card, fontFamily: TYPE.sans, fontSize: 13, fontWeight: 600, borderRadius: 14, padding: "12px 20px", textDecoration: "none" }}>
@@ -138,6 +152,106 @@ export default function Bowl() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Switching foods: the gradual old→new ramp. Both blends are split with the same distributeBowl
+// engine as the ration, so each day is just the full-target distribution scaled by that day's
+// share — the old blend fading from 100%→0 while the new one rises 0→100%, total energy held at
+// target throughout. Migrated here from the classic planner so nothing lives on #/ration-classic.
+function Transition({ name, start, setStartSplitMode, newRows, target, tr, setTr, library, saveFood, savedNames }) {
+  const on = !!tr.on;
+  const days = Math.max(1, Math.min(30, num(tr.days) || 7));
+  const unit = tr.timelineUnit || "g";
+  const startDist = distributeBowl(start.items, target);
+  const startById = Object.fromEntries(startDist.rows.map((r) => [r.id, r]));
+  const newById = Object.fromEntries(newRows.map((r) => [r.id, r]));
+  const suf = unit === "kcal" ? "" : "g";
+  const cell = (row, frac) => {
+    if (!row) return "—";
+    if (unit === "kcal") return `${r0(row.kcal * frac)}`;
+    return row.grams != null ? `${Number((row.grams * frac).toFixed(1))}` : `${r0(row.kcal * frac)}`;
+  };
+  const firstWord = (nm, fallback) => (nm || fallback).split(" ")[0];
+  const hasStart = start.items.length > 0;
+
+  return (
+    <Card className="span-all">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div>
+          <div style={label()}>Switching foods</div>
+          <p style={{ fontSize: 12.5, color: A.bodyOnFill, margin: "5px 0 0", lineHeight: 1.45 }}>
+            Ramp from what {name || "she"}'s eating now to this ration over several days to avoid stomach upset.
+          </p>
+        </div>
+        <button onClick={() => setTr((s) => ({ ...s, on: !s.on }))} aria-pressed={on} role="switch" aria-label="Enable food transition"
+          style={{ flex: "none", width: 44, height: 26, borderRadius: 999, border: "none", cursor: "pointer", background: on ? A.good : A.track, position: "relative", transition: "background .15s" }}>
+          <span style={{ position: "absolute", top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: 999, background: A.card, transition: "left .15s" }} />
+        </button>
+      </div>
+
+      {on && (
+        <div style={{ marginTop: 14 }}>
+          <div style={label({ color: A.labelOnFill, marginBottom: 2 })}>Currently feeding</div>
+          {!hasStart && <p style={{ fontSize: 12, color: A.muted, padding: "6px 0" }}>Add what {name || "she"}'s eating now to see the day-by-day ramp.</p>}
+          {start.items.map((f, i) => (
+            <BowlRow key={f.id} f={f} row={startById[f.id] || { kcal: 0, grams: null, pct: 0 }} target={target}
+              first={i === 0} library={library} ration={start} setSplitMode={setStartSplitMode}
+              saveFood={saveFood} saved={savedNames.has((f.name || "").trim().toLowerCase())} />
+          ))}
+          <button onClick={() => start.add()} style={{ width: "100%", marginTop: 6, border: `1px dashed ${A.cardBorder}`, borderRadius: 12, background: "transparent", color: A.body, fontFamily: TYPE.sans, fontSize: 12.5, padding: "10px 0", cursor: "pointer" }}>
+            + Add a current food
+          </button>
+
+          {hasStart && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "16px 0 8px", flexWrap: "wrap", gap: 8 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5, color: A.body }}>
+                  Over
+                  <input type="number" min={1} max={30} step={1} value={days}
+                    onChange={(e) => setTr((s) => ({ ...s, days: Math.max(1, Math.min(30, Number(e.target.value) || 1)) }))}
+                    style={{ width: 46, fontFamily: TYPE.mono, fontSize: 13, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "center", padding: "1px 2px" }} />
+                  days
+                </label>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[["g", "grams"], ["kcal", "kcal"]].map(([u, lbl]) => (
+                    <button key={u} onClick={() => setTr((s) => ({ ...s, timelineUnit: u }))} aria-pressed={unit === u}
+                      style={{ fontFamily: TYPE.mono, fontSize: 11, borderRadius: 999, padding: "3px 10px", cursor: "pointer", border: unit === u ? "none" : `1px solid ${A.cardBorder}`, background: unit === u ? A.ink : "transparent", color: unit === u ? A.card : A.muted }}>{lbl}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ overflowX: "auto", border: `1px solid ${A.hairline}`, borderRadius: 12 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: TYPE.mono, fontSize: 11.5 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${A.hairline}` }}>
+                      <th style={{ textAlign: "left", padding: "8px 10px", color: A.muted, fontWeight: 500, whiteSpace: "nowrap" }}>Day</th>
+                      {start.items.map((f) => <th key={f.id} style={{ textAlign: "right", padding: "8px 10px", color: A.muted, fontWeight: 500, whiteSpace: "nowrap" }}>{firstWord(f.name, "old")}</th>)}
+                      {newRows.map((r) => <th key={r.id} style={{ textAlign: "right", padding: "8px 10px", color: A.good, fontWeight: 600, whiteSpace: "nowrap" }}>{firstWord(r.name, "new")}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: days }, (_, i) => i + 1).map((day) => {
+                      const toNew = day / days, last = day === days;
+                      return (
+                        <tr key={day} style={{ borderBottom: `1px solid ${A.hairline}`, background: last ? "rgba(31,81,48,0.07)" : "transparent" }}>
+                          <td style={{ padding: "7px 10px", color: A.ink, whiteSpace: "nowrap" }}>{day} <span style={{ color: A.muted }}>· {r0(toNew * 100)}%</span></td>
+                          {start.items.map((f) => { const frac = 1 - toNew; return <td key={f.id} style={{ padding: "7px 10px", textAlign: "right", color: frac < 0.001 ? A.muted : A.body }}>{frac < 0.001 ? "—" : `${cell(startById[f.id], frac)}${suf}`}</td>; })}
+                          {newRows.map((r) => <td key={r.id} style={{ padding: "7px 10px", textAlign: "right", color: A.good }}>{`${cell(newById[r.id], toNew)}${suf}`}</td>)}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p style={{ fontSize: 11.5, color: A.bodyOnFill, margin: "8px 0 0", lineHeight: 1.45 }}>
+                Even ramp: the new ration's share rises ~{r0(100 / days)}% a day to 100% on day {days}, holding total energy at {target} kcal throughout. If stool loosens, repeat a day before advancing.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
