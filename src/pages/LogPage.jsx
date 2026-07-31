@@ -6,6 +6,7 @@ import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayL
 import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../lib/foodStats.js";
 import { kcalPerG, foodType } from "../lib/foods.js";
 import { distributeBowl } from "../lib/bowl.js";
+import { resolveRotations } from "../lib/rotation.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
 import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
@@ -168,12 +169,13 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
   // Tonight's bowl (the old Today screen, folded in): shown on today's view before anything's
   // logged. "Log it" fills the day from the ration split in one tap.
   const steps = useMemo(() => {
-    const dist = distributeBowl(ration.items, target);
+    const resolved = resolveRotations(ration.items, viewedDate); // a rotation slot → that day's flavor
+    const dist = distributeBowl(resolved, target);
     return dist.rows.filter((s) => s.kcal > 0).map((s) => {
-      const f = ration.items.find((x) => x.id === s.id) || {};
+      const f = resolved.find((x) => x.id === s.id) || {};
       return { ...s, type: foodType(f), treatCount: f.treatCount };
     }).sort((a, b) => (a.splitMode === "remainder" ? 1 : 0) - (b.splitMode === "remainder" ? 1 : 0));
-  }, [ration.items, target]);
+  }, [ration.items, target, viewedDate]);
   const showTonight = isToday && steps.length > 0 && dayItems.length === 0;
   const logTonight = () => steps.forEach((s) => intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(s.kcal), grams: s.grams != null ? Number(s.grams.toFixed(1)) : null, name: s.name || null, kcalPerG: s.grams > 0 ? s.kcal / s.grams : null }));
 

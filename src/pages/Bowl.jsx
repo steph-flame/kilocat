@@ -3,6 +3,7 @@ import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
 import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, treatEnergy, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
+import { hasRotation, activeMember, activeRotationIndex, foodFieldsOf, resolveRotations } from "../lib/rotation.js";
 import { num } from "../lib/util.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import { BookmarkPlus, BookmarkCheck } from "lucide-react";
@@ -53,12 +54,15 @@ function useEditableRation(ration, isDemo, activeCatId) {
 }
 
 export default function Bowl() {
-  const { p, intent, ration: liveRation, start: liveStart, library, t, tr, setTr, activeCatId, saveFood } = useApp();
+  const { p, intent, ration: liveRation, start: liveStart, library, t, tr, setTr, activeCatId, saveFood, today } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const ration = useEditableRation(liveRation, isDemo, activeCatId);
   const start = useEditableRation(liveStart, isDemo, activeCatId);
   const target = r0(intent.target);
-  const dist = distributeBowl(ration.items, target);
+  // Resolve any variety-pack rotation slot to today's active flavor before splitting, so grams,
+  // macros and the distribution all reflect what actually goes in the bowl today.
+  const resolvedItems = resolveRotations(ration.items, today);
+  const dist = distributeBowl(resolvedItems, target);
   const byId = Object.fromEntries(dist.rows.map((r) => [r.id, r]));
   const savedNames = new Set((library.foods || []).map((x) => x.name.trim().toLowerCase()));
 
@@ -79,7 +83,7 @@ export default function Bowl() {
   const trEff = isDemo ? (demoTr ?? tr) : tr;
   const setTrEff = isDemo ? (u) => setDemoTr((prev) => (typeof u === "function" ? u(prev ?? tr) : u)) : setTr;
 
-  const prof = rationMacroProfile(ration.items);
+  const prof = rationMacroProfile(resolvedItems);
   const aafco = prof ? aafcoCheck(prof.dryMatter, t.stage) : null;
 
   return (
@@ -127,7 +131,7 @@ export default function Bowl() {
         </Card>
 
         {/* where the planned calories come from — same visualization as the Log's day summary */}
-        <RationDistribution rows={dist.rows} foods={ration.items} prof={prof} aafco={aafco} />
+        <RationDistribution rows={dist.rows} foods={resolvedItems} prof={prof} aafco={aafco} />
 
         {/* switching foods — the gradual ramp from the current blend to this ration */}
         <Transition name={p?.name} start={start} setStartSplitMode={setStartSplitMode}
@@ -285,35 +289,72 @@ function AmountRow({ left, grams }) {
 }
 
 function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFood, saved }) {
+  const { today } = useApp();
   const [showDetails, setShowDetails] = useState(false);
   const [gEdit, setGEdit] = useState(null); // grams being typed for a fixed food (kcal follows)
   const splitMode = f.splitMode || "share";
-  const type = foodType(f);
-  const color = dotColor(f);
-  const kpg = kcalPerG(f); // energy density — lets a fixed amount be entered as grams, not just kcal
+  // A rotation slot has no top-level food of its own — its energy/type/name come from whichever
+  // flavor is active today. `af` is the food we display and price against.
+  const isRot = hasRotation(f);
+  const af = isRot ? (activeMember(f, today) || {}) : f;
+  const activeIdx = isRot ? activeRotationIndex(f, today) : -1;
+  const type = foodType(af);
+  const color = dotColor(af);
+  const kpg = kcalPerG(af); // energy density — lets a fixed amount be entered as grams, not just kcal
   const setFixedKcal = (v) => { setGEdit(null); ration.setField(f.id, "fixedKcal", v === "" ? "" : Number(v)); };
   const setFixedGrams = (v) => { setGEdit(v); ration.setField(f.id, "fixedKcal", v === "" ? "" : Math.round(Number(v) * kpg * 100) / 100); };
   const gramsShown = gEdit != null ? gEdit : (row.grams != null ? String(Number(row.grams.toFixed(1))) : "");
   const patch = (obj) => ration.setItems((fs) => fs.map((x) => (x.id === f.id ? { ...x, ...obj } : x)));
   const setType = (ty) => patch({ type: ty, mode: ty === "dry" ? "perKg" : "perUnit" });
   // A treat is given by count; its fixed kcal follows the per-treat energy.
-  const setTreatCount = (c) => patch({ treatCount: c, fixedKcal: c === "" ? "" : num(c) * num(f.kcalPerUnit) });
+  const setTreatCount = (c) => patch({ treatCount: c, fixedKcal: c === "" ? "" : num(c) * num(af.kcalPerUnit) });
+
+  // ---- rotation (variety-pack) editing ----
+  const setMembers = (updater) => ration.setItems((fs) => fs.map((x) => {
+    if (x.id !== f.id) return x;
+    const cur = Array.isArray(x.rotation) ? x.rotation : [];
+    const next = typeof updater === "function" ? updater(cur) : updater;
+    if (!next || next.length === 0) { const { rotation, ...rest } = x; return rest; } // last flavor removed → plain food again
+    return { ...x, rotation: next };
+  }));
+  const startRotation = () => setMembers([foodFieldsOf(f), foodFieldsOf(blankFood())]); // seed with the current food + one empty slot
+  const stopRotation = () => ration.setItems((fs) => fs.map((x) => {
+    if (x.id !== f.id) return x;
+    const { rotation, ...rest } = x;
+    return { ...rest, ...foodFieldsOf(af) }; // collapse back to today's flavor
+  }));
+  const addFlavor = () => setMembers((cur) => [...cur, foodFieldsOf(blankFood())]);
+  const removeFlavor = (idx) => setMembers((cur) => cur.filter((_, i) => i !== idx));
+  const setFlavorName = (idx, name) => setMembers((cur) => cur.map((m, i) => (i === idx ? { ...m, name } : m)));
+  const pickFlavor = (idx, food) => setMembers((cur) => cur.map((m, i) => (i === idx ? foodFieldsOf(libEntry(food)) : m)));
 
   return (
     <div style={{ borderTop: first ? "none" : `1px solid ${A.hairline}`, padding: "12px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ width: 9, height: 9, borderRadius: 999, background: color, flex: "none" }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <FoodSearch value={f.name} search={library.search}
-            onChangeName={(v) => ration.setField(f.id, "name", v)}
-            onPick={(food) => ration.patch(f.id, libEntry(food))} />
+          {isRot ? (
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: A.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{af.name || "New rotation"}</div>
+              <div style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted }}>↻ variety pack · {f.rotation.length} flavor{f.rotation.length === 1 ? "" : "s"} · today</div>
+            </div>
+          ) : (
+            <FoodSearch value={f.name} search={library.search}
+              onChangeName={(v) => ration.setField(f.id, "name", v)}
+              onPick={(food) => ration.patch(f.id, libEntry(food))} />
+          )}
         </div>
-        <button onClick={() => isCompleteFood(f) && saveFood?.(f)} disabled={!isCompleteFood(f)}
-          title={saved ? "Saved to your foods" : isCompleteFood(f) ? "Save to your foods (with its type, energy & analysis)" : "Add a name and energy first"}
-          aria-label="Save food to your library"
-          style={{ color: saved ? A.good : isCompleteFood(f) ? A.muted : A.cardBorder, border: "none", background: "none", cursor: isCompleteFood(f) ? "pointer" : "default", padding: 0, display: "inline-flex" }}>
-          {saved ? <BookmarkCheck size={16} /> : <BookmarkPlus size={16} />}
-        </button>
+        <button onClick={() => (isRot ? stopRotation() : startRotation())} aria-pressed={isRot}
+          title={isRot ? "Stop rotating — keep today's flavor" : "Rotate flavors (variety pack)"} aria-label="Rotate flavors"
+          style={{ color: isRot ? A.good : A.muted, border: "none", background: "none", cursor: "pointer", padding: 0, display: "inline-flex", fontSize: 16, lineHeight: 1 }}>↻</button>
+        {!isRot && (
+          <button onClick={() => isCompleteFood(f) && saveFood?.(f)} disabled={!isCompleteFood(f)}
+            title={saved ? "Saved to your foods" : isCompleteFood(f) ? "Save to your foods (with its type, energy & analysis)" : "Add a name and energy first"}
+            aria-label="Save food to your library"
+            style={{ color: saved ? A.good : isCompleteFood(f) ? A.muted : A.cardBorder, border: "none", background: "none", cursor: isCompleteFood(f) ? "pointer" : "default", padding: 0, display: "inline-flex" }}>
+            {saved ? <BookmarkCheck size={16} /> : <BookmarkPlus size={16} />}
+          </button>
+        )}
         <button onClick={() => ration.remove(f.id)} aria-label="Remove food" style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 15 }}>×</button>
       </div>
 
@@ -326,9 +367,11 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
                 border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? c.bg : "transparent", color: on ? c.text : A.muted, cursor: "pointer" }}>{lbl}</button>
           );
         })}
-        <button onClick={() => setShowDetails((s) => !s)} style={{ marginLeft: "auto", fontFamily: TYPE.mono, fontSize: 10, color: showDetails ? A.ink : A.muted, background: "none", border: "none", cursor: "pointer" }}>
-          {showDetails ? "details ▾" : "details ▸"}
-        </button>
+        {!isRot && (
+          <button onClick={() => setShowDetails((s) => !s)} style={{ marginLeft: "auto", fontFamily: TYPE.mono, fontSize: 10, color: showDetails ? A.ink : A.muted, background: "none", border: "none", cursor: "pointer" }}>
+            {showDetails ? "details ▾" : "details ▸"}
+          </button>
+        )}
       </div>
 
       {splitMode === "share" && (
@@ -370,7 +413,25 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
         <AmountRow left={`absorbs what's left · ${r0(row.pct)}% · ${r0(row.kcal)} kcal`} grams={row.grams} />
       )}
 
-      {showDetails && <FoodDetails f={f} type={type} patch={patch} setType={setType} ration={ration} />}
+      {isRot && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${A.cardBorder}` }}>
+          <div style={label({ fontSize: 9, marginBottom: 4 })}>Flavors · one per day</div>
+          {f.rotation.map((m, idx) => (
+            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: dotColor(m), flex: "none" }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <FoodSearch value={m.name} search={library.search} onChangeName={(v) => setFlavorName(idx, v)} onPick={(food) => pickFlavor(idx, food)} />
+              </div>
+              {idx === activeIdx && <span style={{ fontFamily: TYPE.mono, fontSize: 9, color: A.good, border: `1px solid ${A.good}`, borderRadius: 999, padding: "1px 6px", flex: "none" }}>today</span>}
+              <button onClick={() => removeFlavor(idx)} aria-label="Remove flavor" style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 14 }}>×</button>
+            </div>
+          ))}
+          <button onClick={addFlavor} style={{ marginTop: 4, fontFamily: TYPE.mono, fontSize: 11, color: A.good, background: "none", border: "none", cursor: "pointer" }}>+ add flavor</button>
+          <p style={{ fontSize: 10.5, color: A.muted, marginTop: 6, lineHeight: 1.4 }}>Each flavor pulls its energy &amp; analysis from your saved foods — pick from the list. The bowl cycles one flavor per day.</p>
+        </div>
+      )}
+
+      {showDetails && !isRot && <FoodDetails f={f} type={type} patch={patch} setType={setType} ration={ration} />}
     </div>
   );
 }
