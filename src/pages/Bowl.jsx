@@ -8,6 +8,8 @@ import { DEMO_CAT_ID } from "../lib/catStore.js";
 import { BookmarkPlus, BookmarkCheck } from "lucide-react";
 import FoodSearch from "../components/FoodSearch.jsx";
 import GuaranteedAnalysis from "../components/GuaranteedAnalysis.jsx";
+import { DistributionBody, Toggle } from "../components/FoodDistribution.jsx";
+import { foodSummary, macroBreakdown } from "../lib/foodStats.js";
 
 // Ration — Step 2 of 2: The bowl. Split the Intent target across N foods, each fixed / share /
 // remainder. One basis for everything: % of the full target (see lib/bowl.js).
@@ -124,21 +126,8 @@ export default function Bowl() {
           </div>
         </Card>
 
-        {/* folded nutrition detail */}
-        {prof && (
-          <Card>
-            <div style={label()}>This blend delivers</div>
-            <div style={{ fontSize: 13, color: A.body, marginTop: 8, lineHeight: 1.5 }}>
-              <div><b style={{ color: A.ink }}>{prof.caloric.protein}%</b> protein · <b style={{ color: A.ink }}>{prof.caloric.fat}%</b> fat · <b style={{ color: A.ink }}>{prof.caloric.carb}%</b> carb of calories</div>
-              <div style={{ color: A.muted, marginTop: 3 }}>
-                Dry-matter protein {r0(prof.dryMatter.protein)}%{aafco && aafco.protein === "below" ? ` · below the AAFCO ${aafco.stage} minimum` : aafco && aafco.protein === "ok" ? " · clears AAFCO" : ""} · {r0(prof.moisture)}% moisture
-              </div>
-              {prof.coverageKcalPct < 99 && (
-                <div style={{ color: A.muted, marginTop: 3 }}>Based on {r0(prof.coverageKcalPct)}% of the blend — add guaranteed-analysis to the rest.</div>
-              )}
-            </div>
-          </Card>
-        )}
+        {/* where the planned calories come from — same visualization as the Log's day summary */}
+        <RationDistribution rows={dist.rows} foods={ration.items} prof={prof} aafco={aafco} />
 
         {/* switching foods — the gradual ramp from the current blend to this ration */}
         <Transition name={p?.name} start={start} setStartSplitMode={setStartSplitMode}
@@ -255,6 +244,35 @@ function Transition({ name, start, setStartSplitMode, newRows, target, tr, setTr
   );
 }
 
+// Where the planned calories (and grams) come from — the same wet/dry, per-food and macro
+// breakdown the Log shows for a logged day, but computed over the ration's distribution instead of
+// intake entries. Feeds foodSummary/macroBreakdown a pseudo-intake list built from the split, with
+// the ration's own foods as the classifying library. Keeps the dry-matter/AAFCO line the old card
+// carried, since the shared DistributionBody doesn't cover it.
+function RationDistribution({ rows, foods, prof, aafco }) {
+  const [basis, setBasis] = useState("calories");
+  const items = (rows || [])
+    .filter((r) => r.kcal > 0 || (r.grams || 0) > 0)
+    .map((r) => ({ name: r.name, kcal: r.kcal, grams: r.grams ?? 0 }));
+  const s = foodSummary(items, foods, 1);
+  const m = macroBreakdown(items, foods, 1);
+  if (s.isEmpty) return null;
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+        <span style={label()}>Where the calories come from</span>
+        <Toggle options={[["calories", "cal"], ["weight", "g"]]} value={basis} onChange={setBasis} accent={A.gold} />
+      </div>
+      <DistributionBody s={s} m={m} byKcal={basis === "calories"} coverageNoun="the blend" />
+      {prof && (
+        <div style={{ borderTop: `1px solid ${A.hairline}`, marginTop: 12, paddingTop: 10, fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>
+          Dry-matter protein {r0(prof.dryMatter.protein)}%{aafco && aafco.protein === "below" ? ` · below the AAFCO ${aafco.stage} minimum` : aafco && aafco.protein === "ok" ? " · clears AAFCO" : ""}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 const numInline = { width: 46, fontFamily: TYPE.mono, fontSize: 13, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "right", padding: "1px 2px" };
 
 function AmountRow({ left, grams }) {
@@ -268,9 +286,14 @@ function AmountRow({ left, grams }) {
 
 function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFood, saved }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [gEdit, setGEdit] = useState(null); // grams being typed for a fixed food (kcal follows)
   const splitMode = f.splitMode || "share";
   const type = foodType(f);
   const color = dotColor(f);
+  const kpg = kcalPerG(f); // energy density — lets a fixed amount be entered as grams, not just kcal
+  const setFixedKcal = (v) => { setGEdit(null); ration.setField(f.id, "fixedKcal", v === "" ? "" : Number(v)); };
+  const setFixedGrams = (v) => { setGEdit(v); ration.setField(f.id, "fixedKcal", v === "" ? "" : Math.round(Number(v) * kpg * 100) / 100); };
+  const gramsShown = gEdit != null ? gEdit : (row.grams != null ? String(Number(row.grams.toFixed(1))) : "");
   const patch = (obj) => ration.setItems((fs) => fs.map((x) => (x.id === f.id ? { ...x, ...obj } : x)));
   const setType = (ty) => patch({ type: ty, mode: ty === "dry" ? "perKg" : "perUnit" });
   // A treat is given by count; its fixed kcal follows the per-treat energy.
@@ -320,7 +343,7 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
           <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body, display: "inline-flex", alignItems: "baseline", gap: 5 }}>
             <input type="number" step="any" min="0" value={f.treatCount ?? ""} onChange={(e) => setTreatCount(e.target.value === "" ? "" : Number(e.target.value))} aria-label="number of treats" style={numInline} />
-            treats · {r0(row.kcal)} kcal
+            treats · {r0(row.kcal)} kcal · {r0(row.pct)}%
           </span>
           <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{g1(row.grams)}</span>
         </div>
@@ -329,9 +352,18 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
           <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.body, display: "inline-flex", alignItems: "baseline", gap: 5 }}>
             off the top ·
-            <input type="number" step="any" min="0" value={f.fixedKcal ?? ""} onChange={(e) => ration.setField(f.id, "fixedKcal", e.target.value === "" ? "" : Number(e.target.value))} aria-label="fixed kcal" style={numInline} /> kcal
+            <input type="number" step="any" min="0" value={f.fixedKcal ?? ""} onChange={(e) => setFixedKcal(e.target.value)} aria-label="fixed kcal" style={numInline} /> kcal
+            · {r0(row.pct)}%
           </span>
-          <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{g1(row.grams)}</span>
+          {kpg > 0 ? (
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }} title="Type grams to set the amount — kcal follows">
+              <input type="number" step="any" min="0" value={gramsShown} onChange={(e) => setFixedGrams(e.target.value)} onBlur={() => setGEdit(null)} aria-label="fixed grams"
+                style={{ width: 60, fontFamily: TYPE.mono, fontSize: 16, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "right", padding: "1px 2px" }} />
+              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>g</span>
+            </span>
+          ) : (
+            <span style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.ink }}>{g1(row.grams)}</span>
+          )}
         </div>
       )}
       {splitMode === "remainder" && (
