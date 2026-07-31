@@ -18,6 +18,7 @@ import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
 import { resolveIntent } from "../lib/intent.js";
 import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../lib/mergeData.js";
+import { openCan, consumeFromFridge } from "../lib/fridge.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -64,6 +65,8 @@ const sanitizeCat = (cat) => ({
   profile: cat?.profile ?? freshProfile(),
   ration: (cat?.ration || []).map(cleanFood),
   start: (cat?.start || []).map(cleanFood),
+  fridge: Array.isArray(cat?.fridge) ? cat.fridge : [], // open-can inventory (tier B); snapshots kept as-is
+
   // repairWeighInDate: self-heals any weigh-in whose stored `date` was UTC-derived (from
   // before `today` below was fixed to local) and now disagrees with its own `ts` — see
   // lib/series.js. Entries with no `ts` (backfilled/future-dated) pass through untouched.
@@ -321,6 +324,17 @@ export function AppProvider({ children }) {
   const expSettings = activeCat.expSettings;
   const setExpSettings = (patch) => updateActiveCat((cat) => ({ ...cat, expSettings: { ...cat.expSettings, ...patch }, stateModAt: Date.now() }));
 
+  // Open-can fridge — a current-state-bundle field like ration/start (LWW by stateModAt on merge).
+  const fridge = activeCat.fridge || [];
+  const setFridge = (updater) => updateActiveCat((cat) => ({ ...cat, fridge: typeof updater === "function" ? updater(cat.fridge || []) : updater, stateModAt: Date.now() }));
+  // Higher-level ops so pages don't need the fridge lib or uid: open a fresh can, toss one, set the
+  // grams left by hand, or consume grams of a food (used when logging a wet meal — draws oldest-
+  // first, opens new cans as needed). `today`/`fridgeDays` are closed over from state.
+  const openFridgeCan = (food) => setFridge((fr) => [...fr, openCan(food, today, uid)]);
+  const tossCan = (id) => setFridge((fr) => fr.filter((c) => c.id !== id));
+  const setCanRemaining = (id, grams) => setFridge((fr) => fr.map((c) => (c.id === id ? { ...c, remainingGrams: Math.max(0, Number(grams) || 0) } : c)));
+  const consumeFridge = (food, grams) => setFridge((fr) => consumeFromFridge(fr, food, grams, today, fridgeDays, uid));
+
   // Permanent vs. logged state. Age derives from date of birth (so it never goes stale);
   // with no dob to derive it from, the cat is treated as an adult (never a fabricated
   // newborn — see effectiveAgeMonths) and dobMissing tells the UI to prompt for it instead
@@ -546,6 +560,7 @@ export function AppProvider({ children }) {
     today, currentWeight, logWeight,
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
+    fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure, intent,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,

@@ -39,6 +39,7 @@ function validateCatShape(d) {
   if (d.profile !== undefined && !isPlainObject(d.profile)) return false;
   if (d.ration !== undefined && !arrOf(d.ration, isFoodEntry)) return false;
   if (d.start !== undefined && !arrOf(d.start, isFoodEntry)) return false;
+  if (d.fridge !== undefined && !arrOf(d.fridge, (c) => isPlainObject(c) && typeof c.name === "string")) return false;
   if (d.weightLog !== undefined && !arrOf(d.weightLog, isWeightEntry)) return false;
   if (d.intakeLog !== undefined && !arrOf(d.intakeLog, isIntakeEntry)) return false;
   if (d.intakeDayStatus !== undefined && !isIntakeDayStatus(d.intakeDayStatus)) return false;

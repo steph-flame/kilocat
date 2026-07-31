@@ -3,7 +3,8 @@ import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
 import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, treatEnergy, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
-import { hasRotation, activeMember, activeRotationIndex, foodFieldsOf, resolveRotations } from "../lib/rotation.js";
+import { hasRotation, foodFieldsOf } from "../lib/rotation.js";
+import { resolveRotationsWithFridge, activeMemberWithFridge } from "../lib/fridge.js";
 import { num } from "../lib/util.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import { BookmarkPlus, BookmarkCheck } from "lucide-react";
@@ -54,14 +55,15 @@ function useEditableRation(ration, isDemo, activeCatId) {
 }
 
 export default function Bowl() {
-  const { p, intent, ration: liveRation, start: liveStart, library, t, tr, setTr, activeCatId, saveFood, today } = useApp();
+  const { p, intent, ration: liveRation, start: liveStart, library, t, tr, setTr, activeCatId, saveFood, today, fridge, fridgeDays } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const ration = useEditableRation(liveRation, isDemo, activeCatId);
   const start = useEditableRation(liveStart, isDemo, activeCatId);
   const target = r0(intent.target);
   // Resolve any variety-pack rotation slot to today's active flavor before splitting, so grams,
-  // macros and the distribution all reflect what actually goes in the bowl today.
-  const resolvedItems = resolveRotations(ration.items, today);
+  // macros and the distribution all reflect what actually goes in the bowl today — finishing an
+  // open can before starting a new flavor (falls back to the calendar cycle when nothing's open).
+  const resolvedItems = resolveRotationsWithFridge(ration.items, today, fridge, fridgeDays);
   const dist = distributeBowl(resolvedItems, target);
   const byId = Object.fromEntries(dist.rows.map((r) => [r.id, r]));
   const savedNames = new Set((library.foods || []).map((x) => x.name.trim().toLowerCase()));
@@ -289,15 +291,16 @@ function AmountRow({ left, grams }) {
 }
 
 function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFood, saved }) {
-  const { today } = useApp();
+  const { today, fridge, fridgeDays } = useApp();
   const [showDetails, setShowDetails] = useState(false);
   const [gEdit, setGEdit] = useState(null); // grams being typed for a fixed food (kcal follows)
   const splitMode = f.splitMode || "share";
   // A rotation slot has no top-level food of its own — its energy/type/name come from whichever
-  // flavor is active today. `af` is the food we display and price against.
+  // flavor is active today (fridge-aware: finish an open can before starting a new flavor). `af`
+  // is the food we display and price against.
   const isRot = hasRotation(f);
-  const af = isRot ? (activeMember(f, today) || {}) : f;
-  const activeIdx = isRot ? activeRotationIndex(f, today) : -1;
+  const af = isRot ? (activeMemberWithFridge(f, today, fridge, fridgeDays) || {}) : f;
+  const activeIdx = isRot ? f.rotation.findIndex((m) => m === af || (m.name || "") === (af.name || "")) : -1;
   const type = foodType(af);
   const color = dotColor(af);
   const kpg = kcalPerG(af); // energy density — lets a fixed amount be entered as grams, not just kcal

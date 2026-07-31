@@ -60,6 +60,7 @@ export const freshCatState = () => ({
   profile: freshProfile(),
   ration: [{ ...blankFood(), pct: 100 }],
   start: [{ ...blankFood(), pct: 100 }],
+  fridge: [],
   weightLog: [],
   intakeLog: [],
   intakeDayStatus: {},

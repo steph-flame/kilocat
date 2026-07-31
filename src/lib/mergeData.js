@@ -218,6 +218,7 @@ function mergeCat(local, incoming) {
     profile: newer.profile,
     ration: newer.ration,
     start: newer.start,
+    ...(newer.fridge !== undefined ? { fridge: newer.fridge } : {}), // rides with the LWW bundle; absent stays absent
     tr: newer.tr,
     expSettings: newer.expSettings,
     stateModAt: Math.max(localModAt, incModAt),
@@ -245,6 +246,7 @@ function normalizeCat(cat) {
     profile: cat.profile,
     ration: cat.ration,
     start: cat.start,
+    ...(cat.fridge !== undefined ? { fridge: cat.fridge } : {}),
     tr: cat.tr,
     expSettings: cat.expSettings,
     stateModAt: cat.stateModAt ?? 0,

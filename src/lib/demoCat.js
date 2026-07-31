@@ -143,6 +143,14 @@ export function buildDemoCat(today) {
     profile: buildProfile(today),
     ration,
     start: ration.map((f) => ({ ...f, id: nextId() })),
+    // One open can in the fridge so the Fridge tab shows something on Biscuit: a 79 g wet can
+    // opened yesterday, half fed. Deterministic like the rest of the demo.
+    fridge: [{
+      id: nextId(),
+      name: foods.wet.name, mode: "perUnit", type: "wet",
+      kcalPerUnit: foods.wet.kcalPerUnit, gramsPerUnit: foods.wet.gramsPerUnit,
+      openedDate: addDaysISO(today, -1), canGrams: foods.wet.gramsPerUnit, remainingGrams: 40,
+    }],
     weightLog: buildWeightLog(rand, startDate, nextId),
     intakeLog: buildIntakeLog(rand, startDate, foods, nextId),
     intakeDayStatus: {}, // Biscuit's log is always complete — never flagged, never mutated
