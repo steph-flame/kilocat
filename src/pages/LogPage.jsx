@@ -296,7 +296,7 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
           <p style={{ fontSize: 12, color: A.muted }}>No weigh-ins {isToday ? "today" : "this day"}.</p>
         ) : dayItems.map((en) => (
           <div key={en.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontFamily: TYPE.mono, fontSize: 12 }}>
-            <span style={{ color: A.muted }}>{(WEIGH_METHODS[en.method] || WEIGH_METHODS[DEFAULT_METHOD]).label}{en.source === WEIGH_SOURCES.litterRobot ? " · auto" : ""}</span>
+            <span style={{ color: A.muted }}>{(WEIGH_METHODS[en.method] || WEIGH_METHODS[DEFAULT_METHOD]).label}{en.source === WEIGH_SOURCES.litterRobot ? " · auto" : ""}{en.ts != null ? ` · ${new Date(en.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
               <span style={{ color: A.body }}>{fmtWeight(num(en.kg), unit)} {weightLabel(unit)}</span>
               {<button onClick={() => weightLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
