@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
-import { buildDailyFrame, weightChangeRate } from "../lib/timeline.js";
+import { buildDailyFrame, weightChangeRate, historySpanDays } from "../lib/timeline.js";
 import { extent, linScale } from "../lib/scale.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
 import { bcsToPct, pctToBcs } from "../lib/nutrition.js";
@@ -71,8 +71,15 @@ const RANGES = [["1w", 7, "1w"], ["2w", 14, "2w"], ["1m", 30, "1m"], ["3m", 90, 
 
 export default function Trend() {
   const { p, t, expenditure: e, intakeLog, weightLog, intakeDayStatus, unit, today, currentWeight } = useApp();
-  const [range, setRange] = useState("3m");
-  const rangeDays = RANGES.find((r) => r[0] === range)[1];
+  // Fit the range control to the cat's actual history: the default is the tightest window that
+  // still shows every logged day, and windows longer than that are disabled (they'd show the exact
+  // same chart as "all"). Until the owner picks a window explicitly, we follow the fit as data grows.
+  const spanDays = historySpanDays(e.trend);
+  const fit = RANGES.find(([, d]) => d != null && d >= spanDays)?.[0] ?? "all";
+  const fitDays = fit === "all" ? Infinity : RANGES.find((r) => r[0] === fit)[1];
+  const [range, setRange] = useState(null);
+  const effRange = range ?? fit;
+  const rangeDays = RANGES.find((r) => r[0] === effRange)[1];
 
   const bcs = pctToBcs(t.pctOver);
   const idealKg = currentWeight.kg > 0 ? currentWeight.kg / (1 + bcsToPct(bcs) / 100) : t.idealWeight;
@@ -128,11 +135,16 @@ export default function Trend() {
         <div className="span-all" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", margin: "0 18px 12px" }}>
           <span style={label({ color: A.labelOnFill })}>Charts below show</span>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            {RANGES.map(([key, , lbl]) => (
-              <button key={key} onClick={() => setRange(key)} aria-pressed={range === key}
-                style={{ fontFamily: TYPE.mono, fontSize: 11, borderRadius: 999, padding: "3px 11px", cursor: "pointer",
-                  border: range === key ? "none" : `1px solid ${A.cardBorder}`, background: range === key ? A.ink : "transparent", color: range === key ? A.card : A.muted }}>{lbl}</button>
-            ))}
+            {RANGES.map(([key, days, lbl]) => {
+              const disabled = days != null && days > fitDays;
+              const on = effRange === key;
+              return (
+                <button key={key} disabled={disabled} onClick={() => setRange(key)} aria-pressed={on}
+                  title={disabled ? "Longer than the logged history" : undefined}
+                  style={{ fontFamily: TYPE.mono, fontSize: 11, borderRadius: 999, padding: "3px 11px", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.32 : 1,
+                    border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? A.ink : "transparent", color: on ? A.card : A.muted }}>{lbl}</button>
+              );
+            })}
           </div>
         </div>
 
