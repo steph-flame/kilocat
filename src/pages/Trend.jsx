@@ -107,7 +107,10 @@ export default function Trend() {
   }
 
   const burn = r0(e.kcal);
-  const pm = r0(e.kcal - e.low); // ±95%
+  // The 95% interval is asymmetric — its low edge is clamped at a physiological floor (a burn can't
+  // be near zero), so show the true bounds rather than a single ± that would misstate it.
+  const plus = r0(e.high - e.kcal), minus = r0(e.kcal - e.low);
+  const asym = Math.abs(plus - minus) > 1;
   const dispW = (kg) => toDisplayWeight(kg, unit);
 
   return (
@@ -125,7 +128,7 @@ export default function Trend() {
         <Card className="span-all">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <div style={{ fontFamily: TYPE.mono, fontSize: 40, fontWeight: 600, color: A.ink, lineHeight: 1 }}>{burn}</div>
-            <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textAlign: "right" }}>±{pm} kcal<br />95% interval</div>
+            <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textAlign: "right" }}>{asym ? `+${plus} / −${minus}` : `±${plus}`} kcal<br />95% interval</div>
           </div>
           <IntervalBar lo={e.low} hi={e.high} point={e.kcal} />
           <p style={{ ...cap, fontSize: 11.5 }}>The band narrows as you log{e.missingIntake > 0 ? `; ${r0(e.missingIntake * 100)}% of days in range are incomplete and left out` : ""}.</p>

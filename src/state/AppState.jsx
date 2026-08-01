@@ -366,7 +366,15 @@ export function AppProvider({ children }) {
     // still being logged — its running intake total isn't a complete day yet, so every
     // estimator treats it as missing (identically to a flagged-incomplete day) rather than
     // reading this morning's partial total as a genuine low-intake day.
-    const opts = { priorKcal: t.refs.maintain, intakeDayStatus, excludeDay: today };
+    //
+    // priorSdKcal is how loosely we hold that formula prior. The library default (120) is far too
+    // weak — a ±235 kcal 95% band that let the day-one estimate imply a physically impossible
+    // near-zero burn. Scale it to the cat instead: ~25% of the formula estimate (a ±50% 95% band),
+    // which reflects real between-cat variation in the vet formula without pretending the formula
+    // is truth. It's a PRIOR, not a floor — with a couple of weeks of consistent weigh-ins the
+    // filter still moves the estimate wherever the data genuinely leads, below the prior included.
+    const priorSdKcal = Math.min(120, Math.max(40, 0.25 * (t.refs.maintain || 200)));
+    const opts = { priorKcal: t.refs.maintain, priorSdKcal, intakeDayStatus, excludeDay: today };
     if (estimator === "v1") return estimateExpenditure(w, i, opts);
     if (estimator === "v2") return kalmanEstimateExpenditure(w, i, opts);
     return ucEstimateExpenditure(w, i, opts); // v3 (default)

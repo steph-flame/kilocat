@@ -103,6 +103,25 @@ describe("floorSdKcal (displayed-uncertainty floor, day-zero honesty)", () => {
   });
 });
 
+describe("formula prior width (priorSdKcal) — day-one plausibility", () => {
+  const w = [["2026-02-01", 4.50], ["2026-02-02", 4.49], ["2026-02-03", 4.50], ["2026-02-04", 4.48]].map(([date, value]) => ({ date, value }));
+  const i = ["2026-02-01", "2026-02-02", "2026-02-03", "2026-02-04"].map((date) => ({ date, value: 250 }));
+  const day0Band = (sd) => {
+    const r = ucEstimateExpenditure(w, i, { priorKcal: 250, priorSdKcal: sd, excludeDay: null });
+    const p = r.trend[0];
+    return { e: p.e, half: 1.96 * p.sd, low: p.e - 1.96 * p.sd };
+  };
+  it("a tighter prior yields a narrower day-one band than the loose default", () => {
+    expect(day0Band(62).half).toBeLessThan(day0Band(120).half);
+  });
+  it("keeps the day-one lower bound physically plausible (well above zero)", () => {
+    // the loose 120 prior let the low bound sink near zero (the reported bug); a ~25%-of-prior sd
+    // keeps it comfortably positive without pretending to more certainty than exists.
+    expect(day0Band(120).low).toBeLessThan(40); // documents the old, implausible behavior
+    expect(day0Band(62).low).toBeGreaterThan(100);
+  });
+});
+
 describe("weigh-method metadata (contract for precision-weighting later)", () => {
   it("every method carries a label and a positive per-reading sigma", () => {
     for (const m of Object.values(WEIGH_METHODS)) {
