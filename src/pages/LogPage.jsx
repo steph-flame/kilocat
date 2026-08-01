@@ -169,8 +169,20 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
   const [kcalG, setKcalG] = useState(0);
   const [grams, setGrams] = useState("");
   const [kcal, setKcal] = useState("");
+  const [picked, setPicked] = useState(null); // the chosen library food (for treat-by-count entry)
+  const [treats, setTreats] = useState("");
+  const isTreat = foodType(picked) === "treat";
   const computed = num(grams) > 0 && kcalG > 0 ? num(grams) * kcalG : null;
   useEffect(() => { if (computed != null) setKcal(String(r0(computed))); }, [computed]);
+  // Treats are given by the each, not weighed: entering a count derives the grams (which then
+  // drives kcal through the effect above) from the food's per-treat weight/energy.
+  const onTreats = (v) => {
+    setTreats(v);
+    const n = num(v);
+    const gpt = num(picked?.gramsPerUnit), kpt = num(picked?.kcalPerUnit);
+    setGrams(v !== "" && gpt > 0 ? String(Number((n * gpt).toFixed(2))) : "");
+    if (!(gpt > 0)) setKcal(v !== "" && kpt > 0 ? String(r0(n * kpt)) : ""); // fallback if no derived weight
+  };
 
   const days = useMemo(() => {
     const out = [];
@@ -211,7 +223,10 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
 
   const add = () => {
     if (num(kcal) > 0) {
-      intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null });
+      const treatFields = isTreat && num(treats) > 0
+        ? { treatCount: num(treats), kcalPerTreat: num(picked.kcalPerUnit), gramsPerTreat: num(picked.gramsPerUnit) }
+        : {};
+      intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null, ...treatFields });
       // Hybrid fridge: logging a wet meal today draws its can(s) down (opening a new one if needed),
       // the same as "Log tonight's bowl" does. Match the typed/picked name to a saved food for the
       // can size; deduct grams (derived from kcal when only kcal was entered). No-op for dry/unknown.
@@ -220,7 +235,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
         const g = num(grams) > 0 ? num(grams) : (kcalG > 0 ? num(kcal) / kcalG : 0);
         if (food && isCanned(food) && g > 0) consumeFridge(food, g);
       }
-      setGrams(""); setKcal("");
+      setGrams(""); setKcal(""); setTreats("");
     }
   };
 
@@ -266,10 +281,12 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
         <Card>
           <div style={label({ marginBottom: 8 })}>Add a meal</div>
           <div style={{ border: `1px solid ${A.cardBorder}`, borderRadius: 12, padding: 8, marginBottom: 8 }}>
-            <FoodSearch value={name} search={library.search} onChangeName={(v) => { setName(v); setKcalG(0); }} onPick={(f) => { setName(f.name); setKcalG(kcalPerG(f)); }} />
+            <FoodSearch value={name} search={library.search} onChangeName={(v) => { setName(v); setKcalG(0); setPicked(null); setTreats(""); }} onPick={(f) => { setName(f.name); setKcalG(kcalPerG(f)); setPicked(f); }} />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <NumBox label="Grams" suf="g" value={grams} onChange={setGrams} />
+            {isTreat
+              ? <NumBox label="Treats" suf="×" value={treats} onChange={onTreats} />
+              : <NumBox label="Grams" suf="g" value={grams} onChange={setGrams} />}
             <NumBox label="kcal" suf="kcal" value={kcal} onChange={setKcal} />
             <button onClick={add} style={{ background: A.good, color: A.card, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 18, cursor: "pointer" }}>+</button>
           </div>
@@ -308,7 +325,19 @@ const entryNum = { fontFamily: TYPE.mono, fontSize: 12.5, color: A.ink, backgrou
 function EntryRow({ en, onEdit, onRemove, onReconcile }) {
   const [gEdit, setGEdit] = useState(null);
   const [kEdit, setKEdit] = useState(null);
+  const [tEdit, setTEdit] = useState(null);
   const kpg = num(en.kcalPerG);
+  // A treat entry is logged by count, not weight: edit the count and kcal/grams follow from the
+  // per-treat values recorded at log time (falling back to the logged ratios for older entries).
+  const isTreatEntry = en.treatCount != null;
+  const kpt = num(en.kcalPerTreat) || (en.treatCount > 0 ? num(en.kcal) / en.treatCount : 0);
+  const gpt = num(en.gramsPerTreat) || (en.treatCount > 0 ? num(en.grams) / en.treatCount : 0);
+  const tShown = tEdit != null ? tEdit : String(Number(num(en.treatCount).toFixed(2)));
+  const commitT = (v) => {
+    setTEdit(v);
+    const n = v === "" ? 0 : num(v);
+    onEdit(en.id, { treatCount: n, kcal: r0(n * kpt), grams: gpt > 0 ? Number((n * gpt).toFixed(2)) : en.grams });
+  };
   // Capture the grams at the start of an edit; on blur, hand the NET change to the fridge once
   // (rather than per keystroke, which would churn cans on intermediate values).
   const baseGrams = useRef(null);
@@ -343,6 +372,15 @@ function EntryRow({ en, onEdit, onRemove, onReconcile }) {
         {en.ts != null && <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{new Date(en.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
         {isNothing ? (
           <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>0 kcal</span>
+        ) : isTreatEntry ? (
+          <>
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
+              <input type="number" step="any" min="0" value={tShown} onChange={(e) => commitT(e.target.value)} onBlur={() => setTEdit(null)} aria-label="treats" style={{ ...entryNum, width: 34 }} />
+              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>treat{num(en.treatCount) === 1 ? "" : "s"}</span>
+            </span>
+            <span style={{ color: A.muted, fontFamily: TYPE.mono, fontSize: 11 }}>·</span>
+            <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>{r0(num(en.kcal))} kcal</span>
+          </>
         ) : (
           <>
             <span style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
