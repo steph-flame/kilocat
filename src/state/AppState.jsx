@@ -18,7 +18,7 @@ import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
 import { resolveIntent } from "../lib/intent.js";
 import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../lib/mergeData.js";
-import { openCan, consumeFromFridge } from "../lib/fridge.js";
+import { openCan, consumeFromFridge, returnToFridge } from "../lib/fridge.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -334,6 +334,12 @@ export function AppProvider({ children }) {
   const tossCan = (id) => setFridge((fr) => fr.filter((c) => c.id !== id));
   const setCanRemaining = (id, grams) => setFridge((fr) => fr.map((c) => (c.id === id ? { ...c, remainingGrams: Math.max(0, Number(grams) || 0) } : c)));
   const consumeFridge = (food, grams) => setFridge((fr) => consumeFromFridge(fr, food, grams, today, fridgeDays, uid));
+  // Reconcile a logged wet meal's fridge draw after its grams are edited: a positive delta draws
+  // more (opening cans if needed), a negative delta puts the difference back. Keeps the fridge in
+  // step with edits, symmetric so an up-then-down edit nets out.
+  const reconcileFridge = (food, deltaGrams) => setFridge((fr) => (deltaGrams > 0
+    ? consumeFromFridge(fr, food, deltaGrams, today, fridgeDays, uid)
+    : returnToFridge(fr, food, -deltaGrams, today, uid)));
 
   // Permanent vs. logged state. Age derives from date of birth (so it never goes stale);
   // with no dob to derive it from, the cat is treated as an adult (never a fabricated
@@ -568,7 +574,7 @@ export function AppProvider({ children }) {
     today, currentWeight, logWeight,
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
-    fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge,
+    fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure, intent,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,

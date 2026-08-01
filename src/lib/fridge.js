@@ -75,6 +75,33 @@ export function planDraw(fridge, food, grams, today, fridgeDays) {
   return { grams: need0, segs };
 }
 
+// Put `grams` of `food` back into the fridge — the reverse of consume, used when a logged wet meal
+// is edited DOWN (you fed less than first recorded). Refills matching open cans newest-first up to a
+// full can each; any remainder re-opens a can holding it. No provenance is tracked, so this restores
+// stock rather than the exact physical can, which is the best that's possible — and symmetric with
+// consume so an edit up-then-back-down nets out. No-op for non-canned foods.
+export function returnToFridge(fridge, food, grams, today, makeId) {
+  let give = num(grams);
+  if (!(give > 0) || !isCanned(food)) return fridge || [];
+  const canGrams = num(food.gramsPerUnit);
+  const out = (fridge || []).map((c) => ({ ...c }));
+  const mine = out.filter((c) => keyOf(c.name) === keyOf(food.name)).sort((a, b) => (a.openedDate < b.openedDate ? 1 : -1)); // newest first
+  for (const c of mine) {
+    if (give <= 0.01) break;
+    const room = Math.max(0, canGrams - num(c.remainingGrams));
+    const put = Math.min(give, room);
+    c.remainingGrams = round2(num(c.remainingGrams) + put);
+    give -= put;
+  }
+  let guard = 0;
+  while (give > 0.01 && canGrams > 0 && guard++ < 50) {
+    const put = Math.min(give, canGrams);
+    out.push({ id: makeId(), ...foodFieldsOf(food), openedDate: today, canGrams, remainingGrams: round2(put) });
+    give -= put;
+  }
+  return out;
+}
+
 // Fridge-aware rotation resolution: which flavor of a variety-pack slot to feed on `date`. Finish
 // an open, still-good can first (the oldest one), so you don't start a new flavor while a can sits
 // in the fridge; only when nothing of the slot is open does it fall back to the calendar cycle.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, consumeFromFridge } from "./fridge.js";
+import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, consumeFromFridge, returnToFridge } from "./fridge.js";
 
 let idn = 0;
 const mkId = () => `can-${idn++}`;
@@ -78,6 +78,29 @@ describe("fridge", () => {
   it("consume is a no-op for non-canned foods", () => {
     const fridge = [];
     expect(consumeFromFridge(fridge, dry, 40, "2026-02-02", 3, mkId)).toEqual([]);
+  });
+
+  it("returnToFridge refills the newest can up to a full can, then re-opens one for the rest", () => {
+    const fridge = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 50 }]; // canGrams 80, room 30
+    const out = returnToFridge(fridge, wet, 45, "2026-02-03", mkId);
+    // 30 tops the existing can to 80; the remaining 15 re-opens a fresh can
+    expect(out).toHaveLength(2);
+    const topped = out.find((c) => c.openedDate === "2026-02-01");
+    const fresh = out.find((c) => c.openedDate === "2026-02-03");
+    expect(topped.remainingGrams).toBe(80);
+    expect(fresh.remainingGrams).toBe(15);
+  });
+
+  it("consume then return the same grams nets out (an edit up-then-down leaves stock unchanged)", () => {
+    const start = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 60 }];
+    const afterDraw = consumeFromFridge(start, wet, 25, "2026-02-01", 3, mkId); // 60 → 35
+    const restored = returnToFridge(afterDraw, wet, 25, "2026-02-01", mkId);     // 35 → 60
+    const total = (fr) => fr.reduce((s, c) => s + c.remainingGrams, 0);
+    expect(total(restored)).toBeCloseTo(total(start), 5);
+  });
+
+  it("returnToFridge is a no-op for non-canned foods", () => {
+    expect(returnToFridge([], dry, 40, "2026-02-01", mkId)).toEqual([]);
   });
 
   it("cansOf filters by name, case-insensitively", () => {

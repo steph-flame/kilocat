@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, manualEntryStamp } from "../lib/series.js";
@@ -55,7 +55,7 @@ function useEditableLog(log, isDemo, activeCatId) {
 }
 
 export default function LogPage() {
-  const { p, intent, ration, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings, fridge, fridgeDays, consumeFridge } = useApp();
+  const { p, intent, ration, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings, fridge, fridgeDays, consumeFridge, reconcileFridge } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const intakeLog = useEditableLog(liveIntake, isDemo, activeCatId);
   const weightLog = useEditableLog(liveWeight, isDemo, activeCatId);
@@ -108,7 +108,7 @@ export default function LogPage() {
         </div>
 
         {tab === "food"
-          ? <FoodTab {...{ intakeLog, ration, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge }} />
+          ? <FoodTab {...{ intakeLog, ration, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge }} />
           : <WeightTab {...{ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings }} />}
       </div>
     </div>
@@ -164,7 +164,7 @@ function KcalChart({ intakeItems, days, selected, onSelect, target, dayStatus, t
 }
 
 /* ---------- food tab ---------- */
-function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge }) {
+function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge }) {
   const [name, setName] = useState("");
   const [kcalG, setKcalG] = useState(0);
   const [grams, setGrams] = useState("");
@@ -200,6 +200,14 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(s.kcal), grams: s.grams != null ? Number(s.grams.toFixed(1)) : null, name: s.name || null, kcalPerG: s.grams > 0 ? s.kcal / s.grams : null });
     if (isToday && s.food && s.grams > 0) consumeFridge(s.food, s.grams); // draw wet cans down / open new (no-op for dry)
   });
+
+  // When a logged wet meal's grams are edited, move the difference in/out of the fridge (only for
+  // today's entries and foods we can size from the library).
+  const reconcileEntry = (en, deltaGrams) => {
+    if (!isToday || !(Math.abs(deltaGrams) > 0.01)) return;
+    const food = library.foods.find((f) => (f.name || "").trim().toLowerCase() === (en.name || "").trim().toLowerCase());
+    if (food && isCanned(food)) reconcileFridge(food, deltaGrams);
+  };
 
   const add = () => {
     if (num(kcal) > 0) {
@@ -285,7 +293,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
         {dayItems.length === 0 ? (
           <p style={{ fontSize: 12, color: A.muted }}>No meals logged {isToday ? "today" : "this day"}.</p>
         ) : dayItems.map((en) => (
-          <EntryRow key={en.id} en={en} onEdit={intakeLog.edit} onRemove={intakeLog.remove} />
+          <EntryRow key={en.id} en={en} onEdit={intakeLog.edit} onRemove={intakeLog.remove} onReconcile={reconcileEntry} />
         ))}
       </Card>
     </>
@@ -297,10 +305,20 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
 // edited on its own. Local state holds the value being typed so the caret doesn't jump on each
 // keystroke; it resyncs to the stored value on blur.
 const entryNum = { fontFamily: TYPE.mono, fontSize: 12.5, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "right", padding: "1px 2px" };
-function EntryRow({ en, onEdit, onRemove }) {
+function EntryRow({ en, onEdit, onRemove, onReconcile }) {
   const [gEdit, setGEdit] = useState(null);
   const [kEdit, setKEdit] = useState(null);
   const kpg = num(en.kcalPerG);
+  // Capture the grams at the start of an edit; on blur, hand the NET change to the fridge once
+  // (rather than per keystroke, which would churn cans on intermediate values).
+  const baseGrams = useRef(null);
+  const onFieldFocus = () => { baseGrams.current = num(en.grams); };
+  const onFieldBlur = (clearEdit) => {
+    clearEdit();
+    const base = baseGrams.current;
+    baseGrams.current = null;
+    if (base != null) onReconcile?.(en, num(en.grams) - base);
+  };
   const isNothing = (en.name || "").trim().toLowerCase() === "nothing eaten";
   const gShown = gEdit != null ? gEdit : (en.grams != null ? String(Number(num(en.grams).toFixed(1))) : "");
   const kShown = kEdit != null ? kEdit : String(r0(num(en.kcal)));
@@ -328,12 +346,12 @@ function EntryRow({ en, onEdit, onRemove }) {
         ) : (
           <>
             <span style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
-              <input type="number" step="any" min="0" value={gShown} onChange={(e) => commitG(e.target.value)} onBlur={() => setGEdit(null)} aria-label="grams" style={{ ...entryNum, width: 42 }} />
+              <input type="number" step="any" min="0" value={gShown} onFocus={onFieldFocus} onChange={(e) => commitG(e.target.value)} onBlur={() => onFieldBlur(() => setGEdit(null))} aria-label="grams" style={{ ...entryNum, width: 42 }} />
               <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>g</span>
             </span>
             <span style={{ color: A.muted, fontFamily: TYPE.mono, fontSize: 11 }}>·</span>
             <span style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
-              <input type="number" step="any" min="0" value={kShown} onChange={(e) => commitK(e.target.value)} onBlur={() => setKEdit(null)} aria-label="kcal" style={{ ...entryNum, width: 40 }} />
+              <input type="number" step="any" min="0" value={kShown} onFocus={onFieldFocus} onChange={(e) => commitK(e.target.value)} onBlur={() => onFieldBlur(() => setKEdit(null))} aria-label="kcal" style={{ ...entryNum, width: 40 }} />
               <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>kcal</span>
             </span>
           </>
