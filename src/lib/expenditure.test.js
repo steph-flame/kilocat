@@ -103,6 +103,26 @@ describe("floorSdKcal (displayed-uncertainty floor, day-zero honesty)", () => {
   });
 });
 
+describe("outlier convergence — a tight prior still yields to the data", () => {
+  // A cat whose TRUE maintenance is far from the vet-formula prior (250), held tightly (sd 62).
+  // Over ~6 weeks of consistent weigh-ins + meals, the estimate must escape the prior and reach
+  // the truth — the prior informs the cold start, it doesn't trap an outlier.
+  const RHO = 7800;
+  const converge = (maintenance, intake, w0) => {
+    const { weightEntries, intakeEntries } = history({ days: 45, intake, maintenance, rho: RHO, w0 });
+    return ucEstimateExpenditure(weightEntries, intakeEntries, { priorKcal: 250, priorSdKcal: 62, excludeDay: null }).kcal;
+  };
+  it("reaches a HIGH outlier (true 400) from a 250 prior", () => {
+    expect(converge(400, 340, 5.2)).toBeGreaterThan(385);
+  });
+  it("reaches a LOW outlier (true 150) from a 250 prior", () => {
+    expect(converge(150, 200, 3.6)).toBeLessThan(170);
+  });
+  it("reaches an EXTREME outlier (true 500) — no ceiling from the prior", () => {
+    expect(converge(500, 400, 6.0)).toBeGreaterThan(470);
+  });
+});
+
 describe("formula prior width (priorSdKcal) — day-one plausibility", () => {
   const w = [["2026-02-01", 4.50], ["2026-02-02", 4.49], ["2026-02-03", 4.50], ["2026-02-04", 4.48]].map(([date, value]) => ({ date, value }));
   const i = ["2026-02-01", "2026-02-02", "2026-02-03", "2026-02-04"].map((date) => ({ date, value: 250 }));
