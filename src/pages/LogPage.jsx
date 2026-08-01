@@ -277,17 +277,62 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
         {dayItems.length === 0 ? (
           <p style={{ fontSize: 12, color: A.muted }}>No meals logged {isToday ? "today" : "this day"}.</p>
         ) : dayItems.map((en) => (
-          <div key={en.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 13 }}>
-            <span style={{ color: A.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{en.name || "—"}</span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flex: "none" }}>
-              {en.ts != null && <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{new Date(en.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
-              <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>{en.grams != null ? `${Number(Number(en.grams).toFixed(1))} g · ` : ""}{r0(num(en.kcal))} kcal</span>
-              {<button onClick={() => intakeLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
-            </span>
-          </div>
+          <EntryRow key={en.id} en={en} onEdit={intakeLog.edit} onRemove={intakeLog.remove} />
         ))}
       </Card>
     </>
+  );
+}
+
+// A logged meal, with its grams and kcal editable in place (not just deletable). Typing grams
+// updates kcal via the food's energy density (and vice versa) when it's known; otherwise each is
+// edited on its own. Local state holds the value being typed so the caret doesn't jump on each
+// keystroke; it resyncs to the stored value on blur.
+const entryNum = { fontFamily: TYPE.mono, fontSize: 12.5, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "right", padding: "1px 2px" };
+function EntryRow({ en, onEdit, onRemove }) {
+  const [gEdit, setGEdit] = useState(null);
+  const [kEdit, setKEdit] = useState(null);
+  const kpg = num(en.kcalPerG);
+  const isNothing = (en.name || "").trim().toLowerCase() === "nothing eaten";
+  const gShown = gEdit != null ? gEdit : (en.grams != null ? String(Number(num(en.grams).toFixed(1))) : "");
+  const kShown = kEdit != null ? kEdit : String(r0(num(en.kcal)));
+  const commitG = (v) => {
+    setGEdit(v);
+    const grams = v === "" ? null : num(v);
+    const patch = { grams };
+    if (kpg > 0 && grams != null) patch.kcal = r0(grams * kpg); // kcal follows grams when we know the density
+    onEdit(en.id, patch);
+  };
+  const commitK = (v) => {
+    setKEdit(v);
+    const kc = v === "" ? 0 : r0(num(v));
+    const patch = { kcal: kc };
+    if (kpg > 0) patch.grams = Number((kc / kpg).toFixed(1)); // and grams follows kcal
+    onEdit(en.id, patch);
+  };
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 13 }}>
+      <span style={{ color: A.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{en.name || "—"}</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flex: "none" }}>
+        {en.ts != null && <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{new Date(en.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
+        {isNothing ? (
+          <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>0 kcal</span>
+        ) : (
+          <>
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
+              <input type="number" step="any" min="0" value={gShown} onChange={(e) => commitG(e.target.value)} onBlur={() => setGEdit(null)} aria-label="grams" style={{ ...entryNum, width: 42 }} />
+              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>g</span>
+            </span>
+            <span style={{ color: A.muted, fontFamily: TYPE.mono, fontSize: 11 }}>·</span>
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
+              <input type="number" step="any" min="0" value={kShown} onChange={(e) => commitK(e.target.value)} onBlur={() => setKEdit(null)} aria-label="kcal" style={{ ...entryNum, width: 40 }} />
+              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>kcal</span>
+            </span>
+          </>
+        )}
+        <button onClick={() => onRemove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>
+      </span>
+    </div>
   );
 }
 
