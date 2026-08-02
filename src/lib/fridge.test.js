@@ -22,17 +22,19 @@ describe("fridge", () => {
     expect(c.id).toBeTruthy();
   });
 
-  it("computes use-by and expiry from fridgeDays", () => {
+  it("computes goodThru and expiry from fridgeDays, counting the open day", () => {
+    // A 3-day can opened the 1st is good the 1st/2nd/3rd (goodThru = the 3rd), toss on the 4th.
     const c = openCan(wet, "2026-02-01", mkId);
     const s0 = canStatus(c, "2026-02-01", 3);
-    expect(s0.useBy).toBe("2026-02-04");
-    expect(s0.daysLeft).toBe(3);
+    expect(s0.goodThru).toBe("2026-02-03");
+    expect(s0.daysLeft).toBe(2);
     expect(s0.expired).toBe(false);
-    const s3 = canStatus(c, "2026-02-04", 3);
-    expect(s3.daysLeft).toBe(0);
-    expect(s3.expiringToday).toBe(true);
-    const s5 = canStatus(c, "2026-02-06", 3);
-    expect(s5.expired).toBe(true);
+    const sLast = canStatus(c, "2026-02-03", 3); // the last good day
+    expect(sLast.daysLeft).toBe(0);
+    expect(sLast.expiringToday).toBe(true);
+    expect(sLast.expired).toBe(false);
+    const sToss = canStatus(c, "2026-02-04", 3); // one day past — toss it
+    expect(sToss.expired).toBe(true);
   });
 
   it("draws oldest good can first, then opens new ones", () => {

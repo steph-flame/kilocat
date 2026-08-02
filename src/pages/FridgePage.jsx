@@ -86,7 +86,7 @@ export default function FridgePage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {cans.map(({ c, s }) => {
                 const tone = s.expired ? A.danger.bg : s.expiringSoon ? A.caution.text : A.muted;
-                const useByText = s.expired ? `expired ${mmdd(s.useBy)}` : s.expiringToday ? "use by today" : s.daysLeft === 1 ? "use by tomorrow" : `use by ${mmdd(s.useBy)}`;
+                const useByText = s.expired ? "past its window — toss" : s.expiringToday ? "use up today" : s.daysLeft === 1 ? "good thru tomorrow" : `good thru ${mmdd(s.goodThru)}`;
                 return (
                   <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ width: 9, height: 9, borderRadius: 999, background: dotColor(c), flex: "none" }} />

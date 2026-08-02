@@ -26,15 +26,18 @@ export function openCan(food, openedDate, makeId) {
   return { id: makeId(), ...foodFieldsOf(food), openedDate, canGrams, remainingGrams: canGrams };
 }
 
-// An open can's status relative to `today`, given how long an open can keeps (fridgeDays).
+// An open can's status relative to `today`. fridgeDays is how many days it keeps COUNTING THE DAY
+// IT WAS OPENED — so a 3-day can opened the 31st is good the 31st, 1st, 2nd (goodThru = the 2nd)
+// and should be tossed the 3rd. `daysLeft` counts down to that last good day (0 = today is the last
+// day, <0 = past it).
 export function canStatus(can, today, fridgeDays) {
-  const useBy = addDays(can.openedDate, Math.max(1, fridgeDays));
-  const daysLeft = diffDays(today, useBy); // >0 future, 0 today, <0 past-due
+  const goodThru = addDays(can.openedDate, Math.max(1, fridgeDays) - 1);
+  const daysLeft = diffDays(today, goodThru);
   return {
     daysOpen: Math.max(0, diffDays(can.openedDate, today)),
-    useBy, daysLeft,
-    expired: daysLeft < 0,
-    expiringToday: daysLeft === 0,
+    goodThru, daysLeft,
+    expired: daysLeft < 0,             // past the last good day — toss it
+    expiringToday: daysLeft === 0,     // today IS the last good day — use it up
     expiringSoon: daysLeft >= 0 && daysLeft <= 1,
   };
 }
