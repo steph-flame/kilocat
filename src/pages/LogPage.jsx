@@ -3,7 +3,7 @@ import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, manualEntryStamp } from "../lib/series.js";
 import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayLabel } from "../lib/dayPager.js";
-import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../lib/foodStats.js";
+import { foodSummary, macroBreakdown, trailingWindow, itemsInRange, rebalanceRemaining } from "../lib/foodStats.js";
 import { kcalPerG, foodType } from "../lib/foods.js";
 import { distributeBowl } from "../lib/bowl.js";
 import { isCanned, resolveRotationsWithFridge, availableCansOf } from "../lib/fridge.js";
@@ -206,14 +206,25 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     dayItems.forEach((e) => { const k = (e.name || "").trim().toLowerCase(); const c = m.get(k) || { grams: 0, kcal: 0 }; m.set(k, { grams: c.grams + num(e.grams), kcal: c.kcal + num(e.kcal) }); });
     return m;
   }, [dayItems]);
-  const planRows = useMemo(() => steps.map((s) => {
-    let fedG = 0, fedK = 0;
-    for (const k of slotNames(s)) { const f = fedByName.get(k); if (f) { fedG += f.grams; fedK += f.kcal; } }
-    const remG = Math.max(0, num(s.grams) - fedG);
-    const remK = Math.max(0, s.kcal - fedK);
-    const done = num(s.grams) > 0 ? remG < 0.5 : remK < 1;
-    return { s, remG, remK, done };
-  }), [steps, fedByName]); // eslint-disable-line react-hooks/exhaustive-deps
+  // What's left to feed, REBALANCED to still hit the target. Each food's own plan−fed is the naive
+  // remainder; but if you over/under-fed something, the flex foods (the main meal — share/remainder)
+  // scale so the day still lands on target. Fixed amounts and supplements are protected: they stay
+  // put (you don't skip the probiotic because of a bonus treat), and can push the day over target.
+  const planRows = useMemo(() => {
+    const rows = steps.map((s) => {
+      let fedG = 0, fedK = 0;
+      for (const k of slotNames(s)) { const f = fedByName.get(k); if (f) { fedG += f.grams; fedK += f.kcal; } }
+      const kpg = num(s.food?.kcalPerG) || (num(s.grams) > 0 ? s.kcal / s.grams : 0);
+      return { s, kpg, protectedRow: s.splitMode === "fixed" || s.type === "supplement", naiveG: Math.max(0, num(s.grams) - fedG), fedK };
+    });
+    const remKs = rebalanceRemaining(rows.map((r) => ({ plannedK: r.s.kcal, fedK: r.fedK, protected: r.protectedRow })), target, total);
+    return rows.map((r, i) => {
+      const remK = remKs[i];
+      const remG = r.protectedRow || !(r.kpg > 0) ? r.naiveG : remK / r.kpg;
+      const done = num(r.s.grams) > 0 ? remG < 0.5 : remK < 1;
+      return { s: r.s, remG, remK, done };
+    });
+  }, [steps, fedByName, target, total]); // eslint-disable-line react-hooks/exhaustive-deps
   const remainingRows = planRows.filter((r) => !r.done);
   const remainingKcal = Math.max(0, target - total);
 
@@ -331,7 +342,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
                 })}
               </div>
               <button onClick={logAllRemaining} style={{ marginTop: 12, width: "100%", background: A.ink, color: A.card, border: "none", borderRadius: 12, padding: "11px 0", fontFamily: TYPE.sans, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Log everything remaining ✓</button>
-              <p style={{ fontSize: 11, color: A.muted, marginTop: 8, lineHeight: 1.4 }}>Feeding in bits? Tap “log it” on a food as you dispense, or add a portion below — this list tracks what's left.</p>
+              <p style={{ fontSize: 11, color: A.muted, marginTop: 8, lineHeight: 1.4 }}>Feeding in bits? Tap “log it” as you dispense, or add a portion below. Feed extra of one and the main meal adjusts to still hit {target} kcal; supplements and fixed amounts stay put.</p>
             </>
           )}
         </Card>

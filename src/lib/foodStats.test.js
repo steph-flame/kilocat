@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { foodType } from "./foods.js";
-import { foodSummary, trailingWindow, itemsInRange, macroBreakdown } from "./foodStats.js";
+import { foodSummary, trailingWindow, itemsInRange, macroBreakdown, rebalanceRemaining } from "./foodStats.js";
 
 describe("foodType (wet vs dry)", () => {
   it("classifies by packaging shape when no moisture is known", () => {
@@ -148,5 +148,43 @@ describe("macroBreakdown", () => {
     const m = macroBreakdown(items, library, 7);
     expect(m.grams.protein).toBe(28); // 70 * 0.40
     expect(m.perDayGrams.protein).toBe(4); // 28 / 7
+  });
+});
+
+describe("rebalanceRemaining — flex foods flex to hit target; fixed/supplements protected", () => {
+  // Plan: 100 (flex) + 100 (flex) + 20 (protected supplement) = 220 target.
+  const items = [
+    { plannedK: 100, fedK: 0, protected: false },
+    { plannedK: 100, fedK: 0, protected: false },
+    { plannedK: 20, fedK: 0, protected: true },
+  ];
+  it("nothing fed yet → everyone's naive remainder, summing to target", () => {
+    const out = rebalanceRemaining(items, 220, 0);
+    expect(out).toEqual([100, 100, 20]);
+  });
+  it("over-feeding the supplement shrinks the flex foods so the day still hits target", () => {
+    // fed 30 of the 20-planned supplement (a bonus). budget = 220 − 30 = 190; protected keeps 0
+    // remaining (already over); flex share 190 → 95 each.
+    const fed = [{ plannedK: 100, fedK: 0, protected: false }, { plannedK: 100, fedK: 0, protected: false }, { plannedK: 20, fedK: 30, protected: true }];
+    const out = rebalanceRemaining(fed, 220, 30);
+    expect(out[2]).toBe(0);            // supplement already over → nothing more
+    expect(out[0]).toBeCloseTo(95, 5); // flex foods shrank to absorb the extra 10
+    expect(out[1]).toBeCloseTo(95, 5);
+    expect(out[0] + out[1] + out[2]).toBeCloseTo(190, 5); // total remaining = budget
+  });
+  it("over-feeding one flex food is absorbed by the other flex food", () => {
+    // fed 130 of a 100-flex food. budget = 220 − 130 = 90; protected still owed 20; flexBudget = 70;
+    // only the second flex food is under-fed, so it gets all 70.
+    const fed = [{ plannedK: 100, fedK: 130, protected: false }, { plannedK: 100, fedK: 0, protected: false }, { plannedK: 20, fedK: 0, protected: true }];
+    const out = rebalanceRemaining(fed, 220, 130);
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBeCloseTo(70, 5);
+    expect(out[2]).toBe(20); // supplement protected
+  });
+  it("a supplement stays owed even when the day is already over target", () => {
+    const fed = [{ plannedK: 100, fedK: 250, protected: false }, { plannedK: 20, fedK: 0, protected: true }];
+    const out = rebalanceRemaining(fed, 220, 250);
+    expect(out[0]).toBe(0);   // flex zeroed (over budget)
+    expect(out[1]).toBe(20);  // supplement still owed
   });
 });
