@@ -1,8 +1,27 @@
 import { describe, it, expect } from "vitest";
 import { extent, niceTicks, linScale } from "./scale.js";
-import { linregXY } from "./series.js";
-import { buildDailyFrame, historySpanDays, weightChangeRate, pickEndLabelBelow, energyDomain } from "./timeline.js";
+import { linregXY, addDays } from "./series.js";
+import { buildDailyFrame, historySpanDays, weightChangeRate, pickEndLabelBelow, energyDomain, trailingWeeklyRate } from "./timeline.js";
 import { groupByDay } from "./series.js";
+
+describe("trailingWeeklyRate", () => {
+  it("fits a per-week rate over the trailing 7 daily-median weights", () => {
+    const items = [];
+    for (let k = 0; k < 10; k++) items.push({ date: addDays("2026-01-01", k), kg: 5.0 - 0.01 * k }); // −10 g/day
+    const tw = trailingWeeklyRate(items);
+    expect(tw.days).toBe(7);
+    expect(tw.gramsPerWeek).toBeCloseTo(-70, 0); // −10 g/day × 7
+    expect(tw.pctPerWeek).toBeLessThan(0);
+  });
+  it("medians multiple same-day reads and needs at least two days", () => {
+    expect(trailingWeeklyRate([{ date: "2026-01-01", kg: 5 }])).toBe(null);
+    const two = trailingWeeklyRate([
+      { date: "2026-01-01", kg: 5.0 }, { date: "2026-01-01", kg: 5.2 }, // median 5.1
+      { date: "2026-01-02", kg: 5.0 }, { date: "2026-01-02", kg: 5.0 }, // median 5.0
+    ]);
+    expect(two.gramsPerWeek).toBeCloseTo(-0.1 * 7 * 1000, 0); // −100 g/day median drop × 7
+  });
+});
 
 describe("scale", () => {
   it("extent ignores nulls/NaN", () => {

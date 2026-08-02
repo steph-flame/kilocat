@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
-import { buildDailyFrame, weightChangeRate, historySpanDays } from "../lib/timeline.js";
+import { buildDailyFrame, weightChangeRate, historySpanDays, trailingWeeklyRate } from "../lib/timeline.js";
 import { extent, linScale } from "../lib/scale.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
 import { bcsToPct, pctToBcs } from "../lib/nutrition.js";
@@ -171,7 +171,9 @@ export default function Trend() {
           <div style={label({ marginBottom: 4 })}>Rate of change · %/wk</div>
           <RateChart rates={rates} frame={frame} />
           <p style={{ ...cap, fontSize: 11.5 }}>
-            Currently {e.ratePctPerWeek < 0 ? "−" : e.ratePctPerWeek > 0 ? "+" : ""}{Math.abs(r1(e.ratePctPerWeek))}%/wk. The shaded band is the safe 0.5–2%/wk zone; above the dashed line she'd be gaining.
+            {(() => { const tw = trailingWeeklyRate(weightLog.items); return tw
+              ? `Over the last ${tw.days} days: ${tw.gramsPerWeek < 0 ? "−" : "+"}${Math.abs(Math.round(tw.gramsPerWeek))} g/wk (${tw.pctPerWeek < 0 ? "−" : "+"}${Math.abs(r1(tw.pctPerWeek))}%/wk).`
+              : "Not enough days yet to call a rate."; })()} The shaded band is the safe 0.5–2%/wk zone; above the dashed line she'd be gaining.
           </p>
         </Card>
 

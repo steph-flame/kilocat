@@ -1,6 +1,7 @@
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { toDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
+import { trailingWeeklyRate } from "../lib/timeline.js";
 import { num } from "../lib/util.js";
 
 // Today — the landing/overview home. A read-only glance at where the cat stands right now: the
@@ -53,7 +54,7 @@ function QuickLink({ href, children }) {
 }
 
 export default function TodayPage() {
-  const { p, intent, expenditure: e, currentWeight, intakeLog, unit, today } = useApp();
+  const { p, intent, expenditure: e, currentWeight, intakeLog, weightLog, unit, today } = useApp();
   const name = p?.name || "Your cat";
   const disp = (kg) => toDisplayWeight(kg, unit);
 
@@ -73,8 +74,11 @@ export default function TodayPage() {
   const eatenToday = (intakeLog?.items || []).filter((x) => x.date === today).reduce((a, b) => a + num(b.kcal), 0);
   const loggedToday = (intakeLog?.items || []).some((x) => x.date === today);
 
-  const rate = e?.ratePctPerWeek;
-  const rateStr = rate == null ? null : `${rate < 0 ? "−" : rate > 0 ? "+" : ""}${Math.abs(r1(rate))}%/wk`;
+  // Rate over the trailing week from raw weigh-ins (robust to daily bounce), updated daily.
+  const tw = trailingWeeklyRate(weightLog?.items);
+  const rate = tw?.pctPerWeek;
+  const sign = (n) => (n < 0 ? "−" : n > 0 ? "+" : "");
+  const rateStr = tw == null ? null : `${sign(tw.gramsPerWeek)}${Math.abs(Math.round(tw.gramsPerWeek))} g/wk · ${sign(rate)}${Math.abs(r1(rate))}%/wk`;
   const curKg = currentWeight?.kg;
 
   return (

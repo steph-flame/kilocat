@@ -1,8 +1,24 @@
 // Assemble the per-day frame the timeline chart draws: weight + intake + expenditure,
 // aligned by date and clipped to a selected range. Pure — no SVG, no React.
 
-import { dailyReduce, addDays, diffDays, ewma } from "./series.js";
+import { dailyReduce, addDays, diffDays, ewma, linregXY, median } from "./series.js";
 import { extent } from "./scale.js";
+
+// The current weight-change rate over a TRAILING window (default a week): a line fit through the
+// last `days` daily-MEDIAN weights (raw scale, not the Kalman-smoothed trend, so it isn't lagged),
+// expressed per week. Updated every day but the 7-day fit rides out the ±40 g daily bounce — so it
+// shows the current direction (the recent dip included) without whipsawing. `weighIns` are the raw
+// weigh-ins [{ date, kg }]; today IS included here (the rate is weight-only, no partial-intake
+// issue). Returns null until ≥2 days; grams/week and %/week of the latest weight.
+export function trailingWeeklyRate(weighIns, days = 7) {
+  const daily = dailyReduce((weighIns || []).map((e) => ({ date: e.date, value: e.kg })), median); // [{date,value}] sorted
+  const pts = daily.slice(-Math.max(2, days));
+  if (pts.length < 2) return null;
+  const { slope } = linregXY(pts.map((_, k) => k), pts.map((p) => p.value)); // kg/day
+  const kgPerWeek = slope * 7;
+  const lastKg = pts[pts.length - 1].value;
+  return { gramsPerWeek: kgPerWeek * 1000, pctPerWeek: lastKg > 0 ? (kgPerWeek / lastKg) * 100 : 0, days: pts.length };
+}
 
 export const RANGES = [
   { key: "1w", days: 7, label: "1W" },
