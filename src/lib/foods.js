@@ -10,16 +10,18 @@ export const kcalPerG = (f) =>
   f.mode === "perKg" ? num(f.kcalPerKg) / 1000
     : (num(f.gramsPerUnit) > 0 ? num(f.kcalPerUnit) / num(f.gramsPerUnit) : 0);
 
-export const FOOD_TYPES = ["wet", "dry", "treat"];
+export const FOOD_TYPES = ["wet", "dry", "treat", "supplement"];
 
-// Food type. An EXPLICIT `type` ('wet' | 'dry' | 'treat') always wins — it's the only way to mark
-// a treat, since a treat can't be inferred from packaging or moisture (it's just a small per-unit
-// item). With no explicit type we fall back to the honest discriminator, moisture (wet food is
-// ~75-82% water, dry kibble ~6-10%, nothing real sits near the 50% line), and before macros are
-// entered, to packaging shape (per-unit = can/pouch = wet; per-kg = kibble by the cup = dry).
+// Food type. An EXPLICIT `type` ('wet' | 'dry' | 'treat' | 'supplement') always wins — it's the
+// only way to mark a treat or a supplement, since neither can be inferred from packaging or
+// moisture (both are small per-unit items). A supplement (a probiotic sachet, a joint powder) is
+// like a treat energy-wise but its own category so it isn't lumped into the treat share, the AAFCO
+// check, or the macro dilution — it's a tiny daily add-on, not part of the diet's composition. With
+// no explicit type we fall back to moisture (wet ~75-82% water, dry ~6-10%; nothing real sits near
+// the 50% line), then to packaging shape (per-unit = can/pouch = wet; per-kg = kibble = dry).
 export const WET_MOISTURE_PCT = 50;
 export const foodType = (f) => {
-  if (f?.type === "wet" || f?.type === "dry" || f?.type === "treat") return f.type;
+  if (f?.type === "wet" || f?.type === "dry" || f?.type === "treat" || f?.type === "supplement") return f.type;
   const m = num(f?.moisture);
   if (m > 0) return m >= WET_MOISTURE_PCT ? "wet" : "dry";
   return f?.mode === "perUnit" ? "wet" : "dry";

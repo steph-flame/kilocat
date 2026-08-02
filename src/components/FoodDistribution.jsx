@@ -7,7 +7,7 @@ import { A, TYPE } from "../almanac.js";
 
 const r0 = (n) => Math.round(n);
 export const distLabel = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
-const TYPE_COLOR = { wet: A.food.wet, dry: A.food.dry, treat: A.food.treat, unknown: A.muted };
+const TYPE_COLOR = { wet: A.food.wet, dry: A.food.dry, treat: A.food.treat, supplement: A.food.supplement, unknown: A.muted };
 
 export function Dot({ c }) { return <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 999, background: c, marginRight: 4 }} />; }
 export function Seg({ pct, color }) { return pct > 0 ? <span style={{ width: `${pct}%`, background: color, display: "block" }} /> : null; }
@@ -43,10 +43,11 @@ export function DistributionBody({ s, m, byKcal, week = false, coverageNoun = "l
         <Seg pct={pctOf(val(s.byType.wet))} color={A.food.wet} />
         <Seg pct={pctOf(val(s.byType.dry))} color={A.food.dry} />
         <Seg pct={pctOf(val(s.byType.treat))} color={A.food.treat} />
+        <Seg pct={pctOf(val(s.byType.supplement || { kcal: 0, grams: 0 }))} color={A.food.supplement} />
         <Seg pct={pctOf(val(s.byType.unknown))} color={A.muted} />
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", fontFamily: TYPE.mono, fontSize: 11, color: A.muted, marginBottom: 12 }}>
-        {[["wet", "Wet"], ["dry", "Dry"], ["treat", "Treat"]].map(([k, l]) => pctOf(val(s.byType[k])) > 0 && <span key={k}><Dot c={A.food[k]} />{l} {pctOf(val(s.byType[k]))}%</span>)}
+        {[["wet", "Wet"], ["dry", "Dry"], ["treat", "Treat"], ["supplement", "Supp"]].map(([k, l]) => s.byType[k] && pctOf(val(s.byType[k])) > 0 && <span key={k}><Dot c={A.food[k]} />{l} {pctOf(val(s.byType[k]))}%</span>)}
       </div>
 
       <div style={distLabel({ marginBottom: 6 })}>By food · {byKcal ? "calories" : "weight"}</div>

@@ -20,8 +20,8 @@ const r0 = (n) => Math.round(n);
 const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`); // grams to 1 decimal, trimmed
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 const MODES = [["fixed", "fixed"], ["share", "share"], ["remainder", "rest"]];
-const TYPES = [["wet", "wet"], ["dry", "dry"], ["treat", "treat"]];
-const dotColor = (f) => { const ty = foodType(f); return ty === "treat" ? A.food.treat : ty === "wet" ? A.food.wet : A.food.dry; };
+const TYPES = [["wet", "wet"], ["dry", "dry"], ["treat", "treat"], ["supplement", "supp"]];
+const dotColor = (f) => { const ty = foodType(f); return ty === "treat" ? A.food.treat : ty === "supplement" ? A.food.supplement : ty === "wet" ? A.food.wet : A.food.dry; };
 // energy fields per food type (all accept decimals). treats are priced per treat.
 const ENERGY_FIELDS = {
   dry: [["kcalPerKg", "Energy", "kcal/kg"], ["gramsPerCup", "Grams / cup", "g"]],
@@ -29,6 +29,8 @@ const ENERGY_FIELDS = {
   // Treats: enter exactly what's on the package — calories per treat AND calories per kg. The
   // treat's weight (gramsPerUnit) is derived from those, not entered.
   treat: [["kcalPerUnit", "Calories / treat", "kcal"], ["kcalPerKg", "Calories / kg", "kcal/kg"]],
+  // Supplements (a probiotic sachet, a powder): given by the sachet/scoop — calories and grams per.
+  supplement: [["kcalPerUnit", "Calories / sachet", "kcal"], ["gramsPerUnit", "Grams / sachet", "g"]],
 };
 
 function Card({ children, style, className }) {

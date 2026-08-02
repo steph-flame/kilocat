@@ -41,7 +41,7 @@ export const A = {
   underline: "#E3CE7E", // the prose underline behind key numbers (solid, keeps the digit black)
 
   /* ---- food dots ---- */
-  food: { wet: "#1F5130", dry: "#C9A227", treat: "#8A5A2B", wet2: "#5B7CA8" },
+  food: { wet: "#1F5130", dry: "#C9A227", treat: "#8A5A2B", supplement: "#6B6D8A", wet2: "#5B7CA8" },
 
   /* ---- macronutrient triad (protein / fat / carb) ---- */
   // An earth-pigment triad — pine-teal / ochre / clay-plum — distinct by hue AND lightness, so

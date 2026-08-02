@@ -153,10 +153,12 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
   const [kcalG, setKcalG] = useState(0);
   const [grams, setGrams] = useState("");
   const [kcal, setKcal] = useState("");
-  const [picked, setPicked] = useState(null); // the chosen library food (for treat-by-count entry)
+  const [picked, setPicked] = useState(null); // the chosen library food (for by-the-each entry)
   const [treats, setTreats] = useState("");
-  const [treatUnit, setTreatUnit] = useState("count"); // treats: enter by count (×) or by grams
-  const isTreat = foodType(picked) === "treat";
+  const [treatUnit, setTreatUnit] = useState("count"); // unit foods: enter by count (×) or by grams
+  // Treats and supplements are given by the each (a treat, a sachet), so they can be logged by count.
+  const isTreat = foodType(picked) === "treat" || foodType(picked) === "supplement";
+  const unitWord = foodType(picked) === "supplement" ? "sachet" : "treat";
   const derived = kcalG > 0; // we know the energy density → kcal is computed, not typed
   const computed = num(grams) > 0 && kcalG > 0 ? num(grams) * kcalG : null;
   useEffect(() => { if (computed != null) setKcal(String(r0(computed))); }, [computed]);
@@ -218,8 +220,19 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
   // plain food draws its own can. The fridge is forgiving of small over/under vs its estimate.
   const logSlotPortion = (s, grams) => {
     if (!(grams > 0)) return;
-    const kpg = num(s.food?.kcalPerG) || (num(s.grams) > 0 ? s.kcal / s.grams : 0);
-    intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(grams * kpg), grams: Number(grams.toFixed(1)), name: s.name || null, kcalPerG: kpg > 0 ? kpg : null });
+    const f = s.food || {};
+    const kpg = num(f.kcalPerG) || (num(s.grams) > 0 ? s.kcal / s.grams : 0);
+    const entry = { ...manualEntryStamp(viewedDate), grams: Number(grams.toFixed(1)), name: s.name || null, kcalPerG: kpg > 0 ? kpg : null, kcal: r0(grams * kpg) };
+    // treats/supplements are given by the each — record the count so the log reads "2 treats", not grams
+    if ((s.type === "treat" || s.type === "supplement") && num(f.gramsPerUnit) > 0) {
+      const cnt = grams / num(f.gramsPerUnit);
+      entry.treatCount = Number(cnt.toFixed(2));
+      entry.kcalPerTreat = num(f.kcalPerUnit);
+      entry.gramsPerTreat = num(f.gramsPerUnit);
+      entry.unitLabel = s.type === "supplement" ? "sachet" : "treat";
+      entry.kcal = r0(cnt * num(f.kcalPerUnit));
+    }
+    intakeLog.add(entry);
     if (!isToday) return;
     if (s.rot) consumeRotationSlot(s.id, grams);
     else if (s.food && isCanned(s.food)) consumeFridge(s.food, grams);
@@ -237,7 +250,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
   const add = () => {
     if (num(kcal) > 0) {
       const treatFields = isTreat && treatUnit === "count" && num(treats) > 0
-        ? { treatCount: num(treats), kcalPerTreat: num(picked.kcalPerUnit), gramsPerTreat: num(picked.gramsPerUnit) }
+        ? { treatCount: num(treats), kcalPerTreat: num(picked.kcalPerUnit), gramsPerTreat: num(picked.gramsPerUnit), unitLabel: unitWord }
         : {};
       intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null, ...treatFields });
       // Hybrid fridge: logging a wet meal today draws its can(s) down (opening a new one if needed),
@@ -269,7 +282,13 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
               <div style={{ display: "flex", flexDirection: "column", gap: 9, marginTop: 12 }}>
                 {planRows.map((r) => {
                   const s = r.s;
-                  const amt = num(s.grams) > 0 ? `${Number(r.remG.toFixed(1))} g` : `${r0(r.remK)} kcal`;
+                  const isUnit = s.type === "treat" || s.type === "supplement";
+                  const perU = num(s.food?.kcalPerUnit);
+                  const unitWord = s.type === "supplement" ? "sachet" : "treat";
+                  const remCount = isUnit && perU > 0 ? r.remK / perU : null;
+                  const amt = remCount != null
+                    ? `${Number(remCount.toFixed(remCount % 1 ? 1 : 0))} ${unitWord}${Math.abs(remCount - 1) < 1e-9 ? "" : "s"}`
+                    : num(s.grams) > 0 ? `${Number(r.remG.toFixed(1))} g` : `${r0(r.remK)} kcal`;
                   const wet = s.rot || isCanned(s.food);
                   const openC = wet ? (availableCansOf(fridge, s.name, todayStr, fridgeDays)[0] || null) : null;
                   const canBtn = { fontFamily: TYPE.mono, fontSize: 11, border: "none", background: "none", cursor: "pointer", color: A.good, padding: 0, textDecoration: "underline" };
@@ -341,7 +360,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
           </div>
           {isTreat && (
             <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-              {[["count", "by treat"], ["g", "by grams"]].map(([u, lbl]) => (
+              {[["count", `by ${unitWord}`], ["g", "by grams"]].map(([u, lbl]) => (
                 <button key={u} onClick={() => setTreatUnit(u)} aria-pressed={treatUnit === u}
                   style={{ fontFamily: TYPE.mono, fontSize: 10.5, borderRadius: 999, padding: "3px 10px", cursor: "pointer", border: treatUnit === u ? "none" : `1px solid ${A.cardBorder}`, background: treatUnit === u ? A.ink : "transparent", color: treatUnit === u ? A.card : A.muted }}>{lbl}</button>
               ))}
@@ -349,7 +368,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             {isTreat && treatUnit === "count"
-              ? <NumBox label="Treats" suf="×" value={treats} onChange={onTreats} />
+              ? <NumBox label={unitWord === "sachet" ? "Sachets" : "Treats"} suf="×" value={treats} onChange={onTreats} />
               : <NumBox label="Grams" suf="g" value={grams} onChange={setGrams} />}
             {derived
               ? (
@@ -447,7 +466,7 @@ function EntryRow({ en, onEdit, onRemove, onReconcile }) {
           <>
             <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
               <input type="number" step="any" min="0" value={tShown} onChange={(e) => commitT(e.target.value)} onBlur={() => setTEdit(null)} aria-label="treats" style={{ ...entryNum, width: 34 }} />
-              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>treat{num(en.treatCount) === 1 ? "" : "s"}</span>
+              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{en.unitLabel || "treat"}{num(en.treatCount) === 1 ? "" : "s"}</span>
             </span>
             <span style={{ color: A.muted, fontFamily: TYPE.mono, fontSize: 11 }}>·</span>
             <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>{r0(num(en.kcal))} kcal</span>
