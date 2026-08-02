@@ -139,10 +139,11 @@ export default function Bowl() {
         <Transition name={p?.name} start={start} setStartSplitMode={setStartSplitMode}
           newRows={dist.rows} target={target} tr={trEff} setTr={setTrEff} library={library} saveFood={saveFood} savedNames={savedNames} />
 
-        {/* footer — the ration saves live as you edit; this just leaves the page */}
+        {/* footer — the ration saves live as you edit; this just leaves the page. Go to the Log, where
+            tonight's bowl is built from this ration and can be logged — the natural next step. */}
         <div className="span-all" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "4px 24px 0" }}>
-          <a href="#/" style={{ background: A.good, color: A.card, fontFamily: TYPE.sans, fontSize: 13, fontWeight: 600, borderRadius: 14, padding: "12px 20px", textDecoration: "none" }}>
-            Done ›
+          <a href="#/log" style={{ background: A.good, color: A.card, fontFamily: TYPE.sans, fontSize: 13, fontWeight: 600, borderRadius: 14, padding: "12px 20px", textDecoration: "none" }}>
+            Done · to the log ›
           </a>
         </div>
       </div>
