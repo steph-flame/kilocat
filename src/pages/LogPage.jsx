@@ -6,7 +6,7 @@ import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayL
 import { foodSummary, macroBreakdown, trailingWindow, itemsInRange } from "../lib/foodStats.js";
 import { kcalPerG, foodType } from "../lib/foods.js";
 import { distributeBowl } from "../lib/bowl.js";
-import { planDraw, planPackDraw, isCanned, resolveRotationsWithFridge } from "../lib/fridge.js";
+import { planPackDraw, isCanned, resolveRotationsWithFridge } from "../lib/fridge.js";
 import { isRotating } from "../lib/rotation.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
 import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
@@ -18,8 +18,6 @@ const r0 = (n) => Math.round(n);
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`);
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
-const Em = ({ children }) => <strong style={{ fontWeight: 500, boxShadow: `inset 0 -7px 0 ${A.underline}` }}>{children}</strong>;
-const stepAmount = (s) => (s.splitMode === "fixed" && s.type === "treat" && num(s.treatCount) ? `${Number(num(s.treatCount).toFixed(1))} treat${num(s.treatCount) === 1 ? "" : "s"}` : g1(s.grams));
 function Card({ children, style, className }) {
   return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
@@ -188,21 +186,52 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     const dist = distributeBowl(resolved, target);
     return dist.rows.filter((s) => s.kcal > 0).map((s) => {
       const f = resolved.find((x) => x.id === s.id) || {};
-      const rot = isRotating(f); // a variety-pack slot: its day may span flavors (finish a can, open the next)
-      // Work out how tonight is drawn from the fridge so the prompt can name the can(s) — a pack
-      // walks its flavors in order; a plain wet can finishes the open one then opens a new same-flavor.
-      const canned = (rot || isCanned(f)) && s.grams > 0;
-      const draw = !canned ? null : rot ? planPackDraw(f, s.grams, fridge, todayStr, fridgeDays) : planDraw(fridge, f, s.grams, todayStr, fridgeDays);
-      return { ...s, type: foodType(f), treatCount: f.treatCount, food: f, draw, rot };
+      return { ...s, type: foodType(f), treatCount: f.treatCount, food: f, rot: isRotating(f) };
     }).sort((a, b) => (a.splitMode === "remainder" ? 1 : 0) - (b.splitMode === "remainder" ? 1 : 0));
-  }, [ration.items, target, viewedDate, fridge, fridgeDays, todayStr]);
-  const showTonight = isToday && steps.length > 0 && dayItems.length === 0;
-  const logTonight = () => steps.forEach((s) => {
-    intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(s.kcal), grams: s.grams != null ? Number(s.grams.toFixed(1)) : null, name: s.name || null, kcalPerG: s.grams > 0 ? s.kcal / s.grams : null });
-    if (!isToday || !(s.grams > 0)) return;
-    if (s.rot) consumeRotationSlot(s.id, s.grams); // walk the pack: finish the open can, open the next flavor
-    else if (s.food) consumeFridge(s.food, s.grams); // plain wet can (no-op for dry)
-  });
+  }, [ration.items, target, viewedDate, fridge, fridgeDays]);
+  const showPlan = steps.length > 0; // the day's plan persists all day, showing what's left to feed
+
+  // How much of each plan slot is still to feed, so logging in small meals doesn't make the plan
+  // vanish. Match logged entries to a slot by name — for a rotation, by ANY of its flavor names, so
+  // grams fed across the pack count toward the one slot. Remaining = planned − fed.
+  const slotNames = (s) => (s.rot && Array.isArray(s.food?.rotation)
+    ? s.food.rotation.map((m) => (m.name || "").trim().toLowerCase())
+    : [(s.name || "").trim().toLowerCase()]);
+  const fedByName = useMemo(() => {
+    const m = new Map();
+    dayItems.forEach((e) => { const k = (e.name || "").trim().toLowerCase(); const c = m.get(k) || { grams: 0, kcal: 0 }; m.set(k, { grams: c.grams + num(e.grams), kcal: c.kcal + num(e.kcal) }); });
+    return m;
+  }, [dayItems]);
+  const planRows = useMemo(() => steps.map((s) => {
+    let fedG = 0, fedK = 0;
+    for (const k of slotNames(s)) { const f = fedByName.get(k); if (f) { fedG += f.grams; fedK += f.kcal; } }
+    const remG = Math.max(0, num(s.grams) - fedG);
+    const remK = Math.max(0, s.kcal - fedK);
+    const done = num(s.grams) > 0 ? remG < 0.5 : remK < 1;
+    return { s, remG, remK, done };
+  }), [steps, fedByName]); // eslint-disable-line react-hooks/exhaustive-deps
+  const remainingRows = planRows.filter((r) => !r.done);
+  const remainingKcal = Math.max(0, target - total);
+
+  // Log a portion of a slot. A rotation logs per-flavor per the fridge draw (so entries are named by
+  // the actual flavor and the pack advances); a plain food logs under its name and draws its can.
+  const logSlotPortion = (s, grams) => {
+    if (!(grams > 0)) return;
+    if (s.rot) {
+      const { segs } = planPackDraw(s.food, grams, fridge, todayStr, fridgeDays);
+      segs.forEach((seg) => {
+        const m = (s.food.rotation || []).find((x) => (x.name || "").trim().toLowerCase() === (seg.flavor || "").trim().toLowerCase()) || {};
+        const kpg = kcalPerG(m);
+        intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(seg.take * kpg), grams: Number(seg.take.toFixed(1)), name: seg.flavor || null, kcalPerG: kpg > 0 ? kpg : null });
+      });
+      if (isToday) consumeRotationSlot(s.id, grams);
+    } else {
+      const kpg = num(s.food?.kcalPerG) || (num(s.grams) > 0 ? s.kcal / s.grams : 0);
+      intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(grams * kpg), grams: Number(grams.toFixed(1)), name: s.name || null, kcalPerG: kpg > 0 ? kpg : null });
+      if (isToday && s.food && isCanned(s.food)) consumeFridge(s.food, grams);
+    }
+  };
+  const logAllRemaining = () => remainingRows.forEach((r) => logSlotPortion(r.s, r.remG));
 
   // When a logged wet meal's grams are edited, move the difference in/out of the fridge (only for
   // today's entries and foods we can size from the library).
@@ -230,32 +259,47 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     }
   };
 
-  // Flatten tonight into the actual feed steps: a wet step with a fridge draw expands into its can
-  // steps (finish the open can, then the next flavor / a new can), so a can-spanning day is never
-  // lumped under one flavor. Dry/plain steps stay a single part.
-  const feedParts = steps.flatMap((s) => {
-    if (s.draw?.segs?.length) {
-      return s.draw.segs.map((seg, i) => {
-        const soon = seg.status && (seg.status.expiringSoon || seg.status.expiringToday);
-        return { key: `${s.id}-${i}`, amount: `${Number(num(seg.take).toFixed(1))} g`, name: seg.flavor || s.name || "food", hint: seg.kind === "open" ? (soon ? "open can · use soon" : "open can") : "new can" };
-      });
-    }
-    return [{ key: s.id, amount: stepAmount(s), name: s.name || "food", hint: null }];
-  });
+  const allFed = showPlan && remainingRows.length === 0;
 
   return (
     <>
-      {showTonight && (
+      {showPlan && isToday && (
         <Card className="span-all">
-          <div style={label({ marginBottom: 6 })}>Tonight's bowl · {target} kcal</div>
-          <p style={{ fontFamily: TYPE.serif, fontSize: 19, lineHeight: 1.36, margin: 0, color: A.ink }}>
-            Feed {feedParts.map((p, i) => (
-              <span key={p.key}>
-                <Em>{p.amount}</Em> of {p.name}{p.hint ? <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.muted }}> ({p.hint})</span> : ""}{i < feedParts.length - 1 ? (i === feedParts.length - 2 ? ", then " : ", ") : "."}
-              </span>
-            ))}
-          </p>
-          <button onClick={logTonight} style={{ marginTop: 12, width: "100%", background: A.ink, color: A.card, border: "none", borderRadius: 12, padding: "11px 0", fontFamily: TYPE.sans, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Log it ✓</button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+            <div style={label()}>Still to feed today</div>
+            <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: allFed ? A.good : A.body }}>{allFed ? "all fed ✓" : `${r0(remainingKcal)} kcal to go`}</div>
+          </div>
+          {allFed ? (
+            <p style={{ fontSize: 12.5, color: A.muted, marginTop: 8, lineHeight: 1.45 }}>The whole plan's logged for today. Anything extra goes below.</p>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 9, marginTop: 12 }}>
+                {planRows.map((r) => {
+                  const s = r.s;
+                  const amt = num(s.grams) > 0 ? `${Number(r.remG.toFixed(1))} g` : `${r0(r.remK)} kcal`;
+                  return (
+                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 999, background: s.type === "wet" ? A.food.wet : s.type === "treat" ? A.food.treat : A.food.dry, flex: "none" }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: r.done ? A.muted : A.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {s.name}{s.rot ? <span style={{ fontFamily: TYPE.mono, fontSize: 10, color: A.muted }}> · pack</span> : ""}
+                      </span>
+                      {r.done ? (
+                        <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.good, flex: "none" }}>fed ✓</span>
+                      ) : (
+                        <>
+                          <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body, flex: "none" }}>{amt} left</span>
+                          <button onClick={() => logSlotPortion(s, num(s.grams) > 0 ? r.remG : 0)} disabled={!(r.remG > 0)}
+                            style={{ flex: "none", fontFamily: TYPE.mono, fontSize: 11, borderRadius: 999, padding: "3px 10px", cursor: r.remG > 0 ? "pointer" : "default", border: `1px solid ${A.cardBorder}`, background: "transparent", color: r.remG > 0 ? A.good : A.cardBorder }}>log it</button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <button onClick={logAllRemaining} style={{ marginTop: 12, width: "100%", background: A.ink, color: A.card, border: "none", borderRadius: 12, padding: "11px 0", fontFamily: TYPE.sans, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Log everything remaining ✓</button>
+              <p style={{ fontSize: 11, color: A.muted, marginTop: 8, lineHeight: 1.4 }}>Feeding in bits? Tap “log it” on a food as you dispense, or add a portion below — this list tracks what's left.</p>
+            </>
+          )}
         </Card>
       )}
 
