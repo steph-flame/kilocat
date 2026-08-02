@@ -32,28 +32,31 @@ export function activeMember(f, date) {
   return i < 0 ? null : f.rotation[i];
 }
 
-// The next `n` flavor names starting today — a preview of the cycle so the row shows what it does.
-export function upcomingFlavors(f, date, n = 3) {
+// The next `n` flavor names in PACK ORDER starting at `startIdx` — a preview of the cycle so the
+// row shows what it does. (Order is driven by the cans, not the calendar; see fridge.js.)
+export function upcomingFlavors(f, startIdx, n = 3) {
   if (!isRotating(f)) return [];
-  const len = f.rotation.length, start = activeRotationIndex(f, date), out = [];
+  const len = f.rotation.length, start = ((startIdx % len) + len) % len, out = [];
   for (let k = 0; k < Math.min(n, len); k++) out.push(f.rotation[(start + k) % len]?.name || "—");
   return out;
 }
 
 // Resolve a row for `date`: a rotation row becomes a plain single food (the active flavor's fields)
 // while keeping the row's identity and split — so distributeBowl and every summary treat it like
-// any other food. Non-rotation rows pass through unchanged.
+// any other food. Non-rotation rows pass through unchanged. NB: this uses the CALENDAR active member
+// (paused/single); the fridge-aware "current flavor" is resolved via fridge.js's
+// resolveRotationsWithFridge, which the Bowl/Log actually use.
 export function resolveRotation(f, date) {
   const m = activeMember(f, date);
   if (!m) return f;
-  const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff } = f;
-  return { ...m, id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff };
+  const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex } = f;
+  return { ...m, id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex };
 }
 export const resolveRotations = (items, date) => (items || []).map((f) => resolveRotation(f, date));
 
-// The food-only fields of a row (no id / split / rotation) — used to seed a rotation from the
-// single food already in a slot, and to write a picked/edited flavor back into the list.
+// The food-only fields of a row (no id / split / rotation / cursor) — used to seed a rotation from
+// the single food already in a slot, and to write a picked/edited flavor back into the list.
 export function foodFieldsOf(f) {
-  const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, ...food } = f || {};
+  const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex, ...food } = f || {};
   return food;
 }

@@ -80,10 +80,9 @@ describe("rotation", () => {
     expect(activeMember(one, "2026-03-03").name).toBe("Chicken");
   });
 
-  it("upcomingFlavors previews the cycle from today, empty when not rotating", () => {
-    const up = upcomingFlavors(slot, "2026-01-01", 3);
-    expect(up).toHaveLength(3);
-    expect(new Set(up)).toEqual(new Set(["Chicken", "Lamb", "Salmon"]));
-    expect(upcomingFlavors({ ...slot, rotateOff: true }, "2026-01-01", 3)).toEqual([]);
+  it("upcomingFlavors previews the pack in order from a start index, empty when not rotating", () => {
+    expect(upcomingFlavors(slot, 0, 3)).toEqual(["Chicken", "Lamb", "Salmon"]);
+    expect(upcomingFlavors(slot, 1, 3)).toEqual(["Lamb", "Salmon", "Chicken"]);
+    expect(upcomingFlavors({ ...slot, rotateOff: true }, 0, 3)).toEqual([]);
   });
 });

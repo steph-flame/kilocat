@@ -105,22 +105,85 @@ export function returnToFridge(fridge, food, grams, today, makeId) {
   return out;
 }
 
-// Fridge-aware rotation resolution: which flavor of a variety-pack slot to feed on `date`. Finish
-// an open, still-good can first (the oldest one), so you don't start a new flavor while a can sits
-// in the fridge; only when nothing of the slot is open does it fall back to the calendar cycle.
-// This is what makes rotations + fridge feel real — the plan tracks the physical cans. Non-rotation
-// rows pass through unchanged.
-// The flavor a rotation slot should feed on `date`, fridge-aware: the flavor of the oldest open,
-// still-good can among its members, else the calendar cycle's flavor.
+// A variety pack is consumed IN ORDER, driven by the cans — not by the calendar. You feed the
+// currently-open flavor until its can is empty, then move to the NEXT flavor in the pack and open
+// its can; a single day can finish one can and open the next. `f.rotIndex` is the cursor — the
+// flavor we're currently on — advanced by consumePack when a can is finished. When a can is
+// physically open it anchors position (so the cursor self-heals to reality); otherwise the cursor
+// says what to open next.
+
+const norm = (i, n) => ((i % n) + n) % n;
+
+// Index of the pack flavor with the oldest still-good open can, or -1 if nothing's open.
+function openPackStart(f, fridge, today, fridgeDays) {
+  let best = -1, bestDate = null;
+  f.rotation.forEach((m, i) => {
+    const avail = availableCansOf(fridge, m.name, today, fridgeDays);
+    if (avail.length && (bestDate == null || avail[0].openedDate < bestDate)) { best = i; bestDate = avail[0].openedDate; }
+  });
+  return best;
+}
+
+// Where a pack's draw begins today: finish whatever's physically open, else the stored cursor.
+export function packStartIndex(f, fridge, today, fridgeDays) {
+  if (!isRotating(f)) return 0;
+  const open = openPackStart(f, fridge, today, fridgeDays);
+  return open >= 0 ? open : norm(num(f.rotIndex), f.rotation.length);
+}
+
+// The flavor a rotation slot feeds first on `date` (what the Bowl/Log show as "today's" flavor).
 export function activeMemberWithFridge(f, date, fridge, fridgeDays) {
   if (!hasRotation(f)) return null;
   if (!isRotating(f)) return activeMember(f, date); // paused / single flavor → fixed, ignore the fridge
-  let best = null;
-  for (const m of f.rotation) {
-    const avail = availableCansOf(fridge, m.name, date, fridgeDays);
-    if (avail.length && (!best || avail[0].openedDate < best.openedDate)) best = { m, openedDate: avail[0].openedDate };
+  return f.rotation[packStartIndex(f, fridge, date, fridgeDays)];
+}
+
+// Walk a pack's day of `grams` in order from the start flavor, finishing each open can before
+// opening the next flavor's. `apply` (optional) mutates a working fridge copy — used by consumePack;
+// planPackDraw passes a copy so it's non-mutating. Returns { segs, endIndex } where segs describe
+// the flavors drawn (for the tonight prompt) and endIndex is the cursor to persist.
+function walkPack(f, grams, fridge, today, fridgeDays, makeId) {
+  const n = f.rotation.length;
+  const out = fridge.map((c) => ({ ...c }));
+  let cur = packStartIndex(f, out, today, fridgeDays);
+  let need = num(grams), guard = 0;
+  const segs = [];
+  while (need > 0.01 && guard++ < 100) {
+    const flavor = f.rotation[cur];
+    const avail = availableCansOf(out, flavor.name, today, fridgeDays);
+    if (avail.length) {
+      const can = out.find((c) => c.id === avail[0].id);
+      const take = Math.min(need, num(can.remainingGrams));
+      can.remainingGrams = round2(num(can.remainingGrams) - take);
+      segs.push({ flavor: flavor.name, kind: "open", take: round2(take), status: canStatus(can, today, fridgeDays) });
+      need -= take;
+      if (need <= 0.01) { if (num(can.remainingGrams) <= 0.01) cur = norm(cur + 1, n); break; }
+      cur = norm(cur + 1, n); // this can done → next flavor
+    } else {
+      const canGrams = num(flavor.gramsPerUnit);
+      if (!(canGrams > 0)) break; // can't open a can without a known size
+      const take = Math.min(need, canGrams);
+      out.push({ id: makeId ? makeId() : `sim_${cur}_${guard}`, ...foodFieldsOf(flavor), openedDate: today, canGrams, remainingGrams: round2(canGrams - take) });
+      segs.push({ flavor: flavor.name, kind: "new", take: round2(take) });
+      need -= take;
+      if (need <= 0.01) { if (take >= canGrams - 0.01) cur = norm(cur + 1, n); break; }
+      cur = norm(cur + 1, n);
+    }
   }
-  return best ? best.m : activeMember(f, date);
+  return { fridge: out.filter((c) => num(c.remainingGrams) > 0.01), segs, endIndex: cur };
+}
+
+// Non-mutating plan of tonight's pack draw (for the Log's tonight prompt / draw list).
+export function planPackDraw(f, grams, fridge, today, fridgeDays) {
+  if (!isRotating(f)) return { segs: [], endIndex: 0 };
+  return walkPack(f, grams, fridge || [], today, fridgeDays, null);
+}
+
+// Execute a pack draw (mutation for logging): returns the new fridge AND the advanced cursor.
+export function consumePack(fridge, f, grams, today, fridgeDays, makeId) {
+  if (!isRotating(f) || !(num(grams) > 0)) return { fridge: fridge || [], rotIndex: num(f.rotIndex) };
+  const r = walkPack(f, grams, fridge || [], today, fridgeDays, makeId);
+  return { fridge: r.fridge, rotIndex: r.endIndex };
 }
 
 export function resolveRotationsWithFridge(items, date, fridge, fridgeDays) {
@@ -128,8 +191,8 @@ export function resolveRotationsWithFridge(items, date, fridge, fridgeDays) {
     if (!hasRotation(f)) return f;
     const chosen = activeMemberWithFridge(f, date, fridge, fridgeDays);
     if (!chosen) return f;
-    const { id, splitMode, pct, fixedKcal, treatCount, rotation } = f;
-    return { ...chosen, id, splitMode, pct, fixedKcal, treatCount, rotation };
+    const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex } = f;
+    return { ...chosen, id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex };
   });
 }
 

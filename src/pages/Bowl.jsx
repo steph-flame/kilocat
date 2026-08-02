@@ -293,6 +293,7 @@ function AmountRow({ left, grams }) {
 function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFood, saved }) {
   const { today, fridge, fridgeDays } = useApp();
   const [showDetails, setShowDetails] = useState(false);
+  const [dragIdx, setDragIdx] = useState(null); // flavor being dragged to reorder
   const [gEdit, setGEdit] = useState(null); // grams being typed for a fixed food (kcal follows)
   const splitMode = f.splitMode || "share";
   // A rotation slot has no top-level food of its own — its energy/type/name come from whichever
@@ -330,6 +331,10 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
   const removeFlavor = (idx) => setMembers((cur) => cur.filter((_, i) => i !== idx));
   const setFlavorName = (idx, name) => setMembers((cur) => cur.map((m, i) => (i === idx ? { ...m, name } : m)));
   const pickFlavor = (idx, food) => setMembers((cur) => cur.map((m, i) => (i === idx ? foodFieldsOf(libEntry(food)) : m)));
+  const moveFlavor = (from, to) => setMembers((cur) => {
+    if (to < 0 || to >= cur.length || from === to) return cur;
+    const next = cur.slice(); const [m] = next.splice(from, 1); next.splice(to, 0, m); return next;
+  });
 
   return (
     <div style={{ borderTop: first ? "none" : `1px solid ${A.hairline}`, padding: "12px 0" }}>
@@ -422,25 +427,34 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
 
       {isRot && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${A.cardBorder}` }}>
-          <div style={label({ fontSize: 9, marginBottom: 4 })}>Flavors · one per day</div>
+          <div style={label({ fontSize: 9, marginBottom: 4 })}>Flavors · fed in this order</div>
           {f.rotation.map((m, idx) => (
-            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0" }}>
+            <div key={idx}
+              onDragOver={(e) => { if (dragIdx != null) e.preventDefault(); }}
+              onDrop={(e) => { e.preventDefault(); if (dragIdx != null) moveFlavor(dragIdx, idx); setDragIdx(null); }}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", opacity: dragIdx === idx ? 0.4 : 1, borderTop: dragIdx != null && dragIdx !== idx ? `1px dashed ${A.hairline}` : "1px solid transparent" }}>
+              <span draggable onDragStart={() => setDragIdx(idx)} onDragEnd={() => setDragIdx(null)} aria-label="Drag to reorder" title="Drag to reorder"
+                style={{ flex: "none", cursor: "grab", color: A.cardBorder, fontSize: 13, lineHeight: 1, userSelect: "none", padding: "0 2px" }}>⠿</span>
               <span style={{ width: 8, height: 8, borderRadius: 999, background: dotColor(m), flex: "none" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <FoodSearch value={m.name} search={library.search} onChangeName={(v) => setFlavorName(idx, v)} onPick={(food) => pickFlavor(idx, food)} />
               </div>
-              {idx === activeIdx && <span style={{ fontFamily: TYPE.mono, fontSize: 9, color: A.good, border: `1px solid ${A.good}`, borderRadius: 999, padding: "1px 6px", flex: "none" }}>today</span>}
+              {idx === activeIdx && <span style={{ fontFamily: TYPE.mono, fontSize: 9, color: A.good, border: `1px solid ${A.good}`, borderRadius: 999, padding: "1px 6px", flex: "none" }}>next</span>}
+              <span style={{ display: "inline-flex", flexDirection: "column", flex: "none", lineHeight: 0.8 }}>
+                <button onClick={() => moveFlavor(idx, idx - 1)} disabled={idx === 0} aria-label="Move up" style={{ border: "none", background: "none", cursor: idx === 0 ? "default" : "pointer", color: idx === 0 ? A.cardBorder : A.muted, fontSize: 9, padding: 0 }}>▲</button>
+                <button onClick={() => moveFlavor(idx, idx + 1)} disabled={idx === f.rotation.length - 1} aria-label="Move down" style={{ border: "none", background: "none", cursor: idx === f.rotation.length - 1 ? "default" : "pointer", color: idx === f.rotation.length - 1 ? A.cardBorder : A.muted, fontSize: 9, padding: 0 }}>▼</button>
+              </span>
               <button onClick={() => removeFlavor(idx)} aria-label="Remove flavor" style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 14 }}>×</button>
             </div>
           ))}
           <button onClick={addFlavor} style={{ marginTop: 4, fontFamily: TYPE.mono, fontSize: 11, color: A.good, background: "none", border: "none", cursor: "pointer" }}>+ add flavor</button>
           {rotating && (
             <p style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.body, marginTop: 8, lineHeight: 1.5 }}>
-              Next up: <b style={{ color: A.ink }}>{upcomingFlavors(f, today, 3).join(" → ")}</b>{f.rotation.length > 3 ? " → …" : ""}
+              Next up: <b style={{ color: A.ink }}>{upcomingFlavors(f, activeIdx < 0 ? 0 : activeIdx, 3).join(" → ")}</b>{f.rotation.length > 3 ? " → …" : ""}
             </p>
           )}
           <p style={{ fontSize: 10.5, color: A.muted, marginTop: 6, lineHeight: 1.45 }}>
-            Each flavor pulls its energy &amp; analysis from your saved foods — pick from the list. The bowl advances one flavor per day, so <b>tonight's bowl on the Log</b> and this ration's grams show today's flavor automatically. If you track cans, it feeds whatever's open before starting the next flavor. Drop to one flavor to stop rotating; the ↻ button pauses without losing the list.
+            Each flavor pulls its energy &amp; analysis from your saved foods — pick from the list; drag the ⠿ handle to reorder. The bowl works through the pack <b>in order, by the can</b>: it feeds the open can until it's empty, then opens the next flavor — so a day may finish one can and open the next. <b>Tonight's bowl on the Log</b> shows exactly which can(s) to use. Drop to one flavor to stop rotating; the ↻ button pauses without losing the list.
           </p>
         </div>
       )}

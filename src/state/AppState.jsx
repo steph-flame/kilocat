@@ -18,7 +18,7 @@ import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
 import { resolveIntent } from "../lib/intent.js";
 import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../lib/mergeData.js";
-import { openCan, consumeFromFridge, returnToFridge } from "../lib/fridge.js";
+import { openCan, consumeFromFridge, returnToFridge, consumePack } from "../lib/fridge.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -334,6 +334,16 @@ export function AppProvider({ children }) {
   const tossCan = (id) => setFridge((fr) => fr.filter((c) => c.id !== id));
   const setCanRemaining = (id, grams) => setFridge((fr) => fr.map((c) => (c.id === id ? { ...c, remainingGrams: Math.max(0, Number(grams) || 0) } : c)));
   const consumeFridge = (food, grams) => setFridge((fr) => consumeFromFridge(fr, food, grams, today, fridgeDays, uid));
+  // Consume a whole variety-pack slot for the day: walks the pack in order (finishing the open can,
+  // opening the next flavor when it empties), updating BOTH the fridge and the slot's cursor
+  // (rotIndex) so tomorrow resumes where today left off. Used by the Log's tonight-bowl for rotation
+  // slots (a plain wet food still uses consumeFridge).
+  const consumeRotationSlot = (slotId, grams) => updateActiveCat((cat) => {
+    const item = (cat.ration || []).find((x) => x.id === slotId);
+    if (!item) return cat;
+    const { fridge: nf, rotIndex } = consumePack(cat.fridge || [], item, grams, today, fridgeDays, uid);
+    return { ...cat, fridge: nf, ration: (cat.ration || []).map((x) => (x.id === slotId ? { ...x, rotIndex } : x)), stateModAt: Date.now() };
+  });
   // Reconcile a logged wet meal's fridge draw after its grams are edited: a positive delta draws
   // more (opening cans if needed), a negative delta puts the difference back. Keeps the fridge in
   // step with edits, symmetric so an up-then-down edit nets out.
@@ -574,7 +584,7 @@ export function AppProvider({ children }) {
     today, currentWeight, logWeight,
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
-    fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge,
+    fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge, consumeRotationSlot,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure, intent,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,
