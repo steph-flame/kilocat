@@ -20,17 +20,6 @@ const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`);
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 const Em = ({ children }) => <strong style={{ fontWeight: 500, boxShadow: `inset 0 -7px 0 ${A.underline}` }}>{children}</strong>;
 const stepAmount = (s) => (s.splitMode === "fixed" && s.type === "treat" && num(s.treatCount) ? `${Number(num(s.treatCount).toFixed(1))} treat${num(s.treatCount) === 1 ? "" : "s"}` : g1(s.grams));
-// One line describing how a wet step is drawn from the fridge tonight, in order: finish the open
-// can, then open the next (for a variety pack, that's the next flavor). Flags a can to use up soon.
-const drawNote = (s) => {
-  if (!s.draw || !s.draw.segs?.length) return null;
-  return s.draw.segs.map((seg) => {
-    const g = Number(num(seg.take).toFixed(1));
-    const nm = seg.flavor || s.name || "food";
-    const soon = seg.status && (seg.status.expiringSoon || seg.status.expiringToday);
-    return seg.kind === "open" ? `finish open ${nm} (${g} g)${soon ? " — soon" : ""}` : `open ${nm} (${g} g)`;
-  }).join(", then ");
-};
 function Card({ children, style, className }) {
   return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
 }
@@ -241,23 +230,31 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     }
   };
 
+  // Flatten tonight into the actual feed steps: a wet step with a fridge draw expands into its can
+  // steps (finish the open can, then the next flavor / a new can), so a can-spanning day is never
+  // lumped under one flavor. Dry/plain steps stay a single part.
+  const feedParts = steps.flatMap((s) => {
+    if (s.draw?.segs?.length) {
+      return s.draw.segs.map((seg, i) => {
+        const soon = seg.status && (seg.status.expiringSoon || seg.status.expiringToday);
+        return { key: `${s.id}-${i}`, amount: `${Number(num(seg.take).toFixed(1))} g`, name: seg.flavor || s.name || "food", hint: seg.kind === "open" ? (soon ? "open can · use soon" : "open can") : "new can" };
+      });
+    }
+    return [{ key: s.id, amount: stepAmount(s), name: s.name || "food", hint: null }];
+  });
+
   return (
     <>
       {showTonight && (
         <Card className="span-all">
           <div style={label({ marginBottom: 6 })}>Tonight's bowl · {target} kcal</div>
           <p style={{ fontFamily: TYPE.serif, fontSize: 19, lineHeight: 1.36, margin: 0, color: A.ink }}>
-            Feed {steps.map((s, i) => <span key={s.id}><Em>{stepAmount(s)}</Em> of {s.name || "food"}{i < steps.length - 1 ? (i === steps.length - 2 ? ", and " : ", ") : "."}</span>)}
+            Feed {feedParts.map((p, i) => (
+              <span key={p.key}>
+                <Em>{p.amount}</Em> of {p.name}{p.hint ? <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.muted }}> ({p.hint})</span> : ""}{i < feedParts.length - 1 ? (i === feedParts.length - 2 ? ", then " : ", ") : "."}
+              </span>
+            ))}
           </p>
-          {steps.some((s) => s.draw) && (
-            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
-              {steps.filter((s) => s.draw).map((s) => (
-                <div key={s.id} style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted }}>
-                  <span style={{ color: A.food.wet }}>●</span> {s.name}: {drawNote(s)}
-                </div>
-              ))}
-            </div>
-          )}
           <button onClick={logTonight} style={{ marginTop: 12, width: "100%", background: A.ink, color: A.card, border: "none", borderRadius: 12, padding: "11px 0", fontFamily: TYPE.sans, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Log it ✓</button>
         </Card>
       )}
