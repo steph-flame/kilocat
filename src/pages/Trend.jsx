@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
-import { buildDailyFrame, weightChangeRate, historySpanDays, trailingWeeklyRate } from "../lib/timeline.js";
+import { buildDailyFrame, historySpanDays, trailingWeeklyRate } from "../lib/timeline.js";
+import { dailyReduce, median, ewma, addDays, linregXY } from "../lib/series.js";
 import { extent, linScale } from "../lib/scale.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
 import { bcsToPct, pctToBcs } from "../lib/nutrition.js";
@@ -88,11 +89,33 @@ export default function Trend() {
     () => buildDailyFrame(e.trend, intakeLog.items.map((x) => ({ date: x.date, value: x.kcal })), rangeDays, intakeDayStatus, today),
     [e.trend, intakeLog.items, rangeDays, intakeDayStatus, today]
   );
-  const rates = useMemo(() => weightChangeRate(frame), [frame]);
-  const weighDots = useMemo(() => {
-    const byDate = new Map(frame.map((f, i) => [f.date, i]));
-    return weightLog.items.filter((w) => byDate.has(w.date)).map((w) => ({ i: byDate.get(w.date), kg: w.kg }));
-  }, [frame, weightLog.items]);
+  // Weight + rate DISPLAY charts run off the raw scale (daily medians, today included), NOT the
+  // estimator's Kalman latent (e.trend) — that latent lags real moves and, since we exclude today
+  // from the estimate, stops at yesterday. The burn/energy charts keep using `frame` (they need the
+  // estimator's e/sd and its today-exclusion); only the weight line and the rate line move here so
+  // they agree with the scale and with the trailingWeeklyRate readout on Today.
+  const wdisp = useMemo(() => {
+    let daily = dailyReduce(weightLog.items.map((x) => ({ date: x.date, value: x.kg })), median); // [{date,value}] asc
+    if (rangeDays && daily.length) {
+      const start = addDays(daily[daily.length - 1].date, -(rangeDays - 1));
+      daily = daily.filter((d) => d.date >= start);
+    }
+    const sm = ewma(daily.map((d) => d.value), 0.4); // light EWMA trend line — responsive, rides out the ±40 g bounce
+    const dispFrame = daily.map((d, i) => ({ date: d.date, w: sm[i] }));
+    const idxByDate = new Map(daily.map((d, i) => [d.date, i]));
+    const dots = weightLog.items.filter((w) => idxByDate.has(w.date)).map((w) => ({ i: idxByDate.get(w.date), kg: w.kg }));
+    // Per-day rate = a trailing-7-day line fit on the raw medians (same method as trailingWeeklyRate),
+    // so the last point of this chart equals the headline %/wk instead of the old Kalman-derived one.
+    const rates = daily.map((_, i) => {
+      const wnd = daily.slice(Math.max(0, i - 6), i + 1);
+      if (wnd.length < 2) return { kgPerWeek: null, pctPerWeek: null };
+      const { slope } = linregXY(wnd.map((_, k) => k), wnd.map((p) => p.value));
+      const kgPerWeek = slope * 7;
+      const last = wnd[wnd.length - 1].value;
+      return { kgPerWeek, pctPerWeek: last > 0 ? (kgPerWeek / last) * 100 : 0 };
+    });
+    return { frame: dispFrame, dots, rates };
+  }, [weightLog.items, rangeDays]);
 
   if (!e.enoughData || frame.length < 2) {
     return (
@@ -163,13 +186,13 @@ export default function Trend() {
 
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Weight · {weightLabel(unit)}</div>
-          <WeightChart frame={frame} dots={weighDots} idealKg={idealKg} disp={dispW} unit={unit} />
+          <WeightChart frame={wdisp.frame} dots={wdisp.dots} idealKg={idealKg} disp={dispW} unit={unit} />
           <Legend items={[[A.chart.trend, "trend", "line"], [A.chart.weighDot, "weigh-in", "dot"], [A.chart.ideal, "ideal", "dash"]]} />
         </Card>
 
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Rate of change · %/wk</div>
-          <RateChart rates={rates} frame={frame} />
+          <RateChart rates={wdisp.rates} frame={wdisp.frame} />
           <p style={{ ...cap, fontSize: 11.5 }}>
             {(() => { const tw = trailingWeeklyRate(weightLog.items); return tw
               ? `Over the last ${tw.days} days: ${tw.gramsPerWeek < 0 ? "−" : "+"}${Math.abs(Math.round(tw.gramsPerWeek))} g/wk (${tw.pctPerWeek < 0 ? "−" : "+"}${Math.abs(r1(tw.pctPerWeek))}%/wk).`

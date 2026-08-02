@@ -2,6 +2,7 @@ import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { toDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
 import { trailingWeeklyRate } from "../lib/timeline.js";
+import { dailyReduce, median, ewma } from "../lib/series.js";
 import { num } from "../lib/util.js";
 
 // Today — the landing/overview home. A read-only glance at where the cat stands right now: the
@@ -77,6 +78,13 @@ export default function TodayPage() {
   // Rate over the trailing week from raw weigh-ins (robust to daily bounce), updated daily.
   const tw = trailingWeeklyRate(weightLog?.items);
   const rate = tw?.pctPerWeek;
+  // Sparkline off the raw scale (daily medians, lightly smoothed, today included) — matches the rate
+  // above and the Trend weight chart, rather than the lagging Kalman latent (e.trend).
+  const sparkTrend = (() => {
+    const daily = dailyReduce((weightLog?.items || []).map((x) => ({ date: x.date, value: x.kg })), median);
+    const sm = ewma(daily.map((d) => d.value), 0.4);
+    return daily.map((d, i) => ({ w: sm[i] }));
+  })();
   const sign = (n) => (n < 0 ? "−" : n > 0 ? "+" : "");
   const rateStr = tw == null ? null : `${sign(tw.gramsPerWeek)}${Math.abs(Math.round(tw.gramsPerWeek))} g/wk · ${sign(rate)}${Math.abs(r1(rate))}%/wk`;
   const curKg = currentWeight?.kg;
@@ -132,7 +140,7 @@ export default function TodayPage() {
             </div>
             {rateStr && <div style={{ fontFamily: TYPE.mono, fontSize: 13, color: rate < 0 ? A.good : rate > 0 ? A.caution.text : A.muted, fontWeight: 600 }}>{rateStr}</div>}
           </div>
-          {measured ? <Spark trend={e.trend} disp={disp} /> : <p style={{ ...cap, fontSize: 11.5 }}>A trend line appears once there are a couple of weeks of weigh-ins.</p>}
+          {measured ? <Spark trend={sparkTrend} disp={disp} /> : <p style={{ ...cap, fontSize: 11.5 }}>A trend line appears once there are a couple of weeks of weigh-ins.</p>}
           <a href="#/trend" style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.good, fontWeight: 600, textDecoration: "none", display: "inline-block", marginTop: 8 }}>Full trend ›</a>
         </Card>
 
