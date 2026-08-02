@@ -15,6 +15,18 @@ const GA_ROWS = [
   ["ash", "Ash", "max"],
 ];
 
+// A term with a hover/tap explanation (native title tooltip + a dotted underline so it reads as
+// "there's more here"). Keeps the derived-stats footer from looking like unexplained jargon.
+function Help({ title, children }) {
+  return (
+    <span title={title} style={{ borderBottom: `1px dotted ${C.faint}`, cursor: "help" }}>{children}</span>
+  );
+}
+
+const NFE_HELP = "Nitrogen-Free Extract — the carbohydrate estimate. Cat labels never list carbs, so it's whatever's left after subtracting protein, fat, fiber, moisture and ash from 100%. As-fed (water included).";
+const CAL_HELP = "Share of the food's energy from each macro. Grams × calories-per-gram (protein ~3.5, fat ~8.5, carb ~3.5), normalized. Fat carries ~2.4× the calories per gram, so it takes a bigger slice of the calories than of the weight.";
+const DM_HELP = "Composition by weight with all water removed (as-fed % ÷ the non-water fraction). The fair way to compare a wet food to a dry one, and what AAFCO minimums use — adult cat: 26% protein, 9% fat (dry-matter).";
+
 // Compact right-aligned numeric cell — sits at the end of a label "leader" line.
 function GANum({ value, onChange, label }) {
   return (
@@ -60,9 +72,9 @@ export default function GuaranteedAnalysis({ food, onEditField, defaultOpen = fa
           <div style={{ background: C.paper, borderColor: C.line }} className="border-t px-3 py-2 text-xs">
             {prof ? (
               <div style={{ color: C.sub }} className="leading-relaxed">
-                <span className="font-mono">Carbs (NFE) ≈ {r1(prof.carb)}%</span>{" "}
-                · Calories <b style={{ color: C.ink }}>{prof.caloric.protein}%</b> protein · <b style={{ color: C.ink }}>{prof.caloric.fat}%</b> fat · <b style={{ color: C.ink }}>{prof.caloric.carb}%</b> carb
-                <div style={{ color: C.faint }} className="mt-0.5">Dry-matter: {prof.dryMatter.protein}% protein · {prof.dryMatter.fat}% fat · {prof.dryMatter.carb}% carb</div>
+                <span className="font-mono">Carbs (<Help title={NFE_HELP}>NFE</Help>) ≈ {r1(prof.carb)}%</span>{" "}
+                · <Help title={CAL_HELP}>Calories</Help> <b style={{ color: C.ink }}>{prof.caloric.protein}%</b> protein · <b style={{ color: C.ink }}>{prof.caloric.fat}%</b> fat · <b style={{ color: C.ink }}>{prof.caloric.carb}%</b> carb
+                <div style={{ color: C.faint }} className="mt-0.5"><Help title={DM_HELP}>Dry-matter</Help> <span className="opacity-70">(by weight, water removed)</span>: {prof.dryMatter.protein}% protein · {prof.dryMatter.fat}% fat · {prof.dryMatter.carb}% carb</div>
               </div>
             ) : (
               <span style={{ color: C.faint }}>Enter at least protein and fat to see carbs and the caloric split. Values are the as-fed percentages off the label.</span>
