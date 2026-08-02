@@ -18,7 +18,8 @@ import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
 import { resolveIntent } from "../lib/intent.js";
 import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../lib/mergeData.js";
-import { openCan, consumeFromFridge, returnToFridge, consumePack } from "../lib/fridge.js";
+import { openCan, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, nextPackIndex } from "../lib/fridge.js";
+import { hasRotation } from "../lib/rotation.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -334,15 +335,29 @@ export function AppProvider({ children }) {
   const tossCan = (id) => setFridge((fr) => fr.filter((c) => c.id !== id));
   const setCanRemaining = (id, grams) => setFridge((fr) => fr.map((c) => (c.id === id ? { ...c, remainingGrams: Math.max(0, Number(grams) || 0) } : c)));
   const consumeFridge = (food, grams) => setFridge((fr) => consumeFromFridge(fr, food, grams, today, fridgeDays, uid));
-  // Consume a whole variety-pack slot for the day: walks the pack in order (finishing the open can,
-  // opening the next flavor when it empties), updating BOTH the fridge and the slot's cursor
-  // (rotIndex) so tomorrow resumes where today left off. Used by the Log's tonight-bowl for rotation
-  // slots (a plain wet food still uses consumeFridge).
-  const consumeRotationSlot = (slotId, grams) => updateActiveCat((cat) => {
+  // Logging a variety-pack portion just draws its CURRENT flavor's open can down (no auto-open, no
+  // cursor change — those are the explicit Open/Finish buttons below).
+  const consumeRotationSlot = (slotId, grams) => setFridge((fr) => {
+    const item = (activeCat.ration || []).find((x) => x.id === slotId);
+    const flavor = item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays) : item;
+    return flavor ? consumeFromFridge(fr, flavor, grams, today, fridgeDays) : fr;
+  });
+  // Explicit "Open can" for a ration slot: opens the current flavor's can (the cursor flavor for a
+  // pack). Explicit "Finish can": removes the slot's open can — and for a pack, advances to the next
+  // flavor so the next "Open" opens it. Both are user actions; nothing about cans is inferred.
+  const slotFlavor = (item, fr) => (item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays) : item);
+  const openSlotCan = (slotId) => setFridge((fr) => {
+    const f = slotFlavor((activeCat.ration || []).find((x) => x.id === slotId), fr);
+    return f ? [...fr, openCan(f, today, uid)] : fr;
+  });
+  const finishSlotCan = (slotId) => updateActiveCat((cat) => {
     const item = (cat.ration || []).find((x) => x.id === slotId);
     if (!item) return cat;
-    const { fridge: nf, rotIndex } = consumePack(cat.fridge || [], item, grams, today, fridgeDays, uid);
-    return { ...cat, fridge: nf, ration: (cat.ration || []).map((x) => (x.id === slotId ? { ...x, rotIndex } : x)), stateModAt: Date.now() };
+    const before = cat.fridge || [];
+    const nf = finishOpenCan(before, slotFlavor(item, before), today, fridgeDays);
+    const removed = nf.length < before.length;
+    if (!hasRotation(item) || !removed) return { ...cat, fridge: nf, stateModAt: Date.now() };
+    return { ...cat, fridge: nf, ration: cat.ration.map((x) => (x.id === slotId ? { ...x, rotIndex: nextPackIndex(item) } : x)), stateModAt: Date.now() };
   });
   // Reconcile a logged wet meal's fridge draw after its grams are edited: a positive delta draws
   // more (opening cans if needed), a negative delta puts the difference back. Keeps the fridge in
@@ -584,7 +599,7 @@ export function AppProvider({ children }) {
     today, currentWeight, logWeight,
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
-    fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge, consumeRotationSlot,
+    fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure, intent,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,

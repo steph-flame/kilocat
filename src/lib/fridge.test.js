@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, consumeFromFridge, returnToFridge, planPackDraw, consumePack, activeMemberWithFridge, packStartIndex } from "./fridge.js";
+import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex } from "./fridge.js";
 
 let idn = 0;
 const mkId = () => `can-${idn++}`;
@@ -68,18 +68,28 @@ describe("fridge", () => {
     expect(plan.segs[0].kind).toBe("new");
   });
 
-  it("consumes grams oldest-first, opening cans, and drops emptied cans", () => {
+  it("draws down the open can and NEVER opens a new one (finishing/opening are explicit)", () => {
     const fridge = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 30 }];
-    const out = consumeFromFridge(fridge, wet, 40, "2026-02-02", 3, mkId);
-    // the 30g can is emptied (dropped); a new 80g can opened with 10g taken → 70 left
-    expect(out).toHaveLength(1);
-    expect(out[0].remainingGrams).toBe(70);
-    expect(out[0].openedDate).toBe("2026-02-02");
+    // feed 40 from a 30g can: the can empties (dropped), the 10g excess is untracked, no new can
+    const out = consumeFromFridge(fridge, wet, 40, "2026-02-02", 3);
+    expect(out).toHaveLength(0);
+    // feed 20 from a 30g can: 10 left, still just the one can
+    const out2 = consumeFromFridge([{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 30 }], wet, 20, "2026-02-02", 3);
+    expect(out2).toHaveLength(1);
+    expect(out2[0].remainingGrams).toBe(10);
+    // nothing open → logging does nothing (no phantom can)
+    expect(consumeFromFridge([], wet, 40, "2026-02-02", 3)).toEqual([]);
+  });
+
+  it("finishOpenCan removes the open can regardless of tracked grams", () => {
+    const fridge = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 5 }];
+    expect(finishOpenCan(fridge, wet, "2026-02-02", 3)).toHaveLength(0);
+    expect(finishOpenCan([], wet, "2026-02-02", 3)).toEqual([]); // nothing to finish
   });
 
   it("consume is a no-op for non-canned foods", () => {
     const fridge = [];
-    expect(consumeFromFridge(fridge, dry, 40, "2026-02-02", 3, mkId)).toEqual([]);
+    expect(consumeFromFridge(fridge, dry, 40, "2026-02-02", 3)).toEqual([]);
   });
 
   it("returnToFridge refills the newest can up to a full can, then re-opens one for the rest", () => {
@@ -111,44 +121,30 @@ describe("fridge", () => {
   });
 });
 
-describe("variety-pack draw (in order, by the can)", () => {
+describe("variety pack — explicit open/finish, in order", () => {
   const A = { name: "Chicken", mode: "perUnit", type: "wet", kcalPerUnit: 80, gramsPerUnit: 80 };
   const B = { name: "Lamb", mode: "perUnit", type: "wet", kcalPerUnit: 80, gramsPerUnit: 80 };
   const C = { name: "Salmon", mode: "perUnit", type: "wet", kcalPerUnit: 80, gramsPerUnit: 80 };
   const pack = { id: "r", splitMode: "remainder", rotation: [A, B, C], rotIndex: 0 };
   const DAY = "2026-03-01";
 
-  it("a day bigger than a can finishes the first flavor then opens the next", () => {
-    const { segs, endIndex } = planPackDraw(pack, 100, [], DAY, 3); // 80g can + 20g into the next
-    expect(segs).toEqual([
-      { flavor: "Chicken", kind: "new", take: 80 },
-      { flavor: "Lamb", kind: "new", take: 20 },
-    ]);
-    expect(endIndex).toBe(1); // sitting on Lamb (its can has 60 left for tomorrow)
-  });
-
-  it("consumePack leaves the next flavor's can open and advances the cursor", () => {
-    const { fridge, rotIndex } = consumePack([], pack, 100, DAY, 3, mkId);
-    expect(rotIndex).toBe(1);
-    expect(fridge).toHaveLength(1); // Chicken emptied & dropped; Lamb open
-    expect(fridge[0].name).toBe("Lamb");
-    expect(fridge[0].remainingGrams).toBe(60);
-  });
-
-  it("next day: finishes the open Lamb can, then opens the NEXT flavor (Salmon), not more Lamb", () => {
-    const day1 = consumePack([], pack, 100, DAY, 3, mkId); // → Lamb 60 left, cursor 1
-    const packAt1 = { ...pack, rotIndex: day1.rotIndex };
-    const { segs } = planPackDraw(packAt1, 80, day1.fridge, "2026-03-02", 3);
-    expect(segs).toEqual([
-      { flavor: "Lamb", kind: "open", take: 60, status: expect.anything() }, // finish the open can
-      { flavor: "Salmon", kind: "new", take: 20 },                            // then the NEXT flavor
-    ]);
-  });
-
-  it("the active flavor is the open can's, else the cursor", () => {
+  it("the current flavor is the open can's, else the cursor", () => {
     const withOpenLamb = [{ ...openCan(B, DAY, mkId), remainingGrams: 40 }];
-    expect(activeMemberWithFridge(pack, DAY, withOpenLamb, 3).name).toBe("Lamb");
-    expect(activeMemberWithFridge({ ...pack, rotIndex: 2 }, DAY, [], 3).name).toBe("Salmon");
+    expect(activeMemberWithFridge(pack, DAY, withOpenLamb, 3).name).toBe("Lamb");   // finish what's open
+    expect(activeMemberWithFridge({ ...pack, rotIndex: 2 }, DAY, [], 3).name).toBe("Salmon"); // else cursor
     expect(packStartIndex({ ...pack, rotIndex: 2 }, [], DAY, 3)).toBe(2);
+  });
+
+  it("logging draws down the open can only — it never auto-opens the next flavor", () => {
+    const fridge = [{ ...openCan(A, DAY, mkId), remainingGrams: 30 }];
+    const flavor = activeMemberWithFridge(pack, DAY, fridge, 3); // Chicken (open)
+    const out = consumeFromFridge(fridge, flavor, 50, DAY, 3);   // feed 50 from a 30g can
+    expect(out).toHaveLength(0); // Chicken emptied & dropped; NO Lamb opened
+  });
+
+  it("nextPackIndex advances the cursor (used by Finish can), wrapping", () => {
+    expect(nextPackIndex(pack)).toBe(1);
+    expect(nextPackIndex({ ...pack, rotIndex: 2 })).toBe(0);
+    expect(nextPackIndex({ ...pack, rotateOff: true })).toBe(0); // not rotating → no cycle
   });
 });

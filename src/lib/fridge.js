@@ -14,6 +14,7 @@ import { num } from "./util.js";
 
 const keyOf = (name) => String(name || "").trim().toLowerCase();
 const round2 = (n) => Math.round(n * 100) / 100;
+const norm = (i, n) => ((i % n) + n) % n;
 
 // Something the fridge tracks? A wet can/pouch with a real per-unit weight.
 export function isCanned(food) {
@@ -105,14 +106,11 @@ export function returnToFridge(fridge, food, grams, today, makeId) {
   return out;
 }
 
-// A variety pack is consumed IN ORDER, driven by the cans — not by the calendar. You feed the
-// currently-open flavor until its can is empty, then move to the NEXT flavor in the pack and open
-// its can; a single day can finish one can and open the next. `f.rotIndex` is the cursor — the
-// flavor we're currently on — advanced by consumePack when a can is finished. When a can is
-// physically open it anchors position (so the cursor self-heals to reality); otherwise the cursor
-// says what to open next.
-
-const norm = (i, n) => ((i % n) + n) % n;
+// A variety pack is fed IN ORDER: you feed the open can until it's finished, then open the next
+// flavor. `f.rotIndex` is the cursor — the flavor currently in use — advanced when you tap "Finish
+// can". A physically-open can anchors position (the cursor self-heals to reality); otherwise the
+// cursor says which flavor to open next. Opening and finishing are explicit user actions, never
+// inferred from gram math.
 
 // Index of the pack flavor with the oldest still-good open can, or -1 if nothing's open.
 function openPackStart(f, fridge, today, fridgeDays) {
@@ -138,53 +136,9 @@ export function activeMemberWithFridge(f, date, fridge, fridgeDays) {
   return f.rotation[packStartIndex(f, fridge, date, fridgeDays)];
 }
 
-// Walk a pack's day of `grams` in order from the start flavor, finishing each open can before
-// opening the next flavor's. `apply` (optional) mutates a working fridge copy — used by consumePack;
-// planPackDraw passes a copy so it's non-mutating. Returns { segs, endIndex } where segs describe
-// the flavors drawn (for the tonight prompt) and endIndex is the cursor to persist.
-function walkPack(f, grams, fridge, today, fridgeDays, makeId) {
-  const n = f.rotation.length;
-  const out = fridge.map((c) => ({ ...c }));
-  let cur = packStartIndex(f, out, today, fridgeDays);
-  let need = num(grams), guard = 0;
-  const segs = [];
-  while (need > 0.01 && guard++ < 100) {
-    const flavor = f.rotation[cur];
-    const avail = availableCansOf(out, flavor.name, today, fridgeDays);
-    if (avail.length) {
-      const can = out.find((c) => c.id === avail[0].id);
-      const take = Math.min(need, num(can.remainingGrams));
-      can.remainingGrams = round2(num(can.remainingGrams) - take);
-      segs.push({ flavor: flavor.name, kind: "open", take: round2(take), status: canStatus(can, today, fridgeDays) });
-      need -= take;
-      if (need <= 0.01) { if (num(can.remainingGrams) <= 0.01) cur = norm(cur + 1, n); break; }
-      cur = norm(cur + 1, n); // this can done → next flavor
-    } else {
-      const canGrams = num(flavor.gramsPerUnit);
-      if (!(canGrams > 0)) break; // can't open a can without a known size
-      const take = Math.min(need, canGrams);
-      out.push({ id: makeId ? makeId() : `sim_${cur}_${guard}`, ...foodFieldsOf(flavor), openedDate: today, canGrams, remainingGrams: round2(canGrams - take) });
-      segs.push({ flavor: flavor.name, kind: "new", take: round2(take) });
-      need -= take;
-      if (need <= 0.01) { if (take >= canGrams - 0.01) cur = norm(cur + 1, n); break; }
-      cur = norm(cur + 1, n);
-    }
-  }
-  return { fridge: out.filter((c) => num(c.remainingGrams) > 0.01), segs, endIndex: cur };
-}
-
-// Non-mutating plan of tonight's pack draw (for the Log's tonight prompt / draw list).
-export function planPackDraw(f, grams, fridge, today, fridgeDays) {
-  if (!isRotating(f)) return { segs: [], endIndex: 0 };
-  return walkPack(f, grams, fridge || [], today, fridgeDays, null);
-}
-
-// Execute a pack draw (mutation for logging): returns the new fridge AND the advanced cursor.
-export function consumePack(fridge, f, grams, today, fridgeDays, makeId) {
-  if (!isRotating(f) || !(num(grams) > 0)) return { fridge: fridge || [], rotIndex: num(f.rotIndex) };
-  const r = walkPack(f, grams, fridge || [], today, fridgeDays, makeId);
-  return { fridge: r.fridge, rotIndex: r.endIndex };
-}
+// Advance a pack's cursor to the next flavor — used when you tap "Finish can" on a variety pack so
+// the next flavor becomes current.
+export const nextPackIndex = (f) => (isRotating(f) ? norm(num(f.rotIndex) + 1, f.rotation.length) : 0);
 
 export function resolveRotationsWithFridge(items, date, fridge, fridgeDays) {
   return (items || []).map((f) => {
@@ -196,14 +150,16 @@ export function resolveRotationsWithFridge(items, date, fridge, fridgeDays) {
   });
 }
 
-// Actually consume `grams` of `food` (mutation for logging): draw from good cans oldest-first,
-// open new cans as needed, drop finished cans. Returns a NEW fridge array. Non-canned foods and
-// zero grams are no-ops (returns the fridge unchanged in shape).
-export function consumeFromFridge(fridge, food, grams, today, fridgeDays, makeId) {
+// Draw `grams` of `food` DOWN from its open can(s) when a meal is logged — oldest good can first,
+// floored at zero, dropping any can that empties. It NEVER opens a new can and never removes a
+// still-full one on its own: opening and finishing cans are explicit user actions (see the Open /
+// Finish buttons), because gram math drifts from the real can and auto-opening spawned phantom
+// second cans. If a meal exceeds what's tracked as open, the open can just empties (the extra is
+// untracked) — you finish/open cans yourself. No-op for non-canned foods or when nothing's open.
+export function consumeFromFridge(fridge, food, grams, today, fridgeDays) {
   let need = num(grams);
   if (!(need > 0) || !isCanned(food)) return fridge || [];
   const out = (fridge || []).map((c) => ({ ...c }));
-  const canGrams = num(food.gramsPerUnit);
   const good = out
     .filter((c) => keyOf(c.name) === keyOf(food.name) && num(c.remainingGrams) > 0.01 && !canStatus(c, today, fridgeDays).expired)
     .sort((a, b) => (a.openedDate < b.openedDate ? -1 : 1));
@@ -213,11 +169,15 @@ export function consumeFromFridge(fridge, food, grams, today, fridgeDays, makeId
     c.remainingGrams = round2(num(c.remainingGrams) - take);
     need -= take;
   }
-  let guard = 0;
-  while (need > 0.01 && canGrams > 0 && guard++ < 50) {
-    const take = Math.min(need, canGrams);
-    out.push({ id: makeId(), ...foodFieldsOf(food), openedDate: today, canGrams, remainingGrams: round2(canGrams - take) });
-    need -= take;
-  }
-  return out.filter((c) => num(c.remainingGrams) > 0.01); // drop emptied cans
+  return out.filter((c) => num(c.remainingGrams) > 0.01); // drop emptied cans; never opens a new one
+}
+
+// Explicitly finish the current open can of `food` (the "Finish can" button): remove the oldest
+// good open can regardless of its tracked remaining — you say it's done, drift and all.
+export function finishOpenCan(fridge, food, today, fridgeDays) {
+  const good = (fridge || [])
+    .filter((c) => keyOf(c.name) === keyOf(food?.name) && num(c.remainingGrams) > 0.01 && !canStatus(c, today, fridgeDays).expired)
+    .sort((a, b) => (a.openedDate < b.openedDate ? -1 : 1));
+  const victim = good[0];
+  return victim ? (fridge || []).filter((c) => c.id !== victim.id) : (fridge || []);
 }
