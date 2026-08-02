@@ -87,7 +87,11 @@ export const WEIGH_SOURCES = { manual: "manual", litterRobot: "litter-robot" };
 export function estimateExpenditure(weightEntries = [], intakeEntries = [], opts = {}) {
   const { rho, windowDays, minDays, alpha, maxMissing, intakeDayStatus, excludeDay } = { ...DEFAULTS, ...opts };
 
-  const dailyW = dailyReduce(weightEntries, median);
+  // Drop the in-progress day's weigh-ins too (not just its intake): today's day isn't complete, and
+  // a fresh endpoint — especially the Litter-Robot's many auto-reads — otherwise jitters the fit all
+  // day. The estimate settles on complete days; the live weight display still uses today's reading.
+  const wEntries = excludeDay ? weightEntries.filter((e) => e.date !== excludeDay) : weightEntries;
+  const dailyW = dailyReduce(wEntries, median);
 
   const empty = { enoughData: false, kcal: null, sd: null, low: null, high: null,
     trendWeightKg: dailyW.length ? dailyW[dailyW.length - 1].value : null,
@@ -201,7 +205,8 @@ export const KALMAN_DEFAULTS = { rho: KCAL_PER_KG, qW: 1e-5, qE: 2.0, priorKcal:
 export function kalmanEstimateExpenditure(weightEntries = [], intakeEntries = [], opts = {}) {
   const P = { ...KALMAN_DEFAULTS, ...opts };
   const rho = P.rho;
-  const dW = dailyWeightWithVariance(weightEntries);
+  const wEntries = P.excludeDay ? weightEntries.filter((e) => e.date !== P.excludeDay) : weightEntries; // exclude the in-progress day's weigh-ins (see v1)
+  const dW = dailyWeightWithVariance(wEntries);
   const empty = { enoughData: false, kcal: null, sd: null, low: null, high: null,
     trendWeightKg: dW.length ? dW[dW.length - 1].z : null, rateKgPerWeek: null, ratePctPerWeek: null,
     nDays: dW.length, missingIntake: null, trend: [] };
@@ -290,7 +295,8 @@ export const V3_DEFAULTS = {
 export function ucEstimateExpenditure(weightEntries = [], intakeEntries = [], opts = {}) {
   const P = { ...V3_DEFAULTS, ...opts };
   const rho = P.rho;
-  const dW = dailyWeightWithVariance(weightEntries);
+  const wEntries = P.excludeDay ? weightEntries.filter((e) => e.date !== P.excludeDay) : weightEntries; // exclude the in-progress day's weigh-ins (see v1)
+  const dW = dailyWeightWithVariance(wEntries);
   const empty = { enoughData: false, kcal: null, sd: null, low: null, high: null,
     trendWeightKg: dW.length ? dW[dW.length - 1].z : null, rateKgPerWeek: null, ratePctPerWeek: null,
     nDays: dW.length, missingIntake: null, trend: [] };

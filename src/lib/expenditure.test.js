@@ -257,53 +257,50 @@ describe("estimators treat a flagged-incomplete day exactly like a missing day",
 // the exact same inputs (the excluded day falls back to the mean of every other — identical —
 // day), so the two runs must agree exactly: proof the estimate never moves on a partial today.
 describe("excludeDay: a partial/in-progress 'today' never moves the estimate", () => {
-  it("estimateExpenditure (v1)", () => {
+  // The in-progress day is dropped WHOLE — intake AND weigh-ins. So excludeDay=today must give the
+  // exact same estimate as if today (both its weight and its meals) simply weren't logged: a partial
+  // today, or an extra intraday weigh-in, can't move the number.
+  const noToday = (arr, d) => arr.filter((e) => e.date !== d);
+  it("estimateExpenditure (v1) — excluding today ≡ today not logged at all", () => {
     const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
     const today = intakeEntries[intakeEntries.length - 1].date;
-    const normal = estimateExpenditure(weightEntries, intakeEntries, { rho });
+    const sliced = estimateExpenditure(noToday(weightEntries, today), noToday(intakeEntries, today), { rho });
     const partialToday = intakeEntries.map((e) => (e.date === today ? { ...e, value: 20 } : e)); // a morning-only reading
     const excluded = estimateExpenditure(weightEntries, partialToday, { rho, excludeDay: today });
-    expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
-    // and the exclusion is NOT counted as a logging gap — missingIntake stays 0, not 1/28th
-    expect(excluded.missingIntake).toBeCloseTo(normal.missingIntake, 6);
+    expect(excluded.kcal).toBeCloseTo(sliced.kcal, 6);
     expect(excluded.missingIntake).toBe(0);
   });
   it("kalmanEstimateExpenditure (v2)", () => {
     const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
     const today = intakeEntries[intakeEntries.length - 1].date;
-    const normal = kalmanEstimateExpenditure(weightEntries, intakeEntries, { rho });
+    const sliced = kalmanEstimateExpenditure(noToday(weightEntries, today), noToday(intakeEntries, today), { rho });
     const partialToday = intakeEntries.map((e) => (e.date === today ? { ...e, value: 20 } : e));
     const excluded = kalmanEstimateExpenditure(weightEntries, partialToday, { rho, excludeDay: today });
-    expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
-    expect(excluded.missingIntake).toBeCloseTo(normal.missingIntake, 6);
+    expect(excluded.kcal).toBeCloseTo(sliced.kcal, 6);
   });
   it("ucEstimateExpenditure (v3)", () => {
     const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
     const today = intakeEntries[intakeEntries.length - 1].date;
-    const normal = ucEstimateExpenditure(weightEntries, intakeEntries, { rho });
+    const sliced = ucEstimateExpenditure(noToday(weightEntries, today), noToday(intakeEntries, today), { rho });
     const partialToday = intakeEntries.map((e) => (e.date === today ? { ...e, value: 20 } : e));
     const excluded = ucEstimateExpenditure(weightEntries, partialToday, { rho, excludeDay: today });
-    expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
-    expect(excluded.missingIntake).toBeCloseTo(normal.missingIntake, 6);
+    expect(excluded.kcal).toBeCloseTo(sliced.kcal, 6);
   });
-  it("today's weigh-in (a point measurement) still counts — only intake is excluded", () => {
+  it("today's weigh-ins do NOT move the estimate (no intraday jitter — the whole day is excluded)", () => {
     const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
     const today = intakeEntries[intakeEntries.length - 1].date;
-    const withoutTodaysWeight = estimateExpenditure(weightEntries.slice(0, -1), intakeEntries.slice(0, -1), { rho, minDays: 10 });
-    const withTodaysWeight = estimateExpenditure(weightEntries, intakeEntries, { rho, minDays: 10, excludeDay: today });
-    // today's weigh-in extends the logged span by a day even though its intake is excluded
-    expect(withTodaysWeight.nDays).toBe(withoutTodaysWeight.nDays + 1);
-    expect(withTodaysWeight.trendWeightKg).not.toBeNull();
+    const base = ucEstimateExpenditure(weightEntries, intakeEntries, { rho, minDays: 10, excludeDay: today });
+    // a wild extra weigh-in dated today (e.g. a Litter-Robot auto-read) — must not budge the estimate
+    const jittered = ucEstimateExpenditure([...weightEntries, { date: today, value: 2.5 }], intakeEntries, { rho, minDays: 10, excludeDay: today });
+    expect(jittered.kcal).toBeCloseTo(base.kcal, 6);
   });
   it("an explicit 0-kcal 'nothing eaten' entry dated today is excluded too — it counts from tomorrow", () => {
     const { weightEntries, intakeEntries, rho } = history({ days: 28, intake: 200, maintenance: 250 });
     const today = intakeEntries[intakeEntries.length - 1].date;
-    const normal = estimateExpenditure(weightEntries, intakeEntries, { rho });
+    const sliced = estimateExpenditure(noToday(weightEntries, today), noToday(intakeEntries, today), { rho });
     const nothingEatenToday = intakeEntries.map((e) => (e.date === today ? { ...e, value: 0 } : e));
     const excluded = estimateExpenditure(weightEntries, nothingEatenToday, { rho, excludeDay: today });
-    // without excludeDay, a real logged 0 would drag the mean down for real (see the test
-    // above) — WITH excludeDay, today's 0 is dropped exactly like any other in-progress value.
-    expect(excluded.kcal).toBeCloseTo(normal.kcal, 6);
+    expect(excluded.kcal).toBeCloseTo(sliced.kcal, 6);
   });
 
   // Regression for the UTC-vs-local day bug (see AppState.jsx / lib/series.js localDateOf):
