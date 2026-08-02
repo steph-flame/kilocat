@@ -171,7 +171,9 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
   const [kcal, setKcal] = useState("");
   const [picked, setPicked] = useState(null); // the chosen library food (for treat-by-count entry)
   const [treats, setTreats] = useState("");
+  const [treatUnit, setTreatUnit] = useState("count"); // treats: enter by count (×) or by grams
   const isTreat = foodType(picked) === "treat";
+  const derived = kcalG > 0; // we know the energy density → kcal is computed, not typed
   const computed = num(grams) > 0 && kcalG > 0 ? num(grams) * kcalG : null;
   useEffect(() => { if (computed != null) setKcal(String(r0(computed))); }, [computed]);
   // Treats are given by the each, not weighed: entering a count derives the grams (which then
@@ -223,7 +225,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
 
   const add = () => {
     if (num(kcal) > 0) {
-      const treatFields = isTreat && num(treats) > 0
+      const treatFields = isTreat && treatUnit === "count" && num(treats) > 0
         ? { treatCount: num(treats), kcalPerTreat: num(picked.kcalPerUnit), gramsPerTreat: num(picked.gramsPerUnit) }
         : {};
       intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null, ...treatFields });
@@ -283,11 +285,26 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
           <div style={{ border: `1px solid ${A.cardBorder}`, borderRadius: 12, padding: 8, marginBottom: 8 }}>
             <FoodSearch value={name} search={library.search} onChangeName={(v) => { setName(v); setKcalG(0); setPicked(null); setTreats(""); }} onPick={(f) => { setName(f.name); setKcalG(kcalPerG(f)); setPicked(f); }} />
           </div>
+          {isTreat && (
+            <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+              {[["count", "by treat"], ["g", "by grams"]].map(([u, lbl]) => (
+                <button key={u} onClick={() => setTreatUnit(u)} aria-pressed={treatUnit === u}
+                  style={{ fontFamily: TYPE.mono, fontSize: 10.5, borderRadius: 999, padding: "3px 10px", cursor: "pointer", border: treatUnit === u ? "none" : `1px solid ${A.cardBorder}`, background: treatUnit === u ? A.ink : "transparent", color: treatUnit === u ? A.card : A.muted }}>{lbl}</button>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            {isTreat
+            {isTreat && treatUnit === "count"
               ? <NumBox label="Treats" suf="×" value={treats} onChange={onTreats} />
               : <NumBox label="Grams" suf="g" value={grams} onChange={setGrams} />}
-            <NumBox label="kcal" suf="kcal" value={kcal} onChange={setKcal} />
+            {derived
+              ? (
+                <label style={{ display: "block" }}>
+                  <span style={label({ fontSize: 9 })}>kcal</span>
+                  <div style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.body, padding: "2px 0", minWidth: 56 }} aria-label="kcal (computed)">{num(kcal) > 0 ? `${r0(num(kcal))} kcal` : "—"}</div>
+                </label>
+              )
+              : <NumBox label="kcal" suf="kcal" value={kcal} onChange={setKcal} />}
             <button onClick={add} style={{ background: A.good, color: A.card, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 18, cursor: "pointer" }}>+</button>
           </div>
           <button onClick={() => intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: 0, grams: null, name: "nothing eaten" })}
