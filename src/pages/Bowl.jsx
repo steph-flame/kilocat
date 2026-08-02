@@ -5,7 +5,7 @@ import { distributeBowl } from "../lib/bowl.js";
 import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, treatEnergy, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { hasRotation, isRotating, foodFieldsOf, upcomingFlavors } from "../lib/rotation.js";
 import { resolveRotationsWithFridge, activeMemberWithFridge } from "../lib/fridge.js";
-import { num } from "../lib/util.js";
+import { num, uid } from "../lib/util.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import { BookmarkPlus, BookmarkCheck } from "lucide-react";
 import FoodSearch from "../components/FoodSearch.jsx";
@@ -138,7 +138,7 @@ export default function Bowl() {
         <RationDistribution rows={dist.rows} foods={resolvedItems} prof={prof} aafco={aafco} />
 
         {/* switching foods — the gradual ramp from the current blend to this ration */}
-        <Transition name={p?.name} start={start} setStartSplitMode={setStartSplitMode}
+        <Transition name={p?.name} start={start} setStartSplitMode={setStartSplitMode} rationItems={resolvedItems}
           newRows={dist.rows} target={target} tr={trEff} setTr={setTrEff} library={library} saveFood={saveFood} savedNames={savedNames} />
 
         {/* footer — the ration saves live as you edit; this just leaves the page. Go to the Log, where
@@ -157,7 +157,7 @@ export default function Bowl() {
 // engine as the ration, so each day is just the full-target distribution scaled by that day's
 // share — the old blend fading from 100%→0 while the new one rises 0→100%, total energy held at
 // target throughout. Migrated here from the classic planner so nothing lives on #/ration-classic.
-function Transition({ name, start, setStartSplitMode, newRows, target, tr, setTr, library, saveFood, savedNames }) {
+function Transition({ name, start, setStartSplitMode, rationItems, newRows, target, tr, setTr, library, saveFood, savedNames }) {
   const on = !!tr.on;
   const days = Math.max(1, Math.min(30, num(tr.days) || 7));
   const unit = tr.timelineUnit || "g";
@@ -172,6 +172,17 @@ function Transition({ name, start, setStartSplitMode, newRows, target, tr, setTr
   };
   const firstWord = (nm, fallback) => (nm || fallback).split(" ")[0];
   const hasStart = start.items.length > 0;
+  // Copy the current ration into "currently feeding" (fresh ids + the row's split), so switching
+  // starts from today's mix — usually only one food differs, so you just change that line.
+  const rationCopy = () => (rationItems || []).filter((f) => (f.name || "").trim()).map((f) => ({ ...foodFieldsOf(f), id: uid(), splitMode: f.splitMode || "share", pct: f.pct, fixedKcal: f.fixedKcal, treatCount: f.treatCount }));
+  // "Empty" = nothing entered yet (the blank default a fresh cat starts with) — safe to auto-fill.
+  const startIsBlank = start.items.length === 0 || (start.items.length === 1 && !(start.items[0].name || "").trim());
+  const seedFromRation = () => { const copy = rationCopy(); if (copy.length) start.setItems(() => copy); };
+  const toggle = () => {
+    const turningOn = !tr.on;
+    setTr((s) => ({ ...s, on: !s.on }));
+    if (turningOn && startIsBlank) seedFromRation(); // first time on → mirror the ration
+  };
 
   return (
     <Card className="span-all">
@@ -182,7 +193,7 @@ function Transition({ name, start, setStartSplitMode, newRows, target, tr, setTr
             Ramp from what {name || "she"}'s eating now to this ration over several days to avoid stomach upset.
           </p>
         </div>
-        <button onClick={() => setTr((s) => ({ ...s, on: !s.on }))} aria-pressed={on} role="switch" aria-label="Enable food transition"
+        <button onClick={toggle} aria-pressed={on} role="switch" aria-label="Enable food transition"
           style={{ flex: "none", width: 44, height: 26, borderRadius: 999, border: "none", cursor: "pointer", background: on ? A.good : A.track, position: "relative", transition: "background .15s" }}>
           <span style={{ position: "absolute", top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: 999, background: A.card, transition: "left .15s" }} />
         </button>
@@ -190,8 +201,11 @@ function Transition({ name, start, setStartSplitMode, newRows, target, tr, setTr
 
       {on && (
         <div style={{ marginTop: 14 }}>
-          <div style={label({ color: A.labelOnFill, marginBottom: 2 })}>Currently feeding</div>
-          {!hasStart && <p style={{ fontSize: 12, color: A.muted, padding: "6px 0" }}>Add what {name || "she"}'s eating now to see the day-by-day ramp.</p>}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2, gap: 8 }}>
+            <div style={label({ color: A.labelOnFill })}>Currently feeding</div>
+            <button onClick={seedFromRation} title="Copy the current ration here to tweak" style={{ fontFamily: TYPE.mono, fontSize: 10.5, border: "none", background: "none", cursor: "pointer", color: A.good, padding: 0 }}>match the ration</button>
+          </div>
+          {!hasStart && <p style={{ fontSize: 12, color: A.muted, padding: "6px 0" }}>Add what {name || "she"}'s eating now — or “match the ration” and change what differs.</p>}
           {start.items.map((f, i) => (
             <BowlRow key={f.id} f={f} row={startById[f.id] || { kcal: 0, grams: null, pct: 0 }} target={target}
               first={i === 0} library={library} ration={start} setSplitMode={setStartSplitMode}
