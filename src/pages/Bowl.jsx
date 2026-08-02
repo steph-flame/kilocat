@@ -163,14 +163,24 @@ function Transition({ name, start, setStartSplitMode, rationItems, newRows, targ
   const unit = tr.timelineUnit || "g";
   const startDist = distributeBowl(start.items, target);
   const startById = Object.fromEntries(startDist.rows.map((r) => [r.id, r]));
-  const newById = Object.fromEntries(newRows.map((r) => [r.id, r]));
   const suf = unit === "kcal" ? "" : "g";
-  const cell = (row, frac) => {
-    if (!row) return "—";
-    if (unit === "kcal") return `${r0(row.kcal * frac)}`;
-    return row.grams != null ? `${Number((row.grams * frac).toFixed(1))}` : `${r0(row.kcal * frac)}`;
-  };
   const firstWord = (nm, fallback) => (nm || fallback).split(" ")[0];
+
+  // ONE column per unique food across both blends (matched by name), so a food that's in both — the
+  // usual case, since only one food tends to change — isn't shown twice. Each day nets the fading
+  // old share and the rising new share: a shared food at the same amount stays flat, a dropped food
+  // fades to nothing, an added food grows in. New-ration foods lead the order; dropped foods follow.
+  const key = (n) => (n || "").trim().toLowerCase();
+  const cols = [];
+  const seen = new Map();
+  newRows.forEach((r) => { const k = key(r.name); if (k && !seen.has(k)) { seen.set(k, cols.length); cols.push({ name: r.name, nu: r, old: null }); } });
+  startDist.rows.forEach((r) => { const k = key(r.name); if (!k) return; if (seen.has(k)) cols[seen.get(k)].old = r; else { seen.set(k, cols.length); cols.push({ name: r.name, nu: null, old: r }); } });
+  const amountOf = (row) => (row ? (unit === "kcal" ? num(row.kcal) : (row.grams != null ? num(row.grams) : num(row.kcal))) : 0);
+  const colCell = (col, toNew) => {
+    const v = (1 - toNew) * amountOf(col.old) + toNew * amountOf(col.nu);
+    return unit === "kcal" ? `${r0(v)}` : `${Number(v.toFixed(1))}`;
+  };
+  const colTone = (col) => (col.nu && col.old ? A.ink : col.nu ? A.good : A.muted); // shared / added / dropping
   const hasStart = start.items.length > 0;
   // Copy the current ration into "currently feeding" (fresh ids + the row's split), so switching
   // starts from today's mix — usually only one food differs, so you just change that line.
@@ -238,8 +248,7 @@ function Transition({ name, start, setStartSplitMode, rationItems, newRows, targ
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${A.hairline}` }}>
                       <th style={{ textAlign: "left", padding: "8px 10px", color: A.muted, fontWeight: 500, whiteSpace: "nowrap" }}>Day</th>
-                      {start.items.map((f) => <th key={f.id} style={{ textAlign: "right", padding: "8px 10px", color: A.muted, fontWeight: 500, whiteSpace: "nowrap" }}>{firstWord(f.name, "old")}</th>)}
-                      {newRows.map((r) => <th key={r.id} style={{ textAlign: "right", padding: "8px 10px", color: A.good, fontWeight: 600, whiteSpace: "nowrap" }}>{firstWord(r.name, "new")}</th>)}
+                      {cols.map((col, i) => <th key={i} title={col.nu && col.old ? "" : col.nu ? "new food" : "dropping"} style={{ textAlign: "right", padding: "8px 10px", color: colTone(col), fontWeight: col.nu ? 600 : 500, whiteSpace: "nowrap" }}>{firstWord(col.name, "food")}{!col.nu ? " ↓" : !col.old ? " ↑" : ""}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -248,8 +257,7 @@ function Transition({ name, start, setStartSplitMode, rationItems, newRows, targ
                       return (
                         <tr key={day} style={{ borderBottom: `1px solid ${A.hairline}`, background: last ? "rgba(31,81,48,0.07)" : "transparent" }}>
                           <td style={{ padding: "7px 10px", color: A.ink, whiteSpace: "nowrap" }}>{day} <span style={{ color: A.muted }}>· {r0(toNew * 100)}%</span></td>
-                          {start.items.map((f) => { const frac = 1 - toNew; return <td key={f.id} style={{ padding: "7px 10px", textAlign: "right", color: frac < 0.001 ? A.muted : A.body }}>{frac < 0.001 ? "—" : `${cell(startById[f.id], frac)}${suf}`}</td>; })}
-                          {newRows.map((r) => <td key={r.id} style={{ padding: "7px 10px", textAlign: "right", color: A.good }}>{`${cell(newById[r.id], toNew)}${suf}`}</td>)}
+                          {cols.map((col, i) => { const v = colCell(col, toNew); return <td key={i} style={{ padding: "7px 10px", textAlign: "right", color: Number(v) < 0.05 ? A.muted : A.body }}>{Number(v) < 0.05 ? "—" : `${v}${suf}`}</td>; })}
                         </tr>
                       );
                     })}
