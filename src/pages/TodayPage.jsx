@@ -60,6 +60,8 @@ export default function TodayPage() {
   const measured = !!e?.enoughData;
   const burn = measured ? r0(e.kcal) : r0(intent.maintenance);
   const pm = measured ? r0(e.kcal - e.low) : null;
+  // Early / weight-stable: the interval is wide, so lead with the range, not a precise-looking number.
+  const wide = measured && e.kcal > 0 && (e.high - e.low) / 2 > 0.15 * e.kcal;
 
   const target = r0(intent.target);
   const delta = intent.dailyDelta; // signed kcal/day vs maintenance
@@ -87,16 +89,16 @@ export default function TodayPage() {
 
         {/* measured burn — the hero */}
         <Card className="span-all" inverted>
-          <div style={label({ color: A.inverted.sub })}>{measured ? "measured burn" : "burn · formula estimate"}</div>
+          <div style={label({ color: A.inverted.sub })}>{measured ? (wide ? "measured burn · range" : "measured burn") : "burn · formula estimate"}</div>
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 6 }}>
-            <div style={{ fontFamily: TYPE.mono, fontSize: 44, fontWeight: 600, color: A.inverted.text, lineHeight: 1 }}>
-              {burn}<span style={{ fontSize: 15, color: A.inverted.sub, fontWeight: 400 }}> kcal/day</span>
+            <div style={{ fontFamily: TYPE.mono, fontSize: wide ? 30 : 44, fontWeight: 600, color: A.inverted.text, lineHeight: 1 }}>
+              {wide ? `${r0(e.low)}–${r0(e.high)}` : burn}<span style={{ fontSize: 15, color: A.inverted.sub, fontWeight: 400 }}> kcal/day</span>
             </div>
-            {measured && <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.inverted.sub, textAlign: "right" }}>±{pm} kcal<br />95% interval</div>}
+            {measured && !wide && <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.inverted.sub, textAlign: "right" }}>±{pm} kcal<br />95% interval</div>}
           </div>
           <p style={{ fontSize: 12, color: A.inverted.sub, margin: "10px 0 0", lineHeight: 1.45 }}>
             {measured
-              ? <>Worked out from {e.nDays} days of weigh-ins and meals. <a href="#/trend" style={{ color: "#DCE6D6", fontWeight: 600 }}>See the trend →</a></>
+              ? <>{wide ? `Best guess ~${burn}, but only ${e.nDays} days in — it's still narrowing. ` : `Worked out from ${e.nDays} days of weigh-ins and meals. `}<a href="#/trend" style={{ color: "#DCE6D6", fontWeight: 600 }}>See the trend →</a></>
               : <>The vet formula's estimate until ~2 weeks of logs turn it into a measured number. <a href="#/log" style={{ color: "#DCE6D6", fontWeight: 600 }}>Log weigh-ins & meals →</a></>}
           </p>
         </Card>

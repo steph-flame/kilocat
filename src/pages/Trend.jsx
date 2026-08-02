@@ -107,10 +107,12 @@ export default function Trend() {
   }
 
   const burn = r0(e.kcal);
-  // The 95% interval is asymmetric — its low edge is clamped at a physiological floor (a burn can't
-  // be near zero), so show the true bounds rather than a single ± that would misstate it.
   const plus = r0(e.high - e.kcal), minus = r0(e.kcal - e.low);
   const asym = Math.abs(plus - minus) > 1;
+  // When the interval is still wide (early / weight-stable cats), lead with the RANGE instead of a
+  // confident-looking single number — the honest read is "somewhere in here, still narrowing", not
+  // "197, precisely". Threshold: ±15% of the estimate.
+  const wide = e.kcal > 0 && (e.high - e.low) / 2 > 0.15 * e.kcal;
   const dispW = (kg) => toDisplayWeight(kg, unit);
 
   return (
@@ -119,19 +121,21 @@ export default function Trend() {
         <div className="span-all" style={{ padding: "18px 24px 0" }}>
           <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>trend · measured</div>
           <h1 style={{ fontFamily: TYPE.serif, fontWeight: 400, fontSize: 25, lineHeight: 1.26, letterSpacing: "-.012em", margin: "10px 0 4px" }}>
-            {p.name || "Your cat"} burns about {burn} kcal a day.
+            {wide
+              ? <>{p.name || "Your cat"} burns somewhere around {r0(e.low)}–{r0(e.high)} kcal a day.</>
+              : <>{p.name || "Your cat"} burns about {burn} kcal a day.</>}
           </h1>
-          <p style={{ ...cap, margin: "0 0 4px" }}>Worked out from {e.nDays} days of weigh-ins and meals — not a formula's guess.</p>
+          <p style={{ ...cap, margin: "0 0 4px" }}>{wide ? `Only ${e.nDays} days in — the range narrows as you keep logging.` : `Worked out from ${e.nDays} days of weigh-ins and meals — not a formula's guess.`}</p>
         </div>
 
         {/* estimate card */}
         <Card className="span-all">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-            <div style={{ fontFamily: TYPE.mono, fontSize: 40, fontWeight: 600, color: A.ink, lineHeight: 1 }}>{burn}</div>
-            <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textAlign: "right" }}>{asym ? `+${plus} / −${minus}` : `±${plus}`} kcal<br />95% interval</div>
+            <div style={{ fontFamily: TYPE.mono, fontSize: wide ? 27 : 40, fontWeight: 600, color: A.ink, lineHeight: 1 }}>{wide ? `${r0(e.low)}–${r0(e.high)}` : burn}</div>
+            <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textAlign: "right" }}>{wide ? "95% range" : <>{asym ? `+${plus} / −${minus}` : `±${plus}`} kcal<br />95% interval</>}</div>
           </div>
           <IntervalBar lo={e.low} hi={e.high} point={e.kcal} />
-          <p style={{ ...cap, fontSize: 11.5 }}>The band narrows as you log{e.missingIntake > 0 ? `; ${r0(e.missingIntake * 100)}% of days in range are incomplete and left out` : ""}.</p>
+          <p style={{ ...cap, fontSize: 11.5 }}>{wide ? `Best single guess ~${burn}, but it's genuinely uncertain this early — trust the range. It tightens as you log` : "The band narrows as you log"}{e.missingIntake > 0 ? `; ${r0(e.missingIntake * 100)}% of days in range are incomplete and left out` : ""}.</p>
         </Card>
 
         {/* shared range control — outside the charts, governs all three */}
