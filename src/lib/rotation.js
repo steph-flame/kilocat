@@ -8,15 +8,21 @@
 // flavor is up (tier B), the active flavor advances by CALENDAR DAY, derived deterministically from
 // the date string so every render and every device agree without storing a cursor.
 
+// A row HAS rotation data if it holds a flavor list. It's actively ROTATING only with ≥2 flavors and
+// not paused (`rotateOff`) — a paused pack, or one down to a single flavor, just feeds its first
+// flavor. Pausing (rather than deleting) is what lets the ↻ button be non-destructive.
 export const hasRotation = (f) => Array.isArray(f?.rotation) && f.rotation.length > 0;
+export const isRotating = (f) => hasRotation(f) && f.rotation.length >= 2 && !f.rotateOff;
 
 // Whole days since the unix epoch for a YYYY-MM-DD date. Forced to UTC midnight so the counter is
 // timezone-independent and stable for a given calendar date (the same discipline series.js uses).
 const dayIndex = (date) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
 
-// Index of the flavor active on `date` — cycles 0,1,…,n-1,0,… one step per calendar day.
+// Index of the flavor active on `date` — cycles one step per calendar day when rotating, else the
+// first flavor (paused / single-flavor).
 export function activeRotationIndex(f, date) {
   if (!hasRotation(f)) return -1;
+  if (!isRotating(f)) return 0;
   const n = f.rotation.length;
   if (!date || !Number.isFinite(dayIndex(date))) return 0;
   return ((dayIndex(date) % n) + n) % n;
@@ -26,20 +32,28 @@ export function activeMember(f, date) {
   return i < 0 ? null : f.rotation[i];
 }
 
+// The next `n` flavor names starting today — a preview of the cycle so the row shows what it does.
+export function upcomingFlavors(f, date, n = 3) {
+  if (!isRotating(f)) return [];
+  const len = f.rotation.length, start = activeRotationIndex(f, date), out = [];
+  for (let k = 0; k < Math.min(n, len); k++) out.push(f.rotation[(start + k) % len]?.name || "—");
+  return out;
+}
+
 // Resolve a row for `date`: a rotation row becomes a plain single food (the active flavor's fields)
 // while keeping the row's identity and split — so distributeBowl and every summary treat it like
 // any other food. Non-rotation rows pass through unchanged.
 export function resolveRotation(f, date) {
   const m = activeMember(f, date);
   if (!m) return f;
-  const { id, splitMode, pct, fixedKcal, treatCount, rotation } = f;
-  return { ...m, id, splitMode, pct, fixedKcal, treatCount, rotation };
+  const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff } = f;
+  return { ...m, id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff };
 }
 export const resolveRotations = (items, date) => (items || []).map((f) => resolveRotation(f, date));
 
 // The food-only fields of a row (no id / split / rotation) — used to seed a rotation from the
 // single food already in a slot, and to write a picked/edited flavor back into the list.
 export function foodFieldsOf(f) {
-  const { id, splitMode, pct, fixedKcal, treatCount, rotation, ...food } = f || {};
+  const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, ...food } = f || {};
   return food;
 }

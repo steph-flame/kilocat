@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasRotation, activeRotationIndex, activeMember, resolveRotation, resolveRotations, foodFieldsOf } from "./rotation.js";
+import { hasRotation, isRotating, activeRotationIndex, activeMember, resolveRotation, resolveRotations, foodFieldsOf, upcomingFlavors } from "./rotation.js";
 
 const A = { name: "Chicken", mode: "perUnit", kcalPerUnit: 66, gramsPerUnit: 79, protein: 16 };
 const B = { name: "Lamb", mode: "perUnit", kcalPerUnit: 90, gramsPerUnit: 156, protein: 18 };
@@ -63,5 +63,27 @@ describe("rotation", () => {
 
   it("activeMember returns null for a non-rotation", () => {
     expect(activeMember({ name: "x" }, "2026-01-01")).toBe(null);
+  });
+
+  it("a paused pack keeps its data but stops cycling — it feeds the first flavor", () => {
+    const paused = { ...slot, rotateOff: true };
+    expect(hasRotation(paused)).toBe(true);   // list is preserved (non-destructive pause)
+    expect(isRotating(paused)).toBe(false);
+    // fixed on flavor 0 regardless of date
+    expect(activeMember(paused, "2026-01-01").name).toBe("Chicken");
+    expect(activeMember(paused, "2026-06-15").name).toBe("Chicken");
+  });
+
+  it("a single-flavor list doesn't rotate (feeds that flavor)", () => {
+    const one = { id: "s", splitMode: "share", rotation: [A] };
+    expect(isRotating(one)).toBe(false);
+    expect(activeMember(one, "2026-03-03").name).toBe("Chicken");
+  });
+
+  it("upcomingFlavors previews the cycle from today, empty when not rotating", () => {
+    const up = upcomingFlavors(slot, "2026-01-01", 3);
+    expect(up).toHaveLength(3);
+    expect(new Set(up)).toEqual(new Set(["Chicken", "Lamb", "Salmon"]));
+    expect(upcomingFlavors({ ...slot, rotateOff: true }, "2026-01-01", 3)).toEqual([]);
   });
 });

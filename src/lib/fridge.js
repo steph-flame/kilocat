@@ -7,7 +7,7 @@
 // treats don't spoil in a few days. Pure functions — no I/O; the caller (AppState) owns the array
 // and supplies an id factory.
 
-import { foodFieldsOf, hasRotation, activeMember } from "./rotation.js";
+import { foodFieldsOf, hasRotation, isRotating, activeMember } from "./rotation.js";
 import { foodType } from "./foods.js";
 import { addDays, diffDays } from "./series.js";
 import { num } from "./util.js";
@@ -114,6 +114,7 @@ export function returnToFridge(fridge, food, grams, today, makeId) {
 // still-good can among its members, else the calendar cycle's flavor.
 export function activeMemberWithFridge(f, date, fridge, fridgeDays) {
   if (!hasRotation(f)) return null;
+  if (!isRotating(f)) return activeMember(f, date); // paused / single flavor → fixed, ignore the fridge
   let best = null;
   for (const m of f.rotation) {
     const avail = availableCansOf(fridge, m.name, date, fridgeDays);

@@ -3,7 +3,7 @@ import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
 import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, treatEnergy, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
-import { hasRotation, foodFieldsOf } from "../lib/rotation.js";
+import { hasRotation, isRotating, foodFieldsOf, upcomingFlavors } from "../lib/rotation.js";
 import { resolveRotationsWithFridge, activeMemberWithFridge } from "../lib/fridge.js";
 import { num } from "../lib/util.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
@@ -299,6 +299,7 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
   // flavor is active today (fridge-aware: finish an open can before starting a new flavor). `af`
   // is the food we display and price against.
   const isRot = hasRotation(f);
+  const rotating = isRotating(f); // has ≥2 flavors and not paused
   const af = isRot ? (activeMemberWithFridge(f, today, fridge, fridgeDays) || {}) : f;
   const activeIdx = isRot ? f.rotation.findIndex((m) => m === af || (m.name || "") === (af.name || "")) : -1;
   const type = foodType(af);
@@ -313,19 +314,18 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
   const setTreatCount = (c) => patch({ treatCount: c, fixedKcal: c === "" ? "" : num(c) * num(af.kcalPerUnit) });
 
   // ---- rotation (variety-pack) editing ----
+  // Editing the flavor list. Dropping to ONE flavor collapses the slot back to a plain single food
+  // (that flavor) — the non-destructive way to "un-rotate": nothing is silently discarded, the food
+  // you kept stays. The ↻ button never deletes the list; it only pauses/resumes (rotateOff).
   const setMembers = (updater) => ration.setItems((fs) => fs.map((x) => {
     if (x.id !== f.id) return x;
     const cur = Array.isArray(x.rotation) ? x.rotation : [];
     const next = typeof updater === "function" ? updater(cur) : updater;
-    if (!next || next.length === 0) { const { rotation, ...rest } = x; return rest; } // last flavor removed → plain food again
+    if (!next || next.length <= 1) { const { rotation, rotateOff, ...rest } = x; return { ...rest, ...(next && next[0] ? foodFieldsOf(next[0]) : {}) }; }
     return { ...x, rotation: next };
   }));
   const startRotation = () => setMembers([foodFieldsOf(f), foodFieldsOf(blankFood())]); // seed with the current food + one empty slot
-  const stopRotation = () => ration.setItems((fs) => fs.map((x) => {
-    if (x.id !== f.id) return x;
-    const { rotation, ...rest } = x;
-    return { ...rest, ...foodFieldsOf(af) }; // collapse back to today's flavor
-  }));
+  const togglePause = () => patch({ rotateOff: !f.rotateOff }); // non-destructive: keeps every flavor
   const addFlavor = () => setMembers((cur) => [...cur, foodFieldsOf(blankFood())]);
   const removeFlavor = (idx) => setMembers((cur) => cur.filter((_, i) => i !== idx));
   const setFlavorName = (idx, name) => setMembers((cur) => cur.map((m, i) => (i === idx ? { ...m, name } : m)));
@@ -338,8 +338,12 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
         <div style={{ flex: 1, minWidth: 0 }}>
           {isRot ? (
             <div>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: A.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{af.name || "New rotation"}</div>
-              <div style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted }}>↻ variety pack · {f.rotation.length} flavor{f.rotation.length === 1 ? "" : "s"} · today</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: A.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {af.name || "Pick flavors below"} {rotating && <span style={{ fontFamily: TYPE.mono, fontSize: 9.5, color: A.good, fontWeight: 600 }}>· today</span>}
+              </div>
+              <div style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted }}>
+                {rotating ? `↻ variety pack · ${f.rotation.length} flavors, one per day` : "rotation paused"}
+              </div>
             </div>
           ) : (
             <FoodSearch value={f.name} search={library.search}
@@ -347,9 +351,9 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
               onPick={(food) => ration.patch(f.id, libEntry(food))} />
           )}
         </div>
-        <button onClick={() => (isRot ? stopRotation() : startRotation())} aria-pressed={isRot}
-          title={isRot ? "Stop rotating — keep today's flavor" : "Rotate flavors (variety pack)"} aria-label="Rotate flavors"
-          style={{ color: isRot ? A.good : A.muted, border: "none", background: "none", cursor: "pointer", padding: 0, display: "inline-flex", fontSize: 16, lineHeight: 1 }}>↻</button>
+        <button onClick={() => (isRot ? togglePause() : startRotation())} aria-pressed={rotating}
+          title={!isRot ? "Rotate flavors (variety pack)" : rotating ? "Pause rotation (keeps all flavors)" : "Resume rotation"} aria-label="Rotate flavors"
+          style={{ color: rotating ? A.good : A.muted, border: "none", background: "none", cursor: "pointer", padding: 0, display: "inline-flex", fontSize: 16, lineHeight: 1 }}>↻</button>
         {!isRot && (
           <button onClick={() => isCompleteFood(f) && saveFood?.(f)} disabled={!isCompleteFood(f)}
             title={saved ? "Saved to your foods" : isCompleteFood(f) ? "Save to your foods (with its type, energy & analysis)" : "Add a name and energy first"}
@@ -430,7 +434,14 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
             </div>
           ))}
           <button onClick={addFlavor} style={{ marginTop: 4, fontFamily: TYPE.mono, fontSize: 11, color: A.good, background: "none", border: "none", cursor: "pointer" }}>+ add flavor</button>
-          <p style={{ fontSize: 10.5, color: A.muted, marginTop: 6, lineHeight: 1.4 }}>Each flavor pulls its energy &amp; analysis from your saved foods — pick from the list. The bowl cycles one flavor per day.</p>
+          {rotating && (
+            <p style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.body, marginTop: 8, lineHeight: 1.5 }}>
+              Next up: <b style={{ color: A.ink }}>{upcomingFlavors(f, today, 3).join(" → ")}</b>{f.rotation.length > 3 ? " → …" : ""}
+            </p>
+          )}
+          <p style={{ fontSize: 10.5, color: A.muted, marginTop: 6, lineHeight: 1.45 }}>
+            Each flavor pulls its energy &amp; analysis from your saved foods — pick from the list. The bowl advances one flavor per day, so <b>tonight's bowl on the Log</b> and this ration's grams show today's flavor automatically. If you track cans, it feeds whatever's open before starting the next flavor. Drop to one flavor to stop rotating; the ↻ button pauses without losing the list.
+          </p>
         </div>
       )}
 
