@@ -259,6 +259,12 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     const food = library.foods.find((f) => (f.name || "").trim().toLowerCase() === (en.name || "").trim().toLowerCase());
     if (food && isCanned(food)) reconcileFridge(food, deltaGrams);
   };
+  // Deleting a logged wet meal must give its grams BACK to the fridge — the mirror of logging
+  // drawing them down (only for today's entries and library-known canned foods).
+  const removeEntry = (en) => {
+    reconcileEntry(en, -num(en.grams));
+    intakeLog.remove(en.id);
+  };
 
   const add = () => {
     if (num(kcal) > 0) {
@@ -413,7 +419,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
         {dayItems.length === 0 ? (
           <p style={{ fontSize: 12, color: A.muted }}>No meals logged {isToday ? "today" : "this day"}.</p>
         ) : dayItems.map((en) => (
-          <EntryRow key={en.id} en={en} onEdit={intakeLog.edit} onRemove={intakeLog.remove} onReconcile={reconcileEntry} />
+          <EntryRow key={en.id} en={en} onEdit={intakeLog.edit} onRemove={removeEntry} onReconcile={reconcileEntry} />
         ))}
       </Card>
     </>
@@ -503,7 +509,7 @@ function EntryRow({ en, onEdit, onRemove, onReconcile }) {
             )}
           </>
         )}
-        <button onClick={() => onRemove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>
+        <button onClick={() => onRemove(en)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>
       </span>
     </div>
   );
