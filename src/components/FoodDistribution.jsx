@@ -1,4 +1,5 @@
 import { A, TYPE } from "../almanac.js";
+import { fmtKcal } from "../lib/util.js";
 
 // The shared "where the calories come from" visualization: the wet/dry/treat split, per-food bars,
 // and the macro split — each readable by energy (calories) or by weight (grams). Fed the SAME
@@ -58,7 +59,7 @@ export function DistributionBody({ s, m, byKcal, week = false, coverageNoun = "l
             <div key={f.name}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, gap: 8 }}>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: A.ink }}><Dot c={TYPE_COLOR[f.type]} />{f.name}</span>
-                <span style={{ fontFamily: TYPE.mono, color: A.body, flex: "none" }}>{r0(pp)}% · {byKcal ? `${r0(f.kcal)} kcal` : `${Number(f.grams.toFixed(1))} g`}</span>
+                <span style={{ fontFamily: TYPE.mono, color: A.body, flex: "none" }}>{r0(pp)}% · {byKcal ? `${fmtKcal(f.kcal)} kcal` : `${Number(f.grams.toFixed(1))} g`}</span>
               </div>
               <div style={{ height: 5, borderRadius: 999, background: A.track, overflow: "hidden", marginTop: 2, display: "flex" }}><Seg pct={pp} color={TYPE_COLOR[f.type]} /></div>
             </div>

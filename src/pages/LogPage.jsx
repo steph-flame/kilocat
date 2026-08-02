@@ -15,8 +15,10 @@ import FoodSearch from "../components/FoodSearch.jsx";
 import { DistributionBody, Toggle } from "../components/FoodDistribution.jsx";
 
 const r0 = (n) => Math.round(n);
+const r1 = (n) => Math.round(n * 10) / 10; // store kcal to 0.1 so a 3.7 kcal sachet keeps its value
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`);
+const kc = (n) => { const v = num(n); return v > 0 && v < 10 ? String(Number(v.toFixed(1))) : String(Math.round(v)); }; // small kcal show 1 decimal
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 function Card({ children, style, className }) {
   return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
@@ -161,7 +163,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
   const unitWord = foodType(picked) === "supplement" ? "sachet" : "treat";
   const derived = kcalG > 0; // we know the energy density → kcal is computed, not typed
   const computed = num(grams) > 0 && kcalG > 0 ? num(grams) * kcalG : null;
-  useEffect(() => { if (computed != null) setKcal(String(r0(computed))); }, [computed]);
+  useEffect(() => { if (computed != null) setKcal(String(r1(computed))); }, [computed]);
   // Treats are given by the each, not weighed: entering a count derives the grams (which then
   // drives kcal through the effect above) from the food's per-treat weight/energy.
   const onTreats = (v) => {
@@ -169,7 +171,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     const n = num(v);
     const gpt = num(picked?.gramsPerUnit), kpt = num(picked?.kcalPerUnit);
     setGrams(v !== "" && gpt > 0 ? String(Number((n * gpt).toFixed(2))) : "");
-    if (!(gpt > 0)) setKcal(v !== "" && kpt > 0 ? String(r0(n * kpt)) : ""); // fallback if no derived weight
+    if (!(gpt > 0)) setKcal(v !== "" && kpt > 0 ? String(r1(n * kpt)) : ""); // fallback if no derived weight
   };
 
   const days = useMemo(() => {
@@ -222,7 +224,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
     if (!(grams > 0)) return;
     const f = s.food || {};
     const kpg = num(f.kcalPerG) || (num(s.grams) > 0 ? s.kcal / s.grams : 0);
-    const entry = { ...manualEntryStamp(viewedDate), grams: Number(grams.toFixed(1)), name: s.name || null, kcalPerG: kpg > 0 ? kpg : null, kcal: r0(grams * kpg) };
+    const entry = { ...manualEntryStamp(viewedDate), grams: Number(grams.toFixed(1)), name: s.name || null, kcalPerG: kpg > 0 ? kpg : null, kcal: r1(grams * kpg) };
     // treats/supplements are given by the each — record the count so the log reads "2 treats", not grams
     if ((s.type === "treat" || s.type === "supplement") && num(f.gramsPerUnit) > 0) {
       const cnt = grams / num(f.gramsPerUnit);
@@ -230,7 +232,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
       entry.kcalPerTreat = num(f.kcalPerUnit);
       entry.gramsPerTreat = num(f.gramsPerUnit);
       entry.unitLabel = s.type === "supplement" ? "sachet" : "treat";
-      entry.kcal = r0(cnt * num(f.kcalPerUnit));
+      entry.kcal = r1(cnt * num(f.kcalPerUnit));
     }
     intakeLog.add(entry);
     if (!isToday) return;
@@ -252,7 +254,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
       const treatFields = isTreat && treatUnit === "count" && num(treats) > 0
         ? { treatCount: num(treats), kcalPerTreat: num(picked.kcalPerUnit), gramsPerTreat: num(picked.gramsPerUnit), unitLabel: unitWord }
         : {};
-      intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r0(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null, ...treatFields });
+      intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r1(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null, ...treatFields });
       // Hybrid fridge: logging a wet meal today draws its can(s) down (opening a new one if needed),
       // the same as "Log tonight's bowl" does. Match the typed/picked name to a saved food for the
       // can size; deduct grams (derived from kcal when only kcal was entered). No-op for dry/unknown.
@@ -288,7 +290,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
                   const remCount = isUnit && perU > 0 ? r.remK / perU : null;
                   const amt = remCount != null
                     ? `${Number(remCount.toFixed(remCount % 1 ? 1 : 0))} ${unitWord}${Math.abs(remCount - 1) < 1e-9 ? "" : "s"}`
-                    : num(s.grams) > 0 ? `${Number(r.remG.toFixed(1))} g` : `${r0(r.remK)} kcal`;
+                    : num(s.grams) > 0 ? `${Number(r.remG.toFixed(1))} g` : `${kc(r.remK)} kcal`;
                   const wet = s.rot || isCanned(s.food);
                   const openC = wet ? (availableCansOf(fridge, s.name, todayStr, fridgeDays)[0] || null) : null;
                   const canBtn = { fontFamily: TYPE.mono, fontSize: 11, border: "none", background: "none", cursor: "pointer", color: A.good, padding: 0, textDecoration: "underline" };
@@ -374,7 +376,7 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
               ? (
                 <label style={{ display: "block" }}>
                   <span style={label({ fontSize: 9 })}>kcal</span>
-                  <div style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.body, padding: "2px 0", minWidth: 56 }} aria-label="kcal (computed)">{num(kcal) > 0 ? `${r0(num(kcal))} kcal` : "—"}</div>
+                  <div style={{ fontFamily: TYPE.mono, fontSize: 16, color: A.body, padding: "2px 0", minWidth: 56 }} aria-label="kcal (computed)">{num(kcal) > 0 ? `${kc(num(kcal))} kcal` : "—"}</div>
                 </label>
               )
               : <NumBox label="kcal" suf="kcal" value={kcal} onChange={setKcal} />}
@@ -440,19 +442,19 @@ function EntryRow({ en, onEdit, onRemove, onReconcile }) {
   };
   const isNothing = (en.name || "").trim().toLowerCase() === "nothing eaten";
   const gShown = gEdit != null ? gEdit : (en.grams != null ? String(Number(num(en.grams).toFixed(1))) : "");
-  const kShown = kEdit != null ? kEdit : String(r0(num(en.kcal)));
+  const kShown = kEdit != null ? kEdit : kc(num(en.kcal));
   const commitG = (v) => {
     setGEdit(v);
     const grams = v === "" ? null : num(v);
     const patch = { grams };
-    if (kpg > 0 && grams != null) patch.kcal = r0(grams * kpg); // kcal follows grams when we know the density
+    if (kpg > 0 && grams != null) patch.kcal = r1(grams * kpg); // kcal follows grams when we know the density
     onEdit(en.id, patch);
   };
   const commitK = (v) => {
     setKEdit(v);
-    const kc = v === "" ? 0 : r0(num(v));
-    const patch = { kcal: kc };
-    if (kpg > 0) patch.grams = Number((kc / kpg).toFixed(1)); // and grams follows kcal
+    const kcal = v === "" ? 0 : r1(num(v));
+    const patch = { kcal };
+    if (kpg > 0) patch.grams = Number((kcal / kpg).toFixed(1)); // and grams follows kcal
     onEdit(en.id, patch);
   };
   return (
@@ -469,7 +471,7 @@ function EntryRow({ en, onEdit, onRemove, onReconcile }) {
               <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{en.unitLabel || "treat"}{num(en.treatCount) === 1 ? "" : "s"}</span>
             </span>
             <span style={{ color: A.muted, fontFamily: TYPE.mono, fontSize: 11 }}>·</span>
-            <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>{r0(num(en.kcal))} kcal</span>
+            <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>{kc(num(en.kcal))} kcal</span>
           </>
         ) : (
           <>
