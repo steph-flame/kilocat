@@ -480,10 +480,16 @@ function EntryRow({ en, onEdit, onRemove, onReconcile }) {
               <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>g</span>
             </span>
             <span style={{ color: A.muted, fontFamily: TYPE.mono, fontSize: 11 }}>·</span>
-            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
-              <input type="number" step="any" min="0" value={kShown} onFocus={onFieldFocus} onChange={(e) => commitK(e.target.value)} onBlur={() => onFieldBlur(() => setKEdit(null))} aria-label="kcal" style={{ ...entryNum, width: 40 }} />
-              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>kcal</span>
-            </span>
+            {kpg > 0 ? (
+              // energy density known → kcal follows the grams, so it's a read-only readout, not an input
+              <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body }}>{kc(num(en.kcal))} kcal</span>
+            ) : (
+              // no density (a hand-typed food) → kcal must be entered directly
+              <span style={{ display: "inline-flex", alignItems: "baseline", gap: 2 }}>
+                <input type="number" step="any" min="0" value={kShown} onChange={(e) => commitK(e.target.value)} onBlur={() => setKEdit(null)} aria-label="kcal" style={{ ...entryNum, width: 40 }} />
+                <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>kcal</span>
+              </span>
+            )}
           </>
         )}
         <button onClick={() => onRemove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>
