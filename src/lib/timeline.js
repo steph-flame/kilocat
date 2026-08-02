@@ -9,11 +9,13 @@ import { extent } from "./scale.js";
 // expressed per week. Updated every day but the 7-day fit rides out the ±40 g daily bounce — so it
 // shows the current direction (the recent dip included) without whipsawing. `weighIns` are the raw
 // weigh-ins [{ date, kg }]; today IS included here (the rate is weight-only, no partial-intake
-// issue). Returns null until ≥2 days; grams/week and %/week of the latest weight.
-export function trailingWeeklyRate(weighIns, days = 7) {
+// issue). Returns null until there's most of a week (`minPts` daily medians) — a weekly rate fit to
+//2–3 days just extrapolates one day's ±40 g bounce into an impossible ±5%/wk. grams/week and
+// %/week of the latest weight.
+export function trailingWeeklyRate(weighIns, days = 7, minPts = 5) {
   const daily = dailyReduce((weighIns || []).map((e) => ({ date: e.date, value: e.kg })), median); // [{date,value}] sorted
-  const pts = daily.slice(-Math.max(2, days));
-  if (pts.length < 2) return null;
+  const pts = daily.slice(-Math.max(minPts, days));
+  if (pts.length < minPts) return null;
   const { slope } = linregXY(pts.map((_, k) => k), pts.map((p) => p.value)); // kg/day
   const kgPerWeek = slope * 7;
   const lastKg = pts[pts.length - 1].value;

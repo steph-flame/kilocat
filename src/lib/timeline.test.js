@@ -13,13 +13,23 @@ describe("trailingWeeklyRate", () => {
     expect(tw.gramsPerWeek).toBeCloseTo(-70, 0); // −10 g/day × 7
     expect(tw.pctPerWeek).toBeLessThan(0);
   });
-  it("medians multiple same-day reads and needs at least two days", () => {
+  it("needs most of a week before it will state a rate (a 2–3 day fit extrapolates one day's bounce)", () => {
     expect(trailingWeeklyRate([{ date: "2026-01-01", kg: 5 }])).toBe(null);
-    const two = trailingWeeklyRate([
+    const four = [];
+    for (let k = 0; k < 4; k++) four.push({ date: addDays("2026-01-01", k), kg: 5.0 }); // 4 days — still too few
+    expect(trailingWeeklyRate(four)).toBe(null);
+  });
+  it("medians multiple same-day reads once there are enough days", () => {
+    const five = [
       { date: "2026-01-01", kg: 5.0 }, { date: "2026-01-01", kg: 5.2 }, // median 5.1
-      { date: "2026-01-02", kg: 5.0 }, { date: "2026-01-02", kg: 5.0 }, // median 5.0
-    ]);
-    expect(two.gramsPerWeek).toBeCloseTo(-0.1 * 7 * 1000, 0); // −100 g/day median drop × 7
+      { date: "2026-01-02", kg: 5.05 },
+      { date: "2026-01-03", kg: 5.0 },
+      { date: "2026-01-04", kg: 4.95 },
+      { date: "2026-01-05", kg: 4.9 },
+    ];
+    const tw = trailingWeeklyRate(five);
+    expect(tw.days).toBe(5);
+    expect(tw.gramsPerWeek).toBeCloseTo(-0.05 * 7 * 1000, 0); // −50 g/day median slope × 7
   });
 });
 

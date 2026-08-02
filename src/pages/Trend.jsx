@@ -106,9 +106,13 @@ export default function Trend() {
     const dots = weightLog.items.filter((w) => idxByDate.has(w.date)).map((w) => ({ i: idxByDate.get(w.date), kg: w.kg }));
     // Per-day rate = a trailing-7-day line fit on the raw medians (same method as trailingWeeklyRate),
     // so the last point of this chart equals the headline %/wk instead of the old Kalman-derived one.
+    // A "per-week" rate needs most of a week behind it: with only 2–3 daily medians the fit just
+    // extrapolates one day's ±40 g bounce out to a full week (an impossible ±5%/wk), so hold the line
+    // off until the trailing window is nearly full. It simply starts a few days into the range.
+    const MIN_RATE_PTS = 5;
     const rates = daily.map((_, i) => {
       const wnd = daily.slice(Math.max(0, i - 6), i + 1);
-      if (wnd.length < 2) return { kgPerWeek: null, pctPerWeek: null };
+      if (wnd.length < MIN_RATE_PTS) return { kgPerWeek: null, pctPerWeek: null };
       const { slope } = linregXY(wnd.map((_, k) => k), wnd.map((p) => p.value));
       const kgPerWeek = slope * 7;
       const last = wnd[wnd.length - 1].value;
