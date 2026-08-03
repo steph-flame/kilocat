@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
-import { groupByDay, median, localDateOf, manualWeighInStamp, manualEntryStamp } from "../lib/series.js";
+import { groupByDay, median, localDateOf, manualWeighInStamp, manualEntryStamp, addDays } from "../lib/series.js";
 import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayLabel } from "../lib/dayPager.js";
 import { foodSummary, macroBreakdown, trailingWindow, itemsInRange, rebalanceRemaining } from "../lib/foodStats.js";
 import { kcalPerG, foodType } from "../lib/foods.js";
 import { distributeBowl } from "../lib/bowl.js";
 import { isCanned, resolveRotationsWithFridge, availableCansOf } from "../lib/fridge.js";
 import { isRotating } from "../lib/rotation.js";
+import { transitionSteps, inferTransitionDay, clampDays, shareOfNew } from "../lib/transition.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
 import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
@@ -41,7 +42,7 @@ function useEditableLog(log, isDemo, activeCatId) {
 }
 
 export default function LogPage() {
-  const { p, intent, ration, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan } = useApp();
+  const { p, intent, ration, tr, start, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const intakeLog = useEditableLog(liveIntake, isDemo, activeCatId);
   const weightLog = useEditableLog(liveWeight, isDemo, activeCatId);
@@ -94,7 +95,7 @@ export default function LogPage() {
         </div>
 
         {tab === "food"
-          ? <FoodTab {...{ intakeLog, ration, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan }} />
+          ? <FoodTab {...{ intakeLog, ration, tr, startItems: start.items, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan }} />
           : <WeightTab {...{ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings }} />}
       </div>
     </div>
@@ -150,7 +151,7 @@ function KcalChart({ intakeItems, days, selected, onSelect, target, dayStatus, t
 }
 
 /* ---------- food tab ---------- */
-function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan }) {
+function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan }) {
   const [name, setName] = useState("");
   const [kcalG, setKcalG] = useState(0);
   const [grams, setGrams] = useState("");
@@ -185,14 +186,29 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
 
   // Tonight's bowl (the old Today screen, folded in): shown on today's view before anything's
   // logged. "Log it" fills the day from the ration split in one tap.
+  // Mid-switch, the plan is the RAMP's mix for today — not the final ration. `tr` records that a
+  // switch is on and its length but never which day you're on, so the day is inferred from what
+  // was actually fed yesterday (see lib/transition.js for why that beats counting calendar days).
+  const ramp = useMemo(() => {
+    if (!tr?.on || !(startItems || []).length) return null;
+    const resolved = resolveRotationsWithFridge(ration.items, viewedDate, fridge, fridgeDays);
+    const prior = intakeLog.items.filter((e) => e.date === addDays(viewedDate, -1));
+    const { day, basis } = inferTransitionDay({ startItems, resolvedRationItems: resolved, target, days: tr.days, priorEntries: prior });
+    return { day, basis, days: clampDays(tr.days), resolved };
+  }, [tr?.on, tr?.days, startItems, ration.items, target, viewedDate, fridge, fridgeDays, intakeLog.items]);
+
   const steps = useMemo(() => {
-    const resolved = resolveRotationsWithFridge(ration.items, viewedDate, fridge, fridgeDays); // rotation slot → the flavor to feed (open can first)
-    const dist = distributeBowl(resolved, target);
-    return dist.rows.filter((s) => s.kcal > 0).map((s) => {
-      const f = resolved.find((x) => x.id === s.id) || {};
+    const resolved = ramp ? ramp.resolved : resolveRotationsWithFridge(ration.items, viewedDate, fridge, fridgeDays); // rotation slot → the flavor to feed (open can first)
+    // Mid-ramp: blend today's share of the new ration with what's fading out. Otherwise: the ration.
+    const rows = ramp
+      ? transitionSteps({ startItems, resolvedRationItems: resolved, target, day: ramp.day, days: ramp.days })
+      : distributeBowl(resolved, target).rows;
+    return rows.filter((s) => s.kcal > 0).map((s) => {
+      // a food on its way OUT isn't in the ration, so look it up on the "currently feeding" side
+      const f = resolved.find((x) => x.id === s.id) || (startItems || []).find((x) => x.id === s.id) || {};
       return { ...s, type: foodType(f), treatCount: f.treatCount, food: f, rot: isRotating(f) };
     }).sort((a, b) => (a.splitMode === "remainder" ? 1 : 0) - (b.splitMode === "remainder" ? 1 : 0));
-  }, [ration.items, target, viewedDate, fridge, fridgeDays]);
+  }, [ramp, ration.items, startItems, target, viewedDate, fridge, fridgeDays]);
   const showPlan = steps.length > 0; // the day's plan persists all day, showing what's left to feed
 
   // How much of each plan slot is still to feed, so logging in small meals doesn't make the plan
@@ -294,6 +310,22 @@ function FoodTab({ intakeLog, ration, library, viewedDate, todayStr, target, isD
             <div style={label()}>Still to feed today</div>
             <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: allFed ? A.good : A.body }}>{allFed ? "all fed ✓" : `${r0(remainingKcal)} kcal to go`}</div>
           </div>
+          {/* Mid-switch these amounts are the RAMP's mix for today, not the final ration — say so,
+              or the numbers look like they disagree with the ration page. */}
+          {ramp && (
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".08em", textTransform: "uppercase", color: A.good, fontWeight: 600 }}>
+                switching · day {ramp.day} of {ramp.days}
+              </span>
+              <span style={{ fontSize: 11.5, color: A.muted }}>
+                {ramp.day >= ramp.days
+                  ? "last day — this is the full new ration."
+                  : `${r0(shareOfNew(ramp.day, ramp.days) * 100)}% new ration today.`}
+                {ramp.basis === "start" ? " Starting the ramp (nothing logged yesterday)." : ""}
+              </span>
+              <a href="#/ration" style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.good, textDecoration: "none" }}>schedule ›</a>
+            </div>
+          )}
           {allFed ? (
             <p style={{ fontSize: 12.5, color: A.muted, marginTop: 8, lineHeight: 1.45 }}>The whole plan's logged for today. Anything extra goes below.</p>
           ) : (
