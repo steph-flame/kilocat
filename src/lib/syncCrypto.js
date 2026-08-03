@@ -60,7 +60,7 @@ const CODE_CHARS = Math.ceil((TOTAL_BYTES * 8) / 5); // 77
 
 // Bytes -> Crockford base32, no padding character (fixed-length caller always knows how many
 // bytes to expect back, so there's no ambiguity to pad against).
-function bytesToBase32(bytes) {
+export function bytesToBase32(bytes) {
   let value = 0;
   let bits = 0;
   let out = "";
@@ -81,7 +81,7 @@ function bytesToBase32(bytes) {
 // Crockford base32 -> bytes. Throws on any character outside the (case-insensitive,
 // confusable-folded) alphabet, or on nonzero padding bits (a strong signal of a mistyped/
 // truncated code rather than a genuine one).
-function base32ToBytes(cleaned) {
+export function base32ToBytes(cleaned) {
   let value = 0;
   let bits = 0;
   const out = [];
