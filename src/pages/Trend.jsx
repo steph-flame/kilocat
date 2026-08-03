@@ -5,7 +5,7 @@ import { buildDailyFrame, historySpanDays, trailingWeeklyRate } from "../lib/tim
 import { dailyReduce, median, ewma, addDays, linregXY } from "../lib/series.js";
 import { extent, linScale } from "../lib/scale.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
-import { bcsToPct, pctToBcs } from "../lib/nutrition.js";
+import { bcsToPct, pctToBcs, RER } from "../lib/nutrition.js";
 
 // Trend — the measured burn, its uncertainty, and the evidence the plan is working. Three
 // SEPARATE plots (weight / rate-of-change / energy-balance), each on its own honest scale, with
@@ -142,6 +142,24 @@ export default function Trend() {
   const wide = e.kcal > 0 && (e.high - e.low) / 2 > 0.15 * e.kcal;
   const dispW = (kg) => toDisplayWeight(kg, unit);
 
+  // The vet-formula maintenance the estimate started from, drawn per-day off each day's weight
+  // (statusFactor × RER(kg)) — the same basis as the estimator's prior — so the burn chart can show
+  // how far the measured number has moved from what the formula alone predicts.
+  const formula = frame.map((f) => (f.w != null ? t.statusFactor * RER(f.w) : null));
+
+  // The rate-of-change "safe zone" depends on the PLAN, not a fixed loss band: an overweight cat on
+  // a loss plan wants −2…−0.5 %/wk, a maintenance plan wants to hold (±0.5 %/wk), an underweight cat
+  // gaining wants +0.5…+2 %/wk. Drive it off target vs. maintenance (the same delta the plan uses).
+  const planDelta = (t.target || 0) - (t.refs?.maintain || 0);
+  const rateZone = planDelta < -1 ? { lo: -2, hi: -0.5, kind: "loss" }
+    : planDelta > 1 ? { lo: 0.5, hi: 2, kind: "gain" }
+    : { lo: -0.5, hi: 0.5, kind: "hold" };
+  const zoneCap = rateZone.kind === "loss"
+    ? "The shaded band is the safe 0.5–2%/wk loss zone for her weight-loss plan; above the zero line she'd be gaining."
+    : rateZone.kind === "gain"
+    ? "The shaded band is the safe 0.5–2%/wk gain zone for her weight-gain plan; below the zero line she'd be losing."
+    : "The shaded band is the ±0.5%/wk holding zone; drifting well outside it means she's trending up or down.";
+
   return (
     <div style={{ background: A.pageFill, minHeight: "100%", fontFamily: TYPE.sans, color: A.ink, paddingBottom: 28 }}>
       <div className="alm-page alm-grid">
@@ -189,8 +207,9 @@ export default function Trend() {
 
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Measured burn · kcal/day</div>
-          <BurnChart frame={frame} />
-          <p style={{ ...cap, fontSize: 11.5 }}>The line is the day-by-day estimate; the shaded band is its 95% interval, which tightens as more weigh-ins pin down the trend.</p>
+          <BurnChart frame={frame} formula={formula} />
+          <Legend items={[[A.chart.expenditure || A.good, "measured", "line"], [A.muted, "vet formula", "dash"]]} />
+          <p style={{ ...cap, fontSize: 11.5 }}>The solid line is the day-by-day measured estimate and the shaded band its 95% interval, which tightens as you log. The dotted line is what the vet formula alone predicts for her weight — the gap is what the data revealed the formula was missing.</p>
         </Card>
 
         <Card style={{ padding: "12px 14px" }}>
@@ -210,11 +229,11 @@ export default function Trend() {
 
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Rate of change · %/wk</div>
-          <RateChart rates={wdisp.rates} frame={wdisp.frame} />
+          <RateChart rates={wdisp.rates} frame={wdisp.frame} zone={rateZone} />
           <p style={{ ...cap, fontSize: 11.5 }}>
             {(() => { const tw = trailingWeeklyRate(weightLog.items); return tw
               ? `Over the last ${tw.days} days: ${tw.gramsPerWeek < 0 ? "−" : "+"}${Math.abs(Math.round(tw.gramsPerWeek))} g/wk (${tw.pctPerWeek < 0 ? "−" : "+"}${Math.abs(r1(tw.pctPerWeek))}%/wk).`
-              : "Not enough days yet to call a rate."; })()} The shaded band is the safe 0.5–2%/wk zone; above the dashed line she'd be gaining.
+              : "Not enough days yet to call a rate."; })()} {zoneCap}
           </p>
         </Card>
 
@@ -249,20 +268,25 @@ function IntervalBar({ lo, hi, point }) {
 // The measured-burn timeline: the per-day estimate as a line, wrapped in its 95% confidence band
 // (e ± 1.96·sd). Early history is wide; the band visibly narrows as weigh-ins accumulate — the
 // honest picture of how well we know the burn. This is the evidence behind the headline number.
-function BurnChart({ frame }) {
+function BurnChart({ frame, formula }) {
   const K = 1.96;
   const pts = frame.map((f, i) => (f.e != null ? { i, e: f.e, sd: Number.isFinite(f.sd) && f.sd >= 0 ? f.sd : 0, date: f.date } : null)).filter(Boolean);
   const { idx, bind } = useHoverIndex(frame.length);
   const H = 130, PADY = 12;
   if (pts.length < 2) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>Not enough weigh-ins in range yet.</div>;
-  // scale from the band's own extent (e ± k·sd) — not intake — so the burn line and its interval
-  // fill the panel and the early-history widening reads clearly; a little padding top and bottom.
-  const [blo, bhi] = extent(pts.flatMap((p) => [p.e - K * p.sd, p.e + K * p.sd]));
+  // the vet-formula reference (per-day), aligned to the days that have an estimate.
+  const fpts = (formula || []).map((v, i) => (v != null && frame[i]?.e != null ? { i, v } : null)).filter(Boolean);
+  // scale from the band's own extent (e ± k·sd) plus the formula line — not intake — so the burn
+  // line, its interval, AND the formula reference all fit; a little padding top and bottom.
+  const domainVals = pts.flatMap((p) => [p.e - K * p.sd, p.e + K * p.sd]);
+  fpts.forEach((f) => domainVals.push(f.v));
+  const [blo, bhi] = extent(domainVals);
   const pad = (bhi - blo) * 0.12 || 10;
   const [lo, hi] = [blo - pad, bhi + pad];
   const y = linScale([lo, hi], [H - PADY, PADY]);
   const x = (i) => xAt(i, frame.length);
   const line = pts.map((p) => [x(p.i), y(p.e)]);
+  const fline = fpts.map((f) => [x(f.i), y(f.v)]);
   const top = pts.map((p) => [x(p.i), y(p.e + K * p.sd)]);
   const bot = pts.map((p) => [x(p.i), y(p.e - K * p.sd)]);
   const bandD = dPath(top) + " " + bot.reverse().map((p) => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + " Z";
@@ -274,6 +298,8 @@ function BurnChart({ frame }) {
       {hv && <Tip vbx={hv.x}>{mmdd(hv.date)} · {r0(hv.e)} ±{r0(K * hv.sd)} kcal</Tip>}
       <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }}>
         <path d={bandD} fill={A.chart.expenditure || A.good} opacity="0.16" />
+        {/* vet-formula reference, low-opacity dashed behind the measured line */}
+        {fline.length > 1 && <path d={dPath(fline)} fill="none" stroke={A.muted} strokeWidth="1.4" strokeDasharray="3 3" opacity="0.6" />}
         {hv && <HoverGuide x={hv.x} />}
         <path d={dPath(line)} fill="none" stroke={A.chart.expenditure || A.good} strokeWidth="2.2" />
         <circle cx={x(endI)} cy={y(pts[pts.length - 1].e)} r="4.5" fill={A.chart.expenditure || A.good} />
@@ -320,28 +346,31 @@ function WeightChart({ frame, dots, idealKg, disp, unit }) {
   );
 }
 
-function RateChart({ rates, frame }) {
+function RateChart({ rates, frame, zone }) {
   const { idx, bind } = useHoverIndex(rates.length);
   const H = 104, PADY = 12;
   const vals = rates.map((r) => r.pctPerWeek).filter((v) => v != null);
-  const lo = Math.min(-2.2, ...vals, 0);
-  const hi = Math.max(0.6, ...vals, 0);
+  // domain always holds the plan's safe zone, zero, and the data — with a little padding — so the
+  // band is visible whether the plan is loss (below zero), hold (around zero), or gain (above).
+  const lo = Math.min(zone.lo, 0, ...vals) - 0.3;
+  const hi = Math.max(zone.hi, 0, ...vals) + 0.3;
   const y = linScale([lo, hi], [H - PADY, PADY]);
   const line = rates.map((r, i) => (r.pctPerWeek != null ? [xAt(i, rates.length), y(r.pctPerWeek)] : null)).filter(Boolean);
-  const bandTop = y(-0.5), bandBot = y(-2.0), zero = y(0);
+  const bandTop = y(zone.hi), bandBot = y(zone.lo), zero = y(0);
+  const sgn = (v) => (v > 0 ? "+" : v < 0 ? "−" : "");
   const hv = idx != null && rates[idx]?.pctPerWeek != null ? { x: xAt(idx, rates.length), yv: y(rates[idx].pctPerWeek), val: rates[idx].pctPerWeek, date: frame[idx]?.date } : null;
   return (
     <div {...bind}>
-      {hv && <Tip vbx={hv.x}>{mmdd(hv.date)} · {hv.val > 0 ? "+" : hv.val < 0 ? "−" : ""}{Math.abs(hv.val).toFixed(1)}%/wk</Tip>}
+      {hv && <Tip vbx={hv.x}>{mmdd(hv.date)} · {sgn(hv.val)}{Math.abs(hv.val).toFixed(1)}%/wk</Tip>}
       <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }}>
         <rect x={PADL} y={Math.min(bandTop, bandBot)} width={VW - PADL - PADR} height={Math.abs(bandBot - bandTop)} fill={A.chart.safeBand} opacity="0.13" />
         {hv && <HoverGuide x={hv.x} />}
         <line x1={PADL} y1={zero} x2={VW - PADR} y2={zero} stroke={A.chart.zeroLine} strokeWidth="1" strokeDasharray="4 3" />
         {line.length > 1 && <path d={dPath(line)} fill="none" stroke={A.chart.trend} strokeWidth="2" />}
         {hv && <circle cx={hv.x} cy={hv.yv} r="4" fill={A.ink} />}
-        <text x={PADL - 5} y={y(hi) + 7} textAnchor="end" style={axisText}>+{hi.toFixed(1)}</text>
+        <text x={PADL - 5} y={y(hi) + 7} textAnchor="end" style={axisText}>{sgn(hi)}{Math.abs(hi).toFixed(1)}</text>
         <text x={PADL - 5} y={zero + 3} textAnchor="end" style={{ ...axisText, fill: A.body }}>0</text>
-        <text x={PADL - 5} y={bandBot + 3} textAnchor="end" style={axisText}>−2.0</text>
+        <text x={PADL - 5} y={y(lo) - 2} textAnchor="end" style={axisText}>{sgn(lo)}{Math.abs(lo).toFixed(1)}</text>
         <text x={VW - PADR} y={bandTop - 2} textAnchor="end" style={axisText}>safe zone</text>
       </svg>
       <XDates frame={frame} />
@@ -403,9 +432,11 @@ function EnergyChart({ frame, burn }) {
         {hv && <HoverGuide x={hv.x} />}
         {hv && <circle cx={hv.x} cy={y(hv.d.b)} r="4" fill={A.ink} />}
         <text x={PADL - 5} y={PADY + 7} textAnchor="end" style={{ ...axisText, fill: A.chart.overBurnLabel }}>+{r0(maxAbs)}</text>
-        <text x={PADL - 5} y={base + 3} textAnchor="end" style={{ ...axisText, fill: A.ink }}>burn</text>
+        {/* baseline label stacked in the left gutter (not on the line) so it never sits under the
+            near-break-even pills that cluster on the zero line at the right */}
+        <text x={PADL - 5} y={base - 1} textAnchor="end" style={{ ...axisText, fill: A.ink }}>burn</text>
+        <text x={PADL - 5} y={base + 9} textAnchor="end" style={axisText}>≈{r0(burn)}</text>
         <text x={PADL - 5} y={H - PADY + 3} textAnchor="end" style={axisText}>−{r0(maxAbs)}</text>
-        <text x={VW - PADR} y={base - 4} textAnchor="end" style={axisText}>≈{r0(burn)} kcal now</text>
       </svg>
       <XDates frame={frame} />
     </div>
