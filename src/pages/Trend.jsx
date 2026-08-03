@@ -196,7 +196,7 @@ export default function Trend() {
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Energy balance · kcal vs burn</div>
           <EnergyChart frame={frame} burn={e.kcal} />
-          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake against <b style={{ fontWeight: 600 }}>that day's</b> estimated burn, so it inherits the burn's uncertainty. The shaded zone around the break-even is that same 95% interval: bars inside it are within the noise of how well we know her burn — only bars clearly past it read as a real deficit (below) or surplus (above). The break-even drifts with her weight, so it isn't pinned to today's {burn} kcal; the dark line is the smoothed average.</p>
+          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake against <b style={{ fontWeight: 600 }}>that day's</b> estimated burn: the dot is the balance, the pill around it its 95% interval — which is just the burn's own uncertainty, since intake is exact. A pill straddling the break-even means that day's deficit or surplus is within the noise; only a pill clearly below (deficit) or above (surplus) is real. The break-even drifts with her weight, so it isn't pinned to today's {burn} kcal; the dark line is the smoothed average.</p>
         </Card>
 
         {/* ── measured family: the raw scale weight and its rate — no model, straight from weigh-ins. ── */}
@@ -353,46 +353,55 @@ function EnergyChart({ frame, burn }) {
   const { idx, bind } = useHoverIndex(frame.length);
   const H = 100, PADY = 12;
   const n = frame.length;
-  // one bar PER DAY: that day's logged intake minus THAT DAY'S estimated burn (skip
-  // missing/incomplete days). The burn isn't a constant — it drifts as the cat's weight (and so
-  // its maintenance) changes, so each day is measured against the frame's own expenditure for that
-  // day (f.e), falling back to the latest estimate only when a day has none. Using a single flat
-  // burn would misattribute a rising/falling baseline as a surplus/deficit.
-  const daily = frame.map((f) => (f.kin != null && !f.kinImputed ? f.kin - (Number.isFinite(f.e) ? f.e : burn) : null));
-  if (!daily.some((d) => d != null)) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>No complete days in range yet.</div>;
-  // The balance is intake (measured, exact) minus the FITTED burn — so all its uncertainty comes
-  // from the burn's per-day sd (the same sd the burn chart bands). Draw that as a fuzzy break-even
-  // zone (±1.96·sd around zero): a bar inside the band is within the noise of how well we know her
-  // burn, so only bars clearly past it are a real deficit/surplus. It's wide early, narrow later.
   const K = 1.96;
-  const bandPts = frame.map((f, i) => (Number.isFinite(f.sd) && f.sd >= 0 ? { i, sd: f.sd } : null)).filter(Boolean);
-  // smoothed running average (EWMA over the days that have data) — the line on top.
+  // One point PER DAY: that day's logged intake minus THAT DAY'S estimated burn (skip
+  // missing/incomplete days). The burn isn't a constant — it drifts as the cat's weight (and so its
+  // maintenance) changes, so each day is measured against the frame's own expenditure for that day
+  // (f.e), falling back to the latest estimate only when a day has none. The point is the balance
+  // estimate; intake is exact, so the point's uncertainty is entirely the burn's own 95% (±K·sd),
+  // drawn as a pill around the dot. A pill straddling the break-even = that day's deficit/surplus is
+  // within the noise; only a pill clearly on one side is a real deficit (below) or surplus (above).
+  const daily = frame.map((f) =>
+    f.kin != null && !f.kinImputed
+      ? { b: f.kin - (Number.isFinite(f.e) ? f.e : burn), sd: Number.isFinite(f.sd) && f.sd >= 0 ? f.sd : 0 }
+      : null
+  );
+  if (!daily.some((d) => d != null)) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>No complete days in range yet.</div>;
+  // smoothed running average of the point estimates (EWMA over days with data) — the line on top.
   const alpha = 0.2;
   let ema = null;
   const smooth = [];
-  daily.forEach((d, i) => { if (d == null) return; ema = ema == null ? d : alpha * d + (1 - alpha) * ema; smooth.push([xAt(i, n), i, ema]); });
-  const maxAbs = Math.max(40, ...daily.map((d) => (d == null ? 0 : Math.abs(d))), ...smooth.map((s) => Math.abs(s[2])), ...bandPts.map((p) => K * p.sd));
+  daily.forEach((d, i) => { if (d == null) return; ema = ema == null ? d.b : alpha * d.b + (1 - alpha) * ema; smooth.push([xAt(i, n), i, ema]); });
+  // domain must hold each pill's full extent (|b| + K·sd), not just the point, so nothing clips.
+  const maxAbs = Math.max(40, ...daily.map((d) => (d == null ? 0 : Math.abs(d.b) + K * d.sd)), ...smooth.map((s) => Math.abs(s[2])));
   const y = linScale([-maxAbs, maxAbs], [H - PADY, PADY]);
   const base = y(0);
-  const bw = Math.max(1.5, (VW - PADL - PADR) / n - 1);
+  const pillW = Math.max(4, Math.min(7, (VW - PADL - PADR) / n - 2));
+  const dotR = 2.8;
   const smoothPts = smooth.map(([x, , v]) => [x, y(v)]);
-  const bTop = bandPts.map((p) => [xAt(p.i, n), y(K * p.sd)]);
-  const bBot = bandPts.map((p) => [xAt(p.i, n), y(-K * p.sd)]);
-  const bandD = bTop.length > 1 ? dPath(bTop) + " " + bBot.reverse().map((p) => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + " Z" : null;
-  const hv = idx != null && daily[idx] != null ? { x: xAt(idx, n), val: daily[idx], date: frame[idx].date } : null;
+  const hv = idx != null && daily[idx] != null ? { x: xAt(idx, n), d: daily[idx], date: frame[idx].date } : null;
   return (
     <div {...bind}>
-      {hv && <Tip vbx={hv.x}>{mmdd(hv.date)} · {hv.val > 0 ? "+" : "−"}{r0(Math.abs(hv.val))} kcal</Tip>}
+      {hv && <Tip vbx={hv.x}>{mmdd(hv.date)} · {hv.d.b > 0 ? "+" : "−"}{r0(Math.abs(hv.d.b))} kcal <span style={{ color: A.muted }}>± {r0(K * hv.d.sd)}</span></Tip>}
       <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }}>
-        {bandD && <path d={bandD} fill={A.chart.expenditure || A.good} opacity="0.14" />}
+        <line x1={PADL} y1={base} x2={VW - PADR} y2={base} stroke={A.chart.zeroLine} strokeWidth="1" strokeDasharray="4 3" />
         {daily.map((d, i) => {
           if (d == null) return null;
-          const cx = xAt(i, n), yv = y(d);
-          return <rect key={i} x={cx - bw / 2} y={Math.min(base, yv)} width={bw} height={Math.max(0.5, Math.abs(yv - base))} fill={d > 0 ? A.chart.overBurn : A.chart.underBurn} opacity={hv && i !== idx ? 0.55 : 0.9} />;
+          const cx = xAt(i, n);
+          const yTop = y(d.b + K * d.sd), yBot = y(d.b - K * d.sd);
+          const col = d.b > 0 ? A.chart.overBurn : A.chart.underBurn;
+          return (
+            <g key={i} opacity={hv && i !== idx ? 0.45 : 1}>
+              {/* the 95% interval as a pill; collapses to a dot-sized capsule when the burn is well pinned */}
+              <rect x={cx - pillW / 2} y={Math.min(yTop, yBot)} width={pillW} height={Math.max(pillW, Math.abs(yBot - yTop))} rx={pillW / 2} fill={col} opacity="0.24" />
+              {/* the point estimate */}
+              <circle cx={cx} cy={y(d.b)} r={dotR} fill={col} />
+            </g>
+          );
         })}
-        <line x1={PADL} y1={base} x2={VW - PADR} y2={base} stroke={A.chart.zeroLine} strokeWidth="1" strokeDasharray="4 3" />
-        {smoothPts.length > 1 && <path d={dPath(smoothPts)} fill="none" stroke={A.ink} strokeWidth="2" />}
+        {smoothPts.length > 1 && <path d={dPath(smoothPts)} fill="none" stroke={A.ink} strokeWidth="1.6" opacity="0.65" />}
         {hv && <HoverGuide x={hv.x} />}
+        {hv && <circle cx={hv.x} cy={y(hv.d.b)} r="4" fill={A.ink} />}
         <text x={PADL - 5} y={PADY + 7} textAnchor="end" style={{ ...axisText, fill: A.chart.overBurnLabel }}>+{r0(maxAbs)}</text>
         <text x={PADL - 5} y={base + 3} textAnchor="end" style={{ ...axisText, fill: A.ink }}>burn</text>
         <text x={PADL - 5} y={H - PADY + 3} textAnchor="end" style={axisText}>−{r0(maxAbs)}</text>
