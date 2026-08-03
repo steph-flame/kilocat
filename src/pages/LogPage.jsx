@@ -192,8 +192,15 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
   const ramp = useMemo(() => {
     if (!tr?.on || !(startItems || []).length) return null;
     const resolved = resolveRotationsWithFridge(ration.items, viewedDate, fridge, fridgeDays);
-    const prior = intakeLog.items.filter((e) => e.date === addDays(viewedDate, -1));
-    const { day, basis } = inferTransitionDay({ startItems, resolvedRationItems: resolved, target, days: tr.days, priorEntries: prior });
+    // The most recent PRIOR day that actually has entries (up to a week back) — missing a day of
+    // logging shouldn't rewind the ramp to day 1; it advances by however many days have passed.
+    let prior = [], gapDays = 1;
+    for (let back = 1; back <= 7; back++) {
+      const d = addDays(viewedDate, -back);
+      const hits = intakeLog.items.filter((e) => e.date === d);
+      if (hits.length) { prior = hits; gapDays = back; break; }
+    }
+    const { day, basis } = inferTransitionDay({ startItems, resolvedRationItems: resolved, target, days: tr.days, priorEntries: prior, gapDays });
     return { day, basis, days: clampDays(tr.days), resolved };
   }, [tr?.on, tr?.days, startItems, ration.items, target, viewedDate, fridge, fridgeDays, intakeLog.items]);
 

@@ -28,6 +28,32 @@ export const shareOfNew = (day, days) => clampDay(day, days) / clampDays(days);
 
 const key = (n) => (n || "").trim().toLowerCase();
 
+// Matching the two blends by FOOD NAME is wrong when a rotating slot is involved. "Currently
+// feeding" is seeded by copying the ration, and that copy strips `rotation` (see foodFieldsOf) and
+// keeps whichever flavor happened to be active at the time. So a variety pack shows up as
+// "Chicken & Beef" on the old side and "Chicken & Quail Egg" on the new — one slot, two names,
+// which blends into a phantom "fading out" row that no logged meal can ever satisfy (the owner
+// feeds today's flavor, which matches neither) and that quietly eats part of the day's budget.
+//
+// So slots are identified by ROTATION FAMILY when there is one: every member name (and the active
+// flavor) maps to the same key, and a bare flavor name on the old side lands on the new side's
+// rotation. Foods without a rotation just key by name, as before.
+export function makeSlotKeyer(...itemLists) {
+  const memberToKey = new Map();
+  const famKey = (it) => "rot:" + (it.rotation || []).map((m) => key(m.name)).filter(Boolean).sort().join("|");
+  for (const list of itemLists) {
+    for (const it of list || []) {
+      if (!it?.rotation?.length) continue;
+      const k = famKey(it);
+      for (const m of it.rotation) { const mk = key(m.name); if (mk) memberToKey.set(mk, k); }
+      const own = key(it.name); // the resolved active flavor, which may not be listed as a member
+      if (own) memberToKey.set(own, k);
+    }
+  }
+  const keyOfName = (n) => memberToKey.get(key(n)) || `name:${key(n)}`;
+  return { keyOfName, keyOfItem: (it) => (it?.rotation?.length ? famKey(it) : keyOfName(it?.name)) };
+}
+
 // Blend two already-distributed row sets into one row per unique food (matched by name), the way
 // the schedule table does: a food in both stays (moving toward its new amount), a dropped food
 // fades to nothing, an added food grows in.
@@ -36,19 +62,19 @@ const key = (n) => (n || "").trim().toLowerCase();
 // doesn't know about cans. Rows carry their source food through so callers keep kcalPerG, type,
 // rotation state, etc. A dropped food's `food` comes from the old side, which is all it needs to
 // be fed and logged on its way out.
-export function blendRows(oldRows, newRows, toNew) {
+export function blendRows(oldRows, newRows, toNew, keyOfName = (n) => key(n)) {
   const t = Math.max(0, Math.min(1, num(toNew)));
   const out = [];
   const at = new Map();
   for (const r of newRows || []) {
-    const k = key(r.name);
-    if (!k) continue;
+    if (!key(r.name)) continue;
+    const k = keyOfName(r.name);
     at.set(k, out.length);
     out.push({ nu: r, old: null });
   }
   for (const r of oldRows || []) {
-    const k = key(r.name);
-    if (!k) continue;
+    if (!key(r.name)) continue;
+    const k = keyOfName(r.name);
     if (at.has(k)) out[at.get(k)].old = r;
     else { at.set(k, out.length); out.push({ nu: null, old: r }); }
   }
@@ -70,47 +96,61 @@ export function blendRows(oldRows, newRows, toNew) {
 export function transitionSteps({ startItems, resolvedRationItems, target, day, days }) {
   const oldRows = distributeBowl(startItems || [], target).rows;
   const newRows = distributeBowl(resolvedRationItems || [], target).rows;
-  return blendRows(oldRows, newRows, shareOfNew(day, days));
+  const { keyOfName } = makeSlotKeyer(startItems, resolvedRationItems);
+  return blendRows(oldRows, newRows, shareOfNew(day, days), keyOfName);
 }
 
 // How far a day's actual feeding sits from what the ramp prescribes for candidate day `day`.
 // Compared in kcal (comparable across foods) and summed as absolute error over every food on
 // either side, so feeding something not in the plan counts against the match too.
-export function dayMismatch({ oldRows, newRows, day, days, fedKcalByName }) {
-  const want = blendRows(oldRows, newRows, shareOfNew(day, days));
-  const names = new Set([...want.map((r) => key(r.name)), ...fedKcalByName.keys()]);
+// `toNew` is the share of the new ration (0 = the pre-ramp state, 1 = fully switched), and
+// `fedBySlot` is keyed the same way the rows are — so a logged flavor counts toward its rotation.
+export function dayMismatch({ oldRows, newRows, toNew, fedBySlot, keyOfName }) {
+  const want = blendRows(oldRows, newRows, toNew, keyOfName);
+  const slots = new Set([...want.map((r) => keyOfName(r.name)), ...fedBySlot.keys()]);
   let err = 0;
-  for (const n of names) {
-    const planned = want.filter((r) => key(r.name) === n).reduce((a, r) => a + num(r.kcal), 0);
-    err += Math.abs(planned - num(fedKcalByName.get(n)));
+  for (const s of slots) {
+    const planned = want.filter((r) => keyOfName(r.name) === s).reduce((a, r) => a + num(r.kcal), 0);
+    err += Math.abs(planned - num(fedBySlot.get(s)));
   }
   return err;
 }
 
-// Which ramp day is TODAY, inferred from what was actually fed on `priorEntries` (yesterday).
+// Which ramp day is TODAY, inferred from what was actually fed on the most recent logged day.
+//
+// DAY 0 MATTERS. Candidates run from 0, not 1: day 0 is the pre-ramp state — 100% of the old food,
+// which is exactly what yesterday looked like if you START the switch today. Without it, "all old
+// food" snapped to day 1 (already 1/n new) and today came out as day 2, so a brand-new transition
+// began a day ahead of itself and asked for more new food than the owner had fed.
+//
+// `gapDays` is how many days back `priorEntries` are (default 1 = yesterday). Missing a day of
+// logging shouldn't reset the ramp to the start, so the caller can hand over the most recent day
+// that HAS entries and say how far back it was; the ramp advances by that many days.
 //
 // Returns { day, basis }:
-//   basis "inferred" — yesterday matched a ramp day; today is the next one (capped at the last).
-//   basis "start"    — nothing usable logged yesterday, so treat today as day 1.
-// Ties go to the EARLIER day (Math.min via strict >), which errs toward advancing more slowly —
-// the safe direction for a gut being transitioned.
-export function inferTransitionDay({ startItems, resolvedRationItems, target, days, priorEntries }) {
+//   "inferred" — matched a ramp day (0..n); today is that plus the gap, capped at the last day.
+//   "start"    — nothing usable logged recently, so treat today as day 1.
+// Ties go to the EARLIER day (strict <), erring toward advancing slowly — the safe direction for a
+// gut being transitioned.
+export function inferTransitionDay({ startItems, resolvedRationItems, target, days, priorEntries, gapDays = 1 }) {
   const n = clampDays(days);
+  const { keyOfName } = makeSlotKeyer(startItems, resolvedRationItems);
   const fed = new Map();
   for (const e of priorEntries || []) {
-    const k = key(e.name);
-    if (!k) continue;
+    if (!key(e.name)) continue;
+    const k = keyOfName(e.name); // a logged flavor counts toward its rotation slot
     fed.set(k, (fed.get(k) || 0) + num(e.kcal));
   }
   if (fed.size === 0 || [...fed.values()].every((v) => v <= 0)) return { day: 1, basis: "start" };
 
   const oldRows = distributeBowl(startItems || [], target).rows;
   const newRows = distributeBowl(resolvedRationItems || [], target).rows;
-  let best = 1;
+  let best = 0;
   let bestErr = Infinity;
-  for (let d = 1; d <= n; d++) {
-    const err = dayMismatch({ oldRows, newRows, day: d, days: n, fedKcalByName: fed });
+  for (let d = 0; d <= n; d++) {
+    const err = dayMismatch({ oldRows, newRows, toNew: d / n, fedBySlot: fed, keyOfName });
     if (err < bestErr) { bestErr = err; best = d; }
   }
-  return { day: Math.min(best + 1, n), basis: "inferred", matchedYesterday: best };
+  const step = Math.max(1, Math.round(num(gapDays)) || 1);
+  return { day: Math.min(best + step, n), basis: "inferred", matchedPrior: best };
 }

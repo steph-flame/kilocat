@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { transitionSteps, inferTransitionDay, blendRows, shareOfNew, clampDays } from "./transition.js";
+import { transitionSteps, inferTransitionDay, blendRows, shareOfNew, clampDays, makeSlotKeyer } from "./transition.js";
 
 // A switch from Instinct (old) to Farmina (new), both 4 kcal/g, one shared food (a treat) that
 // isn't changing — the usual shape: one line differs, everything else holds.
@@ -83,13 +83,13 @@ describe("inferring which ramp day today is", () => {
   it("recognises yesterday's mix and advances one day", () => {
     // yesterday looked like day 3 of 7
     const y = plan(3).map((r) => ({ name: r.name, kcal: r.kcal }));
-    expect(infer(y)).toMatchObject({ day: 4, basis: "inferred", matchedYesterday: 3 });
+    expect(infer(y)).toMatchObject({ day: 4, basis: "inferred", matchedPrior: 3 });
   });
 
   it("works from every day of the ramp", () => {
     for (let d = 1; d < 7; d++) {
       const y = plan(d).map((r) => ({ name: r.name, kcal: r.kcal }));
-      expect(infer(y).matchedYesterday).toBe(d);
+      expect(infer(y).matchedPrior).toBe(d);
     }
   });
 
@@ -109,26 +109,109 @@ describe("inferring which ramp day today is", () => {
 
   it("snaps to the closest day when yesterday was fed a bit off-plan", () => {
     const y = plan(4).map((r) => ({ name: r.name, kcal: r.kcal * 1.06 })); // 6% over, same ratio
-    expect(infer(y).matchedYesterday).toBe(4);
+    expect(infer(y).matchedPrior).toBe(4);
   });
 
   it("counts food fed that isn't in the plan at all against the match", () => {
     const exact = plan(4).map((r) => ({ name: r.name, kcal: r.kcal }));
     const withStray = [...exact, { name: "Churu", kcal: 60 }];
     // still lands on 4 (the stray adds the same error to every candidate), but is a worse fit
-    expect(infer(withStray).matchedYesterday).toBe(4);
+    expect(infer(withStray).matchedPrior).toBe(4);
   });
 
-  it("only the old food yesterday reads as the very start of the ramp", () => {
-    expect(infer([{ name: "Instinct", kcal: TARGET }]).matchedYesterday).toBe(1);
+  // Day 0 = the pre-ramp state. All-old-food yesterday means the switch hasn't started, so today
+  // is day 1 — NOT day 2, which is what came out when candidates began at day 1. See the day-0
+  // regression block below.
+  it("only the old food yesterday reads as day 0 — the ramp hasn't started", () => {
+    const inf = infer([{ name: "Instinct", kcal: TARGET }]);
+    expect(inf.matchedPrior).toBe(0);
+    expect(inf.day).toBe(1);
   });
 
   it("only the new food yesterday reads as the end", () => {
-    expect(infer([{ name: "Farmina", kcal: TARGET }]).matchedYesterday).toBe(7);
+    expect(infer([{ name: "Farmina", kcal: TARGET }]).matchedPrior).toBe(7);
   });
 
   it("is case- and whitespace-insensitive about food names", () => {
     const y = plan(3).map((r) => ({ name: `  ${r.name.toUpperCase()} `, kcal: r.kcal }));
-    expect(infer(y).matchedYesterday).toBe(3);
+    expect(infer(y).matchedPrior).toBe(3);
+  });
+});
+
+// ── Regressions for two bugs found on real data ──────────────────────────────────────────────
+
+describe("day 0: the day BEFORE the ramp starts", () => {
+  // Reported: "it thinks I'm on day 2, but I'm on day 1." Starting a switch today means yesterday
+  // was 100% OLD food. With candidates starting at day 1 (already 1/n new), "all old" snapped to
+  // day 1 and today came out as day 2 — a brand-new transition beginning a day ahead of itself.
+  const infer = (priorEntries, days) =>
+    inferTransitionDay({ startItems: OLD, resolvedRationItems: NEW, target: TARGET, days, priorEntries });
+
+  it("yesterday was all OLD food → today is day 1, not day 2", () => {
+    const yesterday = [{ name: "Instinct", kcal: TARGET }];
+    expect(infer(yesterday, 14)).toMatchObject({ day: 1, matchedPrior: 0 });
+    expect(infer(yesterday, 7)).toMatchObject({ day: 1, matchedPrior: 0 });
+  });
+
+  it("still advances correctly once the ramp is under way", () => {
+    for (const days of [7, 14]) {
+      for (let d = 1; d < days; d++) {
+        const y = transitionSteps({ startItems: OLD, resolvedRationItems: NEW, target: TARGET, day: d, days })
+          .map((r) => ({ name: r.name, kcal: r.kcal }));
+        expect(infer(y, days).day).toBe(d + 1);
+      }
+    }
+  });
+
+  it("a 14-day ramp is honoured, not silently treated as 7", () => {
+    const rows = transitionSteps({ startItems: OLD, resolvedRationItems: NEW, target: TARGET, day: 1, days: 14 });
+    expect(rows.find((r) => r.name === "Farmina").kcal).toBeCloseTo(TARGET / 14, 5);
+  });
+
+  it("missing a day of logging advances the ramp instead of resetting it", () => {
+    const y = transitionSteps({ startItems: OLD, resolvedRationItems: NEW, target: TARGET, day: 3, days: 14 })
+      .map((r) => ({ name: r.name, kcal: r.kcal }));
+    expect(inferTransitionDay({ startItems: OLD, resolvedRationItems: NEW, target: TARGET, days: 14, priorEntries: y, gapDays: 3 }).day).toBe(6);
+  });
+});
+
+describe("a rotating slot is ONE slot, not a food being swapped", () => {
+  // From Steph's real data: "currently feeding" is seeded by copying the ration, and that copy
+  // strips `rotation` and keeps whichever flavor was active then. So the same variety pack showed
+  // up as "…Beef" (old) and "…Quail Egg" (new) — blending into a phantom fading-out row that no
+  // logged meal could satisfy, which is why a fed wet meal still read as "still to feed".
+  const PACK = ["Tiki Beef", "Tiki Quail Egg", "Tiki Lamb"];
+  const rationWithRotation = [
+    { id: "r1", name: "Tiki Quail Egg", mode: "perKg", kcalPerKg: 1200, splitMode: "remainder",
+      rotation: PACK.map((n) => ({ name: n, mode: "perKg", kcalPerKg: 1200 })) },
+  ];
+  const startSnapshot = [{ id: "s1", name: "Tiki Beef", mode: "perKg", kcalPerKg: 1200, splitMode: "remainder" }]; // rotation stripped
+
+  it("collapses the pack into a single row instead of one fading out and one phasing in", () => {
+    const rows = transitionSteps({ startItems: startSnapshot, resolvedRationItems: rationWithRotation, target: TARGET, day: 3, days: 14 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].phase).toBe("both");
+    expect(rows[0].kcal).toBeCloseTo(TARGET, 5); // and it isn't split across a phantom row
+  });
+
+  it("keeps the ration's identity, so the row still knows its rotation", () => {
+    const rows = transitionSteps({ startItems: startSnapshot, resolvedRationItems: rationWithRotation, target: TARGET, day: 3, days: 14 });
+    expect(rows[0].id).toBe("r1"); // → LogPage finds the rotation and matches ANY flavor fed
+  });
+
+  it("a flavor logged yesterday counts toward the slot when inferring the day", () => {
+    const inf = inferTransitionDay({
+      startItems: startSnapshot, resolvedRationItems: rationWithRotation, target: TARGET, days: 14,
+      priorEntries: [{ name: "Tiki Lamb", kcal: TARGET }], // a third flavor, in neither list by name
+    });
+    expect(inf.basis).toBe("inferred"); // not treated as off-plan food
+  });
+
+  it("makeSlotKeyer maps every member and the active flavor to one key", () => {
+    const { keyOfName } = makeSlotKeyer(startSnapshot, rationWithRotation);
+    const k = keyOfName("Tiki Beef");
+    expect(keyOfName("Tiki Quail Egg")).toBe(k);
+    expect(keyOfName("Tiki Lamb")).toBe(k);
+    expect(keyOfName("Farmina")).not.toBe(k); // an unrelated food keeps its own key
   });
 });
