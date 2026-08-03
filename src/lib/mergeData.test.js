@@ -438,16 +438,19 @@ describe("mergeV2 litterRobot", () => {
     expect(mergeV2(local, incoming).litterRobot).toEqual(conn("local-token"));
   });
 
-  it("adopts incoming's connection when local has none (null)", () => {
+  // These two used to assert the opposite — a device with no connection ADOPTED the incoming one,
+  // which made an import able to connect a Whisker account from a backup file. A refreshToken is a
+  // live credential, so that vector is closed: you reconnect after an import, deliberately.
+  it("never adopts incoming's connection, even when local has none (null)", () => {
     const local = snap({ litterRobot: null });
     const incoming = snap({ litterRobot: conn("incoming-token") });
-    expect(mergeV2(local, incoming).litterRobot).toEqual(conn("incoming-token"));
+    expect(mergeV2(local, incoming).litterRobot).toBeNull();
   });
 
-  it("adopts incoming's connection when local's field is undefined (older local state)", () => {
+  it("never adopts incoming's connection when local's field is undefined (older local state)", () => {
     const local = snap(); delete local.litterRobot;
     const incoming = snap({ litterRobot: conn("incoming-token") });
-    expect(mergeV2(local, incoming).litterRobot).toEqual(conn("incoming-token"));
+    expect(mergeV2(local, incoming).litterRobot).toBeNull();
   });
 
   it("stays null when neither side has a connection", () => {

@@ -65,12 +65,13 @@
 //  - fridgeDays / skin / unit / estimator: one shared bundle, LWW by top-level `settingsModAt`
 //    — same rule/limitation shape as the per-cat bundle above (whole bundle moves together;
 //    a tie keeps local).
-//  - litterRobot: kept LOCAL. EXCEPT: if local has no connection (null/undefined — "never
-//    connected" and "explicitly disconnected" look the same in this shape) and incoming has
-//    one, the incoming connection is adopted — there's nothing local to protect in that case,
-//    and it's the one way a Litter-Robot connection could ever reach a new device via this
-//    file-based import. Never the reverse: a local connection's token is never replaced by
-//    an imported one. Deliberately NOT LWW'd — it's a device-bound token, not shared data.
+//  - litterRobot: kept LOCAL, ALWAYS. Deliberately NOT LWW'd — it's a device-bound credential,
+//    not shared data. This used to adopt an incoming connection when local had none ("nothing
+//    local to protect"), which made file-based import the one way a connection could reach a new
+//    device. That's now closed: a refreshToken is a live Whisker credential, so a backup file
+//    must never be able to connect an account — you reconnect after an import, on purpose.
+//    Exports no longer contain one at all (lib/portableExport.js strips it on the way out, and
+//    scrubs it on the way in so older files that still carry one can't reintroduce it).
 //  - activeCatId: kept LOCAL.
 
 import { num } from "./util.js";
@@ -366,7 +367,9 @@ export function mergeV2(local, incoming, now = Date.now()) {
     // "Local has none" covers both undefined (never touched this field) and null (no
     // connection / explicitly disconnected) — either way there's nothing local to protect,
     // so an incoming connection may be adopted. A local connection is never replaced.
-    litterRobot: l.litterRobot ?? inc.litterRobot ?? null,
+    // ALWAYS local. A connection is never adopted from an incoming blob, even onto a device that
+    // has none — see the rule table above for the convenience this deliberately gives up.
+    litterRobot: l.litterRobot ?? null,
   };
   return pruneTombstones(merged, now);
 }

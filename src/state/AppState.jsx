@@ -18,6 +18,7 @@ import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
 import { resolveIntent } from "../lib/intent.js";
 import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../lib/mergeData.js";
+import { toPortableExport, toPortableImport, findCredentialFields } from "../lib/portableExport.js";
 import { openCan, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, nextPackIndex } from "../lib/fridge.js";
 import { hasRotation } from "../lib/rotation.js";
 import {
@@ -220,6 +221,11 @@ export function AppProvider({ children }) {
   // identical to the load path.
   const importData = (raw) => {
     if (!raw || typeof raw !== "object") return;
+    // Scrub the file BEFORE anything else looks at it. Exports written before portableExport.js
+    // existed still carry a live Litter-Robot refreshToken, and an imported file is untrusted
+    // input generally — so a connection can never ride in through this seam (you reconnect after
+    // an import, deliberately). Already-imported weigh-ins are ordinary data and merge normally.
+    raw = toPortableImport(raw);
     let incoming;
     if (raw.v === 2) {
       incoming = raw;
@@ -603,7 +609,15 @@ export function AppProvider({ children }) {
     skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure, intent,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,
-    exportData: () => JSON.stringify(persistData, null, 2),
+    // Never serialise persistData directly — it carries the Litter-Robot refreshToken. See
+    // lib/portableExport.js; the assertion turns a future regression into a loud failure here
+    // rather than a credential quietly written to the user's Downloads folder.
+    exportData: () => {
+      const portable = toPortableExport(persistData);
+      const leaks = findCredentialFields(portable);
+      if (leaks.length) throw new Error(`refusing to export credential fields: ${leaks.join(", ")}`);
+      return JSON.stringify(portable, null, 2);
+    },
     importData,
     litterRobot, connectLitterRobotStart, connectLitterRobotFinish, disconnectLitterRobot, syncLitterRobotNow,
     setPetMapping, setRobotMapping,
