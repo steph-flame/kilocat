@@ -3,6 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Content-Security-Policy. The point of this for Kilocat is NOT "stops a compromised build"
+         — a malicious script served from our own origin is 'self' and passes. What it does buy:
+         (1) script-src 'self' with no 'unsafe-inline'/'unsafe-eval' means injected markup can't
+         execute, so a stored-XSS-shaped bug (a food name, a cat name) can't become code; and
+         (2) connect-src is an EXFILTRATION ALLOWLIST — if anything ever does run in this page, it
+         can only phone home to hosts named here, not to an attacker's collector. That matters a
+         lot more once the browser is holding a decryption key for synced data.
+         Keep connect-src in sync with lib/litterRobot.js's endpoints and, when sync lands, the
+         sync backend's origin. NOTE: frame-ancestors and sandbox are ignored in a <meta> CSP and
+         GitHub Pages can't set real headers, so clickjacking defence has to come from the host
+         if we ever move off Pages. -->
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      base-uri 'self';
+      object-src 'none';
+      form-action 'self';
+      frame-src 'none';
+      script-src 'self';
+      worker-src 'self';
+      manifest-src 'self';
+      font-src 'self';
+      img-src 'self' data: blob: https://steph-flame.goatcounter.com;
+      style-src 'self' 'unsafe-inline';
+      connect-src 'self'
+        https://steph-flame.goatcounter.com
+        https://cognito-idp.us-east-1.amazonaws.com
+        https://lr4.iothings.site
+        https://pet-profile.iothings.site
+        https://ub.prod.iothings.site;
+    " />
     <title>Kilocat</title>
     <meta name="description" content="Work out how much to feed a cat: target energy from the animal, grams from the food split, and a transition schedule." />
     <!-- PWA install metadata — vite-plugin-pwa injects the manifest link + SW registration
@@ -12,15 +42,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Kilocat" />
-    <!-- GoatCounter: cookie-less, privacy-respecting page counts (see README). The path hook
-         records the hash route so #/ration vs #/expenditure count as distinct pages; the
-         hashchange listener counts in-app navigation, not just first loads. -->
-    <script>
-      window.goatcounter = { path: () => location.pathname + location.hash };
-      window.addEventListener("hashchange", () => {
-        if (window.goatcounter.count) window.goatcounter.count({ path: location.pathname + location.hash });
-      });
-    </script>
+    <!-- GoatCounter: cookie-less, privacy-respecting page counts (see README). Config lives in
+         goatcounter-init.js rather than inline so the CSP above can forbid inline script. -->
+    <script src="%BASE_URL%goatcounter-init.js"></script>
     <script data-goatcounter="https://steph-flame.goatcounter.com/count" async src="%BASE_URL%count.js"></script>
   </head>
   <body>
