@@ -209,13 +209,13 @@ export default function Trend() {
           <div style={label({ marginBottom: 4 })}>Measured burn · kcal/day</div>
           <BurnChart frame={frame} formula={formula} />
           <Legend items={[[A.chart.expenditure || A.good, "measured", "line"], [A.muted, "vet formula", "dash"]]} />
-          <p style={{ ...cap, fontSize: 11.5 }}>The solid line is the day-by-day measured estimate and the shaded band its 95% interval, which tightens as you log. The dotted line is what the vet formula alone predicts for her weight — the gap is what the data revealed the formula was missing.</p>
+          <p style={{ ...cap, fontSize: 11.5 }}>Band = the estimate's 95% range, tightening as you log. Dotted = the vet formula for her weight; the gap is what the data revealed.</p>
         </Card>
 
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Energy balance · kcal vs burn</div>
           <EnergyChart frame={frame} burn={e.kcal} />
-          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake against <b style={{ fontWeight: 600 }}>that day's</b> estimated burn: the dot is the balance, the pill around it its 95% interval — which is just the burn's own uncertainty, since intake is exact. A pill straddling the break-even means that day's deficit or surplus is within the noise; only a pill clearly below (deficit) or above (surplus) is real. The break-even drifts with her weight, so it isn't pinned to today's {burn} kcal; the dark line is the smoothed average.</p>
+          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake minus that day's burn. The dot is the balance, the pill its 95% range — a pill crossing the line is too close to call.</p>
         </Card>
 
         {/* ── measured family: the raw scale weight and its rate — no model, straight from weigh-ins. ── */}
