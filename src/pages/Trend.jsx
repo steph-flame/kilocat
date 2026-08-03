@@ -182,11 +182,25 @@ export default function Trend() {
           </div>
         </div>
 
+        {/* ── model-fit family: the burn estimate, and the energy balance measured against it.
+             Both lean on the Kalman fit (its per-day burn + uncertainty), so they're grouped and
+             both carry the same 95% band — a visual cue that these two are fitted, not measured. ── */}
+        <GroupRule>from the model fit</GroupRule>
+
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Measured burn · kcal/day</div>
           <BurnChart frame={frame} />
           <p style={{ ...cap, fontSize: 11.5 }}>The line is the day-by-day estimate; the shaded band is its 95% interval, which tightens as more weigh-ins pin down the trend.</p>
         </Card>
+
+        <Card style={{ padding: "12px 14px" }}>
+          <div style={label({ marginBottom: 4 })}>Energy balance · kcal vs burn</div>
+          <EnergyChart frame={frame} burn={e.kcal} />
+          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake against <b style={{ fontWeight: 600 }}>that day's</b> estimated burn, so it inherits the burn's uncertainty. The shaded zone around the break-even is that same 95% interval: bars inside it are within the noise of how well we know her burn — only bars clearly past it read as a real deficit (below) or surplus (above). The break-even drifts with her weight, so it isn't pinned to today's {burn} kcal; the dark line is the smoothed average.</p>
+        </Card>
+
+        {/* ── measured family: the raw scale weight and its rate — no model, straight from weigh-ins. ── */}
+        <GroupRule>straight from the scale</GroupRule>
 
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Weight · {weightLabel(unit)}</div>
@@ -202,12 +216,6 @@ export default function Trend() {
               ? `Over the last ${tw.days} days: ${tw.gramsPerWeek < 0 ? "−" : "+"}${Math.abs(Math.round(tw.gramsPerWeek))} g/wk (${tw.pctPerWeek < 0 ? "−" : "+"}${Math.abs(r1(tw.pctPerWeek))}%/wk).`
               : "Not enough days yet to call a rate."; })()} The shaded band is the safe 0.5–2%/wk zone; above the dashed line she'd be gaining.
           </p>
-        </Card>
-
-        <Card style={{ padding: "12px 14px" }}>
-          <div style={label({ marginBottom: 4 })}>Energy balance · kcal vs burn</div>
-          <EnergyChart frame={frame} burn={e.kcal} />
-          <p style={{ ...cap, fontSize: 11.5 }}>Each day's intake against <b style={{ fontWeight: 600 }}>that day's</b> estimated burn — the break-even line drifts as her weight (and maintenance) change, so it isn't pinned to today's {burn} kcal. Below the line is a deficit (losing), above is a surplus; the dark line is the smoothed average.</p>
         </Card>
 
         {e.missingIntake > 0 && (
@@ -352,21 +360,31 @@ function EnergyChart({ frame, burn }) {
   // burn would misattribute a rising/falling baseline as a surplus/deficit.
   const daily = frame.map((f) => (f.kin != null && !f.kinImputed ? f.kin - (Number.isFinite(f.e) ? f.e : burn) : null));
   if (!daily.some((d) => d != null)) return <div style={{ fontSize: 12, color: A.muted, padding: "8px 0" }}>No complete days in range yet.</div>;
+  // The balance is intake (measured, exact) minus the FITTED burn — so all its uncertainty comes
+  // from the burn's per-day sd (the same sd the burn chart bands). Draw that as a fuzzy break-even
+  // zone (±1.96·sd around zero): a bar inside the band is within the noise of how well we know her
+  // burn, so only bars clearly past it are a real deficit/surplus. It's wide early, narrow later.
+  const K = 1.96;
+  const bandPts = frame.map((f, i) => (Number.isFinite(f.sd) && f.sd >= 0 ? { i, sd: f.sd } : null)).filter(Boolean);
   // smoothed running average (EWMA over the days that have data) — the line on top.
   const alpha = 0.2;
   let ema = null;
   const smooth = [];
   daily.forEach((d, i) => { if (d == null) return; ema = ema == null ? d : alpha * d + (1 - alpha) * ema; smooth.push([xAt(i, n), i, ema]); });
-  const maxAbs = Math.max(40, ...daily.map((d) => (d == null ? 0 : Math.abs(d))), ...smooth.map((s) => Math.abs(s[2])));
+  const maxAbs = Math.max(40, ...daily.map((d) => (d == null ? 0 : Math.abs(d))), ...smooth.map((s) => Math.abs(s[2])), ...bandPts.map((p) => K * p.sd));
   const y = linScale([-maxAbs, maxAbs], [H - PADY, PADY]);
   const base = y(0);
   const bw = Math.max(1.5, (VW - PADL - PADR) / n - 1);
   const smoothPts = smooth.map(([x, , v]) => [x, y(v)]);
+  const bTop = bandPts.map((p) => [xAt(p.i, n), y(K * p.sd)]);
+  const bBot = bandPts.map((p) => [xAt(p.i, n), y(-K * p.sd)]);
+  const bandD = bTop.length > 1 ? dPath(bTop) + " " + bBot.reverse().map((p) => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ") + " Z" : null;
   const hv = idx != null && daily[idx] != null ? { x: xAt(idx, n), val: daily[idx], date: frame[idx].date } : null;
   return (
     <div {...bind}>
       {hv && <Tip vbx={hv.x}>{mmdd(hv.date)} · {hv.val > 0 ? "+" : "−"}{r0(Math.abs(hv.val))} kcal</Tip>}
       <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }}>
+        {bandD && <path d={bandD} fill={A.chart.expenditure || A.good} opacity="0.14" />}
         {daily.map((d, i) => {
           if (d == null) return null;
           const cx = xAt(i, n), yv = y(d);
@@ -381,6 +399,18 @@ function EnergyChart({ frame, burn }) {
         <text x={VW - PADR} y={base - 4} textAnchor="end" style={axisText}>≈{r0(burn)} kcal now</text>
       </svg>
       <XDates frame={frame} />
+    </div>
+  );
+}
+
+// A section eyebrow + hairline that spans the grid, grouping the charts by data source: the fitted
+// (model) pair vs. the measured (scale) pair. On desktop the grid is 2-up, so each rule heads a row
+// of its two charts; on phones it just precedes the stacked pair.
+function GroupRule({ children }) {
+  return (
+    <div className="span-all" style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 18px 0" }}>
+      <span style={label({ color: A.labelOnFill })}>{children}</span>
+      <span style={{ flex: 1, height: 1, background: A.cardBorder }} />
     </div>
   );
 }
