@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toPortableExport, toPortableImport, stripCredentials, findCredentialFields, isCredentialKey } from "./portableExport.js";
+import { toPortableExport, toPortableImport, stripCredentials, findCredentialFields, isCredentialKey, isUnsafeKey } from "./portableExport.js";
 import { mergeV2 } from "./mergeData.js";
 
 // A persisted blob shaped like the real one, with a live-looking credential in it.
@@ -102,5 +102,37 @@ describe("stripCredentials primitives", () => {
   });
   it("findCredentialFields reports the path so a failure says WHERE", () => {
     expect(findCredentialFields({ a: { b: [{ refreshToken: "x" }] } })).toEqual(["a.b[0].refreshToken"]);
+  });
+});
+
+describe("prototype pollution — untrusted JSON can't reshape objects", () => {
+  // JSON.parse('{"__proto__":{...}}') produces a real OWN property named __proto__. Copying it
+  // onward with `out[k] = v` fires the prototype setter. This module is the first thing to touch an
+  // imported file, so it's where the key has to be dropped.
+  const hostile = () => JSON.parse('{"v":2,"cats":{},"__proto__":{"polluted":"yes"},"nested":{"__proto__":{"polluted":"yes"},"keep":1}}');
+
+  it("drops __proto__ at every depth instead of copying it onward", () => {
+    const out = toPortableImport(hostile());
+    expect(Object.prototype.hasOwnProperty.call(out, "__proto__")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(out.nested, "__proto__")).toBe(false);
+    expect(out.nested.keep).toBe(1); // ordinary siblings survive
+  });
+
+  it("leaves Object.prototype untouched", () => {
+    toPortableImport(hostile());
+    expect({}.polluted).toBeUndefined();
+    expect(Object.prototype.polluted).toBeUndefined();
+  });
+
+  it("also refuses constructor and prototype keys", () => {
+    const out = toPortableImport(JSON.parse('{"constructor":{"x":1},"prototype":{"y":2},"ok":3}'));
+    expect(out.ok).toBe(3);
+    expect(Object.prototype.hasOwnProperty.call(out, "constructor")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(out, "prototype")).toBe(false);
+  });
+
+  it("the export path refuses them too, so a poisoned local state can't be handed on", () => {
+    const out = toPortableExport(JSON.parse('{"v":2,"__proto__":{"polluted":"yes"}}'));
+    expect(Object.prototype.hasOwnProperty.call(out, "__proto__")).toBe(false);
   });
 });

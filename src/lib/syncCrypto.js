@@ -220,5 +220,11 @@ export async function decryptBlob(key, payload) {
   const ciphertext = combined.slice(12);
   const cryptoKey = await importAesKey(key);
   const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, cryptoKey, ciphertext);
-  return JSON.parse(new TextDecoder().decode(plaintext));
+  // Authenticated, so this came from someone holding the key — but "holding the key" includes a
+  // compromised or buggy device on the same account, and GCM proves provenance, not sanity. Drop
+  // __proto__/constructor/prototype during parse: a reviver returning undefined omits the key
+  // entirely, so no consumer downstream can assign it onward and shift an object's prototype.
+  return JSON.parse(new TextDecoder().decode(plaintext), (k, v) =>
+    (k === "__proto__" || k === "constructor" || k === "prototype") ? undefined : v
+  );
 }

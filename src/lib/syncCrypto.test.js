@@ -258,3 +258,16 @@ function bytesToBase64ForTest(bytes) {
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary);
 }
+
+describe("decryptBlob rejects prototype-shifting keys", () => {
+  test("drops __proto__ from a decrypted payload", async () => {
+    const key = crypto.getRandomValues(new Uint8Array(32));
+    // encryptBlob takes an object; build one carrying a literal __proto__ own property
+    const payload = JSON.parse('{"dek":"ab","__proto__":{"polluted":"yes"},"deep":{"__proto__":{"polluted":"yes"},"k":1}}');
+    const back = await decryptBlob(key, await encryptBlob(key, payload));
+    expect(Object.prototype.hasOwnProperty.call(back, "__proto__")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(back.deep, "__proto__")).toBe(false);
+    expect(back.deep.k).toBe(1);
+    expect({}.polluted).toBeUndefined();
+  });
+});

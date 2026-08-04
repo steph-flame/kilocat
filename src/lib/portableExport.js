@@ -32,6 +32,15 @@ const CREDENTIAL_RE = /(token|password|passwd|secret|credential|passphrase|api[-
 
 export const isCredentialKey = (key) => CREDENTIAL_RE.test(String(key));
 
+// Keys that must never be copied out of untrusted JSON. `JSON.parse('{"__proto__":{...}}')` yields
+// a real OWN property named __proto__; copying it onward with `out[k] = v` then fires the prototype
+// setter and changes the object's prototype. Object spread is immune (it defines rather than
+// assigns), but this module assigns, and it's the first thing to touch an imported file or a
+// decrypted sync blob. Cheaper to refuse the keys than to reason about every consumer downstream.
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+export const isUnsafeKey = (key) => UNSAFE_KEYS.has(String(key));
+
 // Walk any JSON-ish value and drop every credential-named field, at every depth. Returns a new
 // value; the input is never mutated (callers pass live state). Non-plain values (Date, etc.) are
 // returned as-is — the persisted blob is plain JSON, so this only matters defensively.
@@ -40,7 +49,7 @@ export function stripCredentials(value) {
   if (value && typeof value === "object" && Object.getPrototypeOf(value) !== Date.prototype) {
     const out = {};
     for (const [k, v] of Object.entries(value)) {
-      if (isCredentialKey(k)) continue;
+      if (isCredentialKey(k) || isUnsafeKey(k)) continue;
       out[k] = stripCredentials(v);
     }
     return out;
@@ -70,7 +79,9 @@ export function toPortableExport(state) {
   if (!state || typeof state !== "object") return state;
   const out = {};
   for (const [k, v] of Object.entries(state)) {
-    if (DEVICE_LOCAL_KEYS.includes(k)) continue;
+    // isUnsafeKey applies HERE as well as inside stripCredentials: this loop assigns too, so a
+    // top-level "constructor" would otherwise land as an own property (a test caught exactly that).
+    if (DEVICE_LOCAL_KEYS.includes(k) || isUnsafeKey(k) || isCredentialKey(k)) continue;
     out[k] = stripCredentials(v);
   }
   return out;
