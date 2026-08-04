@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex } from "./fridge.js";
+import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, planSlotDraw, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex } from "./fridge.js";
 
 let idn = 0;
 const mkId = () => `can-${idn++}`;
@@ -146,5 +146,71 @@ describe("variety pack — explicit open/finish, in order", () => {
     expect(nextPackIndex(pack)).toBe(1);
     expect(nextPackIndex({ ...pack, rotIndex: 2 })).toBe(0);
     expect(nextPackIndex({ ...pack, rotateOff: true })).toBe(0); // not rotating → no cycle
+  });
+});
+
+describe("planSlotDraw — a slot that outlives its open can", () => {
+  // Steph's case: the fridge correctly says 3.4 g left, but the plan showed 53.3 g — the whole
+  // slot priced at the OPEN can's density, ignoring that the rest comes from the next flavor.
+  const flavor = (name, kcalPerKg) => ({ name, type: "wet", mode: "perUnit", gramsPerUnit: 80, kcalPerUnit: (kcalPerKg * 80) / 1000, kcalPerKg });
+  const A_ = flavor("Quail Egg", 1200); // 1.2 kcal/g
+  const B_ = flavor("Beef", 1000);      // 1.0 kcal/g — deliberately different density
+  const pack = { ...A_, id: "slot", splitMode: "share", rotation: [A_, B_], rotIndex: 0 };
+  const today = "2026-02-02";
+  const openCan = (f, remainingGrams, openedDate = "2026-02-01") =>
+    ({ id: `can-${f.name}`, ...f, openedDate, canGrams: 80, remainingGrams });
+
+  it("finishes the open can first, then continues in the NEXT flavor at its own density", () => {
+    const fridge = [openCan(A_, 3.4)];
+    const { segs, shortfall } = planSlotDraw(pack, 64, today, fridge, 3);
+    expect(segs).toHaveLength(2);
+    expect(segs[0]).toMatchObject({ name: "Quail Egg", kind: "open", grams: 3.4 });
+    expect(segs[1].name).toBe("Beef");
+    expect(segs[1].kind).toBe("new");
+    // 64 kcal - (3.4 g x 1.2) = 59.92 kcal left, at 1.0 kcal/g -> 59.92 g of Beef
+    expect(segs[1].grams).toBeCloseTo(59.92, 1);
+    expect(shortfall).toBe(0);
+  });
+
+  it("the segments still add up to the slot's energy — the split is by kcal, not grams", () => {
+    const { segs } = planSlotDraw(pack, 64, today, [openCan(A_, 3.4)], 3);
+    expect(segs.reduce((a, s) => a + s.kcal, 0)).toBeCloseTo(64, 1);
+  });
+
+  it("one segment when the open can comfortably covers the slot (no spurious split)", () => {
+    const { segs } = planSlotDraw(pack, 24, today, [openCan(A_, 60)], 3);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ name: "Quail Egg", kind: "open" });
+    expect(segs[0].grams).toBeCloseTo(20, 1); // 24 kcal / 1.2
+  });
+
+  it("opens the current flavor when nothing is open at all", () => {
+    const { segs } = planSlotDraw(pack, 24, today, [], 3);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ name: "Quail Egg", kind: "new" });
+  });
+
+  it("skips an EXPIRED open can rather than planning to feed it", () => {
+    const stale = openCan(A_, 60, "2026-01-01"); // long past a 3-day life
+    const { segs } = planSlotDraw(pack, 24, today, [stale], 3);
+    expect(segs[0].kind).toBe("new"); // not drawn from the expired can
+  });
+
+  it("walks the whole pack for a big slot and reports what it couldn't place", () => {
+    const { segs, shortfall } = planSlotDraw(pack, 10000, today, [], 3);
+    expect(segs.map((s) => s.name)).toEqual(["Quail Egg", "Beef"]); // one new can each, then stops
+    expect(shortfall).toBeGreaterThan(0); // honest about the rest rather than inventing cans
+  });
+
+  it("works for a plain canned food with no rotation", () => {
+    const solo = { ...A_, id: "s", splitMode: "share" };
+    const { segs } = planSlotDraw(solo, 64, today, [openCan(A_, 3.4)], 3);
+    expect(segs).toHaveLength(2);
+    expect(segs.every((s) => s.name === "Quail Egg")).toBe(true); // same food, next can
+  });
+
+  it("returns nothing for a zero/negative need", () => {
+    expect(planSlotDraw(pack, 0, today, [openCan(A_, 3.4)], 3).segs).toEqual([]);
+    expect(planSlotDraw(null, 64, today, [], 3).segs).toEqual([]);
   });
 });

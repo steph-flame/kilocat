@@ -8,7 +8,7 @@
 // and supplies an id factory.
 
 import { foodFieldsOf, hasRotation, isRotating, activeMember } from "./rotation.js";
-import { foodType } from "./foods.js";
+import { foodType, kcalPerG } from "./foods.js";
 import { addDays, diffDays } from "./series.js";
 import { num } from "./util.js";
 
@@ -77,6 +77,69 @@ export function planDraw(fridge, food, grams, today, fridgeDays) {
     need -= take;
   }
   return { grams: need0, segs };
+}
+
+// Plan a whole SLOT's worth of energy across cans AND, for a variety pack, across flavors — which
+// is what planDraw above can't do on its own, because it only ever looks at cans of one food.
+//
+// The case that makes this necessary: the slot needs (say) 64 kcal, the open can has 3.4 g left,
+// and the next flavor is a different food with its own kcal/g. Showing "53.3 g" — the whole slot
+// priced at the open can's density — is wrong twice over: there isn't 53.3 g in that can, and the
+// remainder won't be that flavor. What the owner needs to see is "finish the 3.4 g that's open,
+// then ~49.9 g of the next one".
+//
+// Fills by ENERGY, not grams, so each segment converts at its own flavor's density and the slot
+// still lands on its kcal. Order: every good open can of the current flavor (oldest first), then
+// the next flavor in the pack as a new can, and so on around the rotation. Plans only — opening and
+// finishing cans stay explicit user actions (see consumeFromFridge).
+//
+// Returns { segs, shortfall } where each seg is { food, name, grams, kcal, kind: "open"|"new",
+// can?, status? }. `shortfall` is kcal that couldn't be placed (no density to convert with).
+export function planSlotDraw(food, kcal, date, fridge, fridgeDays, maxSegs = 12) {
+  const need0 = num(kcal);
+  if (!(need0 > 0) || !food) return { segs: [], shortfall: 0 };
+  // The flavors to walk, starting at whichever the pack is actually on today.
+  const members = isRotating(food)
+    ? (() => {
+        const start = packStartIndex(food, fridge, date, fridgeDays);
+        return food.rotation.map((_, i) => food.rotation[norm(start + i, food.rotation.length)]);
+      })()
+    : [food];
+
+  let need = need0;
+  const segs = [];
+  const usedCans = new Set();
+  for (let pass = 0; pass < members.length && need > 0.01 && segs.length < maxSegs; pass++) {
+    const m = members[pass];
+    const kpg = kcalPerG(m);
+    if (!(kpg > 0)) continue; // can't convert energy to grams for this flavor; try the next
+    // 1) whatever is already open of this flavor
+    let drainedOpen = false;
+    for (const c of availableCansOf(fridge, m.name, date, fridgeDays)) {
+      if (need <= 0.01 || segs.length >= maxSegs) break;
+      if (usedCans.has(c.id)) continue;
+      usedCans.add(c.id);
+      const grams = Math.min(num(c.remainingGrams), need / kpg);
+      if (!(grams > 0.01)) continue;
+      drainedOpen = true;
+      segs.push({ food: m, name: m.name, grams: round2(grams), kcal: round2(grams * kpg), kind: "open", can: c, status: canStatus(c, date, fridgeDays) });
+      need -= grams * kpg;
+    }
+    // 2) Still short. For a VARIETY PACK, emptying the open can is precisely when you move to the
+    //    next flavor — so don't open a second can of the one just finished; fall through to the
+    //    next member instead. A pack with nothing open still opens its current flavor, and a plain
+    //    canned food (no rotation) just opens another of itself.
+    const rotateOnward = isRotating(food) && drainedOpen;
+    if (need > 0.01 && segs.length < maxSegs && !rotateOnward) {
+      const canGrams = num(m.gramsPerUnit);
+      if (canGrams > 0) {
+        const grams = Math.min(canGrams, need / kpg);
+        segs.push({ food: m, name: m.name, grams: round2(grams), kcal: round2(grams * kpg), kind: "new" });
+        need -= grams * kpg;
+      }
+    }
+  }
+  return { segs, shortfall: round2(Math.max(0, need)) };
 }
 
 // Put `grams` of `food` back into the fridge — the reverse of consume, used when a logged wet meal

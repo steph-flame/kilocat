@@ -6,7 +6,7 @@ import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayL
 import { foodSummary, macroBreakdown, trailingWindow, itemsInRange, rebalanceRemaining } from "../lib/foodStats.js";
 import { kcalPerG, foodType } from "../lib/foods.js";
 import { distributeBowl } from "../lib/bowl.js";
-import { isCanned, resolveRotationsWithFridge, availableCansOf } from "../lib/fridge.js";
+import { isCanned, resolveRotationsWithFridge, availableCansOf, planSlotDraw } from "../lib/fridge.js";
 import { isRotating } from "../lib/rotation.js";
 import { transitionSteps, inferTransitionDay, clampDays, shareOfNew } from "../lib/transition.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
@@ -349,6 +349,12 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
                     : num(s.grams) > 0 ? `${Number(r.remG.toFixed(1))} g` : `${kc(r.remK)} kcal`;
                   const wet = s.rot || isCanned(s.food);
                   const openC = wet ? (availableCansOf(fridge, s.name, todayStr, fridgeDays)[0] || null) : null;
+                  // What's left of a wet slot may not fit in the open can — and the rest comes from
+                  // the NEXT flavor, at ITS density. So plan the draw across cans/flavors; when it
+                  // takes more than one, grams stop being a single number and the headline shows
+                  // kcal with the per-can split below it.
+                  const draw = wet && isToday && !r.done ? planSlotDraw(s.food, r.remK, todayStr, fridge, fridgeDays) : null;
+                  const split = draw && draw.segs.length > 1 ? draw.segs : null;
                   const canBtn = { fontFamily: TYPE.mono, fontSize: 11, border: "none", background: "none", cursor: "pointer", color: A.good, padding: 0, textDecoration: "underline" };
                   return (
                     <div key={s.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -361,12 +367,27 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
                           <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.good, flex: "none" }}>fed ✓</span>
                         ) : (
                           <>
-                            <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body, flex: "none" }}>{amt} left</span>
+                            <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.body, flex: "none" }}>{split ? `${kc(r.remK)} kcal` : amt} left</span>
                             <button onClick={() => logSlotPortion(s, num(s.grams) > 0 ? r.remG : 0)} disabled={!(r.remG > 0)}
                               style={{ flex: "none", fontFamily: TYPE.mono, fontSize: 11, borderRadius: 999, padding: "3px 10px", cursor: r.remG > 0 ? "pointer" : "default", border: `1px solid ${A.cardBorder}`, background: "transparent", color: r.remG > 0 ? A.good : A.cardBorder }}>log it</button>
                           </>
                         )}
                       </div>
+                      {/* The open can can't cover what's left, so say what actually comes out of
+                          which can — "finish the 3.4 g that's open, then 49.9 g of the next flavor"
+                          — instead of one gram figure priced at the open can's density. */}
+                      {split && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingLeft: 16 }}>
+                          {split.map((seg, i) => (
+                            <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, fontFamily: TYPE.mono, fontSize: 11 }}>
+                              <span style={{ color: A.ink, minWidth: 52 }}>{Number(seg.grams.toFixed(1))} g</span>
+                              <span style={{ color: A.body, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{seg.name}</span>
+                              <span style={{ color: A.muted, flex: "none" }}>{seg.kind === "open" ? "finishes this can" : "new can"}</span>
+                            </div>
+                          ))}
+                          {draw.shortfall > 1 && <div style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.caution.text }}>{kc(draw.shortfall)} kcal unplaced — add another flavor to the pack</div>}
+                        </div>
+                      )}
                       {wet && isToday && (
                         <div style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: 16, fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>
                           {openC ? (
