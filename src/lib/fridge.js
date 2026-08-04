@@ -129,7 +129,9 @@ export function planSlotDraw(food, kcal, date, fridge, fridgeDays, maxSegs = 12)
     //    next flavor — so don't open a second can of the one just finished; fall through to the
     //    next member instead. A pack with nothing open still opens its current flavor, and a plain
     //    canned food (no rotation) just opens another of itself.
-    const rotateOnward = isRotating(food) && drainedOpen;
+    //    A can of this flavor that already READS EMPTY (awaiting the owner's confirmation) counts
+    //    the same as one emptied just now — either way you're not opening a second of it.
+    const rotateOnward = isRotating(food) && (drainedOpen || emptiedCansOf(fridge, m.name).length > 0);
     if (need > 0.01 && segs.length < maxSegs && !rotateOnward) {
       const canGrams = num(m.gramsPerUnit);
       if (canGrams > 0) {
@@ -214,11 +216,18 @@ export function resolveRotationsWithFridge(items, date, fridge, fridgeDays) {
 }
 
 // Draw `grams` of `food` DOWN from its open can(s) when a meal is logged — oldest good can first,
-// floored at zero, dropping any can that empties. It NEVER opens a new can and never removes a
-// still-full one on its own: opening and finishing cans are explicit user actions (see the Open /
-// Finish buttons), because gram math drifts from the real can and auto-opening spawned phantom
-// second cans. If a meal exceeds what's tracked as open, the open can just empties (the extra is
-// untracked) — you finish/open cans yourself. No-op for non-canned foods or when nothing's open.
+// floored at zero. It NEVER opens a new can and never removes one: opening and finishing cans are
+// explicit user actions (see the Open / Finish buttons), because gram math drifts from the real can
+// and auto-opening spawned phantom second cans.
+//
+// A can that reaches zero is KEPT, at zero, rather than deleted. A "80 g" can isn't 80 g — fill
+// varies both ways, so tracked-zero means "this should be about empty", not "this is empty". Delete
+// it automatically and the two kinds of drift break differently: over-fill silently discards a can
+// with food still in it and tells you to open the next one, while under-fill leaves you scraping a
+// can the app still thinks has food. Keeping it at zero makes the app ASK instead of guess — the UI
+// offers "finish it" or "actually, there's N g left" (setCanRemaining). availableCansOf still
+// excludes it, so nothing is planned or drawn from a can that reads empty.
+// No-op for non-canned foods or when nothing's open.
 export function consumeFromFridge(fridge, food, grams, today, fridgeDays) {
   let need = num(grams);
   if (!(need > 0) || !isCanned(food)) return fridge || [];
@@ -232,15 +241,27 @@ export function consumeFromFridge(fridge, food, grams, today, fridgeDays) {
     c.remainingGrams = round2(num(c.remainingGrams) - take);
     need -= take;
   }
-  return out.filter((c) => num(c.remainingGrams) > 0.01); // drop emptied cans; never opens a new one
+  return out; // emptied cans stay, at zero, for the owner to confirm — see the note above
+}
+
+// A can whose tracked contents have run out. NOT "the can is empty" — only that the arithmetic says
+// it should be, which is a prompt to check, not a fact about the fridge.
+export const isEmptied = (c) => num(c?.remainingGrams) <= 0.01;
+
+// Cans of a food that read empty and are waiting to be confirmed finished (or corrected), oldest
+// first. These are deliberately absent from availableCansOf, so they're never fed from — the UI
+// surfaces them to ask, and that's all.
+export function emptiedCansOf(fridge, name) {
+  return cansOf(fridge, name).filter(isEmptied);
 }
 
 // Explicitly finish the current open can of `food` (the "Finish can" button): remove the oldest
-// good open can regardless of its tracked remaining — you say it's done, drift and all.
+// non-expired can regardless of its tracked remaining — you say it's done, drift and all. Cans that
+// read empty are eligible too (that's the usual case now that they're kept rather than deleted);
+// falls back to the oldest can of that food if every one of them is expired.
 export function finishOpenCan(fridge, food, today, fridgeDays) {
-  const good = (fridge || [])
-    .filter((c) => keyOf(c.name) === keyOf(food?.name) && num(c.remainingGrams) > 0.01 && !canStatus(c, today, fridgeDays).expired)
+  const mine = (fridge || []).filter((c) => keyOf(c.name) === keyOf(food?.name))
     .sort((a, b) => (a.openedDate < b.openedDate ? -1 : 1));
-  const victim = good[0];
+  const victim = mine.find((c) => !canStatus(c, today, fridgeDays).expired) || mine[0];
   return victim ? (fridge || []).filter((c) => c.id !== victim.id) : (fridge || []);
 }

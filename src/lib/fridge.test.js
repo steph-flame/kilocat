@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, planSlotDraw, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex } from "./fridge.js";
+import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, planSlotDraw, isEmptied, emptiedCansOf, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex } from "./fridge.js";
 
 let idn = 0;
 const mkId = () => `can-${idn++}`;
@@ -70,9 +70,14 @@ describe("fridge", () => {
 
   it("draws down the open can and NEVER opens a new one (finishing/opening are explicit)", () => {
     const fridge = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 30 }];
-    // feed 40 from a 30g can: the can empties (dropped), the 10g excess is untracked, no new can
+    // feed 40 from a 30g can: the can reads empty, the 10g excess is untracked, no new can.
+    // The can is KEPT at zero rather than deleted — a "80 g" can varies both ways, so tracked-zero
+    // is a prompt to confirm, not proof the can is empty (see isEmptied / the UI's "still has N g").
     const out = consumeFromFridge(fridge, wet, 40, "2026-02-02", 3);
-    expect(out).toHaveLength(0);
+    expect(out).toHaveLength(1);
+    expect(out[0].remainingGrams).toBe(0);
+    expect(isEmptied(out[0])).toBe(true);
+    expect(availableCansOf(out, wet.name, "2026-02-02", 3)).toHaveLength(0); // never fed from
     // feed 20 from a 30g can: 10 left, still just the one can
     const out2 = consumeFromFridge([{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 30 }], wet, 20, "2026-02-02", 3);
     expect(out2).toHaveLength(1);
@@ -139,7 +144,11 @@ describe("variety pack — explicit open/finish, in order", () => {
     const fridge = [{ ...openCan(A, DAY, mkId), remainingGrams: 30 }];
     const flavor = activeMemberWithFridge(pack, DAY, fridge, 3); // Chicken (open)
     const out = consumeFromFridge(fridge, flavor, 50, DAY, 3);   // feed 50 from a 30g can
-    expect(out).toHaveLength(0); // Chicken emptied & dropped; NO Lamb opened
+    // Chicken reads empty but is kept for confirmation; crucially NO Lamb was auto-opened.
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe(A.name);
+    expect(out[0].remainingGrams).toBe(0);
+    expect(cansOf(out, B.name)).toHaveLength(0);
   });
 
   it("nextPackIndex advances the cursor (used by Finish can), wrapping", () => {
@@ -212,5 +221,47 @@ describe("planSlotDraw — a slot that outlives its open can", () => {
   it("returns nothing for a zero/negative need", () => {
     expect(planSlotDraw(pack, 0, today, [openCan(A_, 3.4)], 3).segs).toEqual([]);
     expect(planSlotDraw(null, 64, today, [], 3).segs).toEqual([]);
+  });
+});
+
+describe("a can that reads empty is confirmed, not assumed", () => {
+  // Real cans don't hold exactly what the label says. Steph's "empty" can actually had 6.9 g in it.
+  // Auto-deleting at tracked-zero breaks both ways: over-fill silently bins a can with food left
+  // and tells you to open the next one; under-fill leaves you scraping a can the app thinks is full.
+  const wet = { name: "Tiki", type: "wet", mode: "perUnit", gramsPerUnit: 80, kcalPerUnit: 96 };
+  const mk = (() => { let n = 0; return () => `c${n++}`; })();
+  const today = "2026-02-02";
+
+  it("keeps the emptied can so the owner can say it still has food", () => {
+    const fridge = [{ ...openCan(wet, "2026-02-01", mk), remainingGrams: 3.4 }];
+    const after = consumeFromFridge(fridge, wet, 3.4, today, 3);
+    expect(after).toHaveLength(1);
+    expect(emptiedCansOf(after, wet.name)).toHaveLength(1);
+    // the owner finds 6.9 g actually left and corrects it — the can comes back into play
+    const corrected = after.map((c) => ({ ...c, remainingGrams: 6.9 }));
+    expect(availableCansOf(corrected, wet.name, today, 3)).toHaveLength(1);
+    expect(emptiedCansOf(corrected, wet.name)).toHaveLength(0);
+  });
+
+  it("an emptied can is never planned from — the plan moves to the next flavor", () => {
+    const A2 = { ...wet, name: "Chicken", kcalPerKg: 1200 };
+    const B2 = { ...wet, name: "Lamb", kcalPerKg: 1200 };
+    const pack = { ...A2, id: "s", rotation: [A2, B2], rotIndex: 0 };
+    const emptied = [{ ...openCan(A2, "2026-02-01", mk), remainingGrams: 0 }];
+    const { segs } = planSlotDraw(pack, 60, today, emptied, 3);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ name: "Lamb", kind: "new" });
+  });
+
+  it("finishing works on a can that reads empty (the usual case now)", () => {
+    const emptied = [{ ...openCan(wet, "2026-02-01", mk), remainingGrams: 0 }];
+    expect(finishOpenCan(emptied, wet, today, 3)).toHaveLength(0);
+  });
+
+  it("finishing still prefers a non-expired can when both exist", () => {
+    const stale = { ...openCan(wet, "2026-01-01", mk), remainingGrams: 0 };
+    const fresh = { ...openCan(wet, "2026-02-01", mk), remainingGrams: 20 };
+    const after = finishOpenCan([stale, fresh], wet, today, 3);
+    expect(after.map((c) => c.id)).toEqual([stale.id]); // the fresh one was the "open" one
   });
 });

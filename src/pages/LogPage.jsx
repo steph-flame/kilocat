@@ -6,7 +6,7 @@ import { earliestLoggedDay, clampDay, canGoPrev, canGoNext, shiftDay, formatDayL
 import { foodSummary, macroBreakdown, trailingWindow, itemsInRange, rebalanceRemaining } from "../lib/foodStats.js";
 import { kcalPerG, foodType } from "../lib/foods.js";
 import { distributeBowl } from "../lib/bowl.js";
-import { isCanned, resolveRotationsWithFridge, availableCansOf, planSlotDraw } from "../lib/fridge.js";
+import { isCanned, resolveRotationsWithFridge, availableCansOf, planSlotDraw, emptiedCansOf } from "../lib/fridge.js";
 import { isRotating } from "../lib/rotation.js";
 import { transitionSteps, inferTransitionDay, clampDays, shareOfNew } from "../lib/transition.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
@@ -42,7 +42,7 @@ function useEditableLog(log, isDemo, activeCatId) {
 }
 
 export default function LogPage() {
-  const { p, intent, ration, tr, start, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan } = useApp();
+  const { p, intent, ration, tr, start, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan, setCanRemaining } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const intakeLog = useEditableLog(liveIntake, isDemo, activeCatId);
   const weightLog = useEditableLog(liveWeight, isDemo, activeCatId);
@@ -95,7 +95,7 @@ export default function LogPage() {
         </div>
 
         {tab === "food"
-          ? <FoodTab {...{ intakeLog, ration, tr, startItems: start.items, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan }} />
+          ? <FoodTab {...{ intakeLog, ration, tr, startItems: start.items, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan, setCanRemaining }} />
           : <WeightTab {...{ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings }} />}
       </div>
     </div>
@@ -151,7 +151,7 @@ function KcalChart({ intakeItems, days, selected, onSelect, target, dayStatus, t
 }
 
 /* ---------- food tab ---------- */
-function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan }) {
+function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan, setCanRemaining }) {
   const [name, setName] = useState("");
   const [kcalG, setKcalG] = useState(0);
   const [grams, setGrams] = useState("");
@@ -349,6 +349,8 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
                     : num(s.grams) > 0 ? `${Number(r.remG.toFixed(1))} g` : `${kc(r.remK)} kcal`;
                   const wet = s.rot || isCanned(s.food);
                   const openC = wet ? (availableCansOf(fridge, s.name, todayStr, fridgeDays)[0] || null) : null;
+                  // reads-empty but not yet confirmed finished — ask rather than assume
+                  const emptyC = wet && !openC ? (emptiedCansOf(fridge, s.name)[0] || null) : null;
                   // What's left of a wet slot may not fit in the open can — and the rest comes from
                   // the NEXT flavor, at ITS density. So plan the draw across cans/flavors; when it
                   // takes more than one, grams stop being a single number and the headline shows
@@ -389,11 +391,24 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
                         </div>
                       )}
                       {wet && isToday && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: 16, fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: 16, flexWrap: "wrap", fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>
                           {openC ? (
                             <>
                               <span>open can · {Number(num(openC.remainingGrams).toFixed(1))} g left</span>
                               <button onClick={() => finishSlotCan(s.id)} style={canBtn}>finish can</button>
+                            </>
+                          ) : emptyC ? (
+                            // Tracked-zero is a PROMPT, not a fact: a "80 g" can varies both ways, so
+                            // ask instead of quietly discarding a can that may still have food in it.
+                            <>
+                              <span style={{ color: A.caution.text }}>this can should be about empty</span>
+                              <button onClick={() => finishSlotCan(s.id)} style={canBtn}>finished it</button>
+                              <span>· still has</span>
+                              <input type="number" min="0" step="0.1" inputMode="decimal" placeholder="g"
+                                onKeyDown={(e) => { if (e.key === "Enter") { const v = Number(e.currentTarget.value); if (v > 0) { setCanRemaining(emptyC.id, v); e.currentTarget.value = ""; } } }}
+                                onBlur={(e) => { const v = Number(e.currentTarget.value); if (v > 0) { setCanRemaining(emptyC.id, v); e.currentTarget.value = ""; } }}
+                                style={{ width: 52, fontFamily: TYPE.mono, fontSize: 11, padding: "2px 5px", borderRadius: 7, border: `1px solid ${A.cardBorder}`, background: "transparent", color: A.ink }} />
+                              <span>g left</span>
                             </>
                           ) : (
                             <>
