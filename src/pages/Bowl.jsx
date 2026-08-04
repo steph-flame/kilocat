@@ -3,7 +3,7 @@ import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
 import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, treatEnergy, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
-import { hasRotation, isRotating, foodFieldsOf, upcomingFlavors } from "../lib/rotation.js";
+import { hasRotation, isRotating, foodFieldsOf, upcomingFlavors, packLabel } from "../lib/rotation.js";
 import { makeSlotKeyer } from "../lib/transition.js";
 import { resolveRotationsWithFridge, activeMemberWithFridge } from "../lib/fridge.js";
 import { num, uid } from "../lib/util.js";
@@ -180,10 +180,18 @@ function Transition({ name, start, setStartSplitMode, rationItems, newRows, targ
   // schedule and what Log actually asks you to feed can't drift apart.
   const key = (n) => (n || "").trim().toLowerCase();
   const { keyOfName } = makeSlotKeyer(start.items, rationItems);
+  // A rotating slot is headed by its PACK, not by whichever can is open today — over 14 days you'll
+  // feed several flavors from that one column, so naming it after the current can would be wrong on
+  // most of the rows. Display only; matching and logging still use the real food names.
+  const packBySlot = new Map();
+  [...(rationItems || []), ...start.items].forEach((it) => {
+    if (it?.rotation?.length) packBySlot.set(keyOfName(it.name), packLabel(it));
+  });
+  const colName = (k, fallback) => packBySlot.get(k) || fallback;
   const cols = [];
   const seen = new Map();
-  newRows.forEach((r) => { if (!key(r.name)) return; const k = keyOfName(r.name); if (!seen.has(k)) { seen.set(k, cols.length); cols.push({ name: r.name, nu: r, old: null }); } });
-  startDist.rows.forEach((r) => { if (!key(r.name)) return; const k = keyOfName(r.name); if (seen.has(k)) cols[seen.get(k)].old = r; else { seen.set(k, cols.length); cols.push({ name: r.name, nu: null, old: r }); } });
+  newRows.forEach((r) => { if (!key(r.name)) return; const k = keyOfName(r.name); if (!seen.has(k)) { seen.set(k, cols.length); cols.push({ name: colName(k, r.name), nu: r, old: null }); } });
+  startDist.rows.forEach((r) => { if (!key(r.name)) return; const k = keyOfName(r.name); if (seen.has(k)) cols[seen.get(k)].old = r; else { seen.set(k, cols.length); cols.push({ name: colName(k, r.name), nu: null, old: r }); } });
   const amountOf = (row) => (row ? (unit === "kcal" ? num(row.kcal) : (row.grams != null ? num(row.grams) : num(row.kcal))) : 0);
   const colCell = (col, toNew) => {
     const v = (1 - toNew) * amountOf(col.old) + toNew * amountOf(col.nu);

@@ -60,3 +60,39 @@ export function foodFieldsOf(f) {
   const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex, ...food } = f || {};
   return food;
 }
+
+// A display name for a variety pack: the flavors' shared prefix, so a rotating slot is labelled by
+// the PACK rather than by whichever can happens to be open.
+//
+// Why derived rather than stored: a rotation is just a list of member foods — there's no pack-name
+// field to read, and asking the owner to name it would be a form to fill in for something the names
+// already say. "Tiki Cat After Dark Chicken & Quail Egg — 2.8 oz can" and "…Chicken & Beef — 2.8 oz
+// can" share "Tiki Cat After Dark Chicken", which is exactly the label.
+//
+// DISPLAY ONLY. Matching, logging and the fridge all key off the real food name; this never
+// substitutes for it. Falls back to "<flavor> +N more" when the names share nothing meaningful
+// (an ad-hoc pack of unrelated foods), so the label is never a misleading fragment.
+export function packLabel(f) {
+  if (!hasRotation(f)) return f?.name || "";
+  const names = f.rotation.map((m) => String(m?.name || "").trim()).filter(Boolean);
+  if (names.length === 0) return f?.name || "";
+  if (names.length === 1) return names[0];
+
+  // longest common prefix, case-insensitively
+  let end = names[0].length;
+  for (const n of names.slice(1)) {
+    let i = 0;
+    while (i < end && i < n.length && names[0][i].toLowerCase() === n[i].toLowerCase()) i++;
+    end = i;
+  }
+  let prefix = names[0].slice(0, end);
+  // Don't cut mid-word: if any name continues with a word character right where the prefix stops,
+  // back up to the last space so we get "Tiki Cat After Dark Chicken", never "…Chick".
+  if (names.some((n) => /[\w]/.test(n.charAt(end) || ""))) {
+    prefix = prefix.slice(0, Math.max(0, prefix.lastIndexOf(" ")));
+  }
+  prefix = prefix.replace(/[\s\-—–&,:/|+]+$/, "").trim();
+
+  const meaningful = prefix.length >= 3 && /[a-z0-9]/i.test(prefix);
+  return meaningful ? prefix : `${names[0]} +${names.length - 1} more`;
+}

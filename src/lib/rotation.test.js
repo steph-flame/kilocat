@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasRotation, isRotating, activeRotationIndex, activeMember, resolveRotation, resolveRotations, foodFieldsOf, upcomingFlavors } from "./rotation.js";
+import { packLabel, hasRotation, isRotating, activeRotationIndex, activeMember, resolveRotation, resolveRotations, foodFieldsOf, upcomingFlavors } from "./rotation.js";
 
 const A = { name: "Chicken", mode: "perUnit", kcalPerUnit: 66, gramsPerUnit: 79, protein: 16 };
 const B = { name: "Lamb", mode: "perUnit", kcalPerUnit: 90, gramsPerUnit: 156, protein: 18 };
@@ -84,5 +84,41 @@ describe("rotation", () => {
     expect(upcomingFlavors(slot, 0, 3)).toEqual(["Chicken", "Lamb", "Salmon"]);
     expect(upcomingFlavors(slot, 1, 3)).toEqual(["Lamb", "Salmon", "Chicken"]);
     expect(upcomingFlavors({ ...slot, rotateOff: true }, 0, 3)).toEqual([]);
+  });
+});
+
+describe("packLabel — label a rotating slot by the pack, not the open can", () => {
+  const pack = (...names) => ({ name: names[0], rotation: names.map((n) => ({ name: n })) });
+
+  it("uses the flavors' shared prefix", () => {
+    expect(packLabel(pack(
+      "Tiki Cat After Dark Chicken & Quail Egg — 2.8 oz can",
+      "Tiki Cat After Dark Chicken & Beef — 2.8 oz can",
+      "Tiki Cat After Dark Chicken — 2.8 oz can",
+      "Tiki Cat After Dark Chicken & Lamb — 2.8 oz can",
+    ))).toBe("Tiki Cat After Dark Chicken");
+  });
+
+  it("never cuts mid-word", () => {
+    expect(packLabel(pack("Wellness Salmon", "Wellness Salsa"))).toBe("Wellness");
+    expect(packLabel(pack("Tiki Chicken", "Tiki Cheese"))).toBe("Tiki");
+  });
+
+  it("trims trailing joiners so the label reads as a name", () => {
+    expect(packLabel(pack("Ziwi Beef & Lamb", "Ziwi Beef & Duck"))).toBe("Ziwi Beef");
+  });
+
+  it("ignores case differences when finding the prefix", () => {
+    expect(packLabel(pack("Tiki cat chicken", "TIKI CAT BEEF"))).toBe("Tiki cat");
+  });
+
+  it("falls back to a countable label when the names share nothing", () => {
+    expect(packLabel(pack("Chicken pate", "Ziwi Beef"))).toBe("Chicken pate +1 more");
+  });
+
+  it("handles a one-flavor or absent rotation without inventing a pack", () => {
+    expect(packLabel(pack("Solo Flavor"))).toBe("Solo Flavor");
+    expect(packLabel({ name: "Plain Food" })).toBe("Plain Food");
+    expect(packLabel(null)).toBe("");
   });
 });
