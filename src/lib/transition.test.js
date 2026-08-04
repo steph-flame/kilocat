@@ -215,3 +215,50 @@ describe("a rotating slot is ONE slot, not a food being swapped", () => {
     expect(keyOfName("Farmina")).not.toBe(k); // an unrelated food keeps its own key
   });
 });
+
+describe("the schedule TABLE's columns use the same slot identity as the plan", () => {
+  // Reported from the real 14-day schedule: the same Tiki variety pack occupied TWO columns —
+  // "Tiki ↑" rising and "Tiki ↓" fading — because the pack had rotated since "currently feeding"
+  // was captured, so the two lists named different flavors of one slot. Bowl built its columns with
+  // its own inline name match; it now shares makeSlotKeyer with the plan, so they can't disagree.
+  const flav = (name) => ({ name, type: "wet", mode: "perUnit", gramsPerUnit: 80, kcalPerUnit: 96 });
+  const PACK = [flav("Tiki Quail Egg"), flav("Tiki Beef"), flav("Tiki Lamb")];
+  const ration = [
+    { id: "n1", name: "Farmina", mode: "perKg", kcalPerKg: 4000, splitMode: "remainder" },
+    { id: "n2", ...flav("Tiki Quail Egg"), splitMode: "share", pct: 20, rotation: PACK, rotIndex: 0 },
+  ];
+  const currentlyFeeding = [ // seeded from the ration earlier, when the pack was on a different can
+    { id: "o1", name: "Instinct", mode: "perKg", kcalPerKg: 4000, splitMode: "remainder" },
+    { id: "o2", ...flav("Tiki Beef"), splitMode: "share", pct: 20 }, // rotation stripped by the copy
+  ];
+
+  // Columns are exactly what blendRows produces — one entry per slot.
+  const columns = (day) =>
+    transitionSteps({ startItems: currentlyFeeding, resolvedRationItems: ration, target: 200, day, days: 14 });
+
+  it("gives the variety pack ONE column, not a rising and a fading one", () => {
+    const tiki = columns(7).filter((r) => /Tiki/.test(r.name));
+    expect(tiki).toHaveLength(1);
+    expect(tiki[0].phase).toBe("both"); // it isn't being switched — only the dry food is
+  });
+
+  it("the pack's amount stays flat across the ramp — it isn't part of the switch", () => {
+    const at = (d) => columns(d).find((r) => /Tiki/.test(r.name)).kcal;
+    expect(at(1)).toBeCloseTo(at(14), 5);
+    expect(at(1)).toBeCloseTo(40, 5); // 20% of 200 throughout
+  });
+
+  it("the dry food IS switched, and still ramps", () => {
+    expect(columns(1).find((r) => r.name === "Farmina").kcal).toBeLessThan(
+      columns(14).find((r) => r.name === "Farmina").kcal
+    );
+    // the row survives at zero (callers drop kcal<=0 rows; the table renders "—")
+    expect(columns(14).find((r) => r.name === "Instinct").kcal).toBeCloseTo(0, 5);
+  });
+
+  it("every day still totals the target — the merged column didn't drop or double energy", () => {
+    for (const d of [1, 7, 14]) {
+      expect(columns(d).reduce((a, r) => a + r.kcal, 0)).toBeCloseTo(200, 5);
+    }
+  });
+});

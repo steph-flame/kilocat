@@ -4,6 +4,7 @@ import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
 import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, treatEnergy, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { hasRotation, isRotating, foodFieldsOf, upcomingFlavors } from "../lib/rotation.js";
+import { makeSlotKeyer } from "../lib/transition.js";
 import { resolveRotationsWithFridge, activeMemberWithFridge } from "../lib/fridge.js";
 import { num, uid } from "../lib/util.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
@@ -166,15 +167,23 @@ function Transition({ name, start, setStartSplitMode, rationItems, newRows, targ
   const suf = unit === "kcal" ? "" : "g";
   const firstWord = (nm, fallback) => (nm || fallback).split(" ")[0];
 
-  // ONE column per unique food across both blends (matched by name), so a food that's in both — the
-  // usual case, since only one food tends to change — isn't shown twice. Each day nets the fading
-  // old share and the rising new share: a shared food at the same amount stays flat, a dropped food
-  // fades to nothing, an added food grows in. New-ration foods lead the order; dropped foods follow.
+  // ONE column per unique food across both blends, so a food that's in both — the usual case, since
+  // only one food tends to change — isn't shown twice. Each day nets the fading old share and the
+  // rising new share: a shared food at the same amount stays flat, a dropped food fades to nothing,
+  // an added food grows in. New-ration foods lead the order; dropped foods follow.
+  //
+  // Matched by SLOT, not by name. "Currently feeding" is a copy of the ration with `rotation`
+  // stripped (foodFieldsOf) and whatever flavor was active frozen into its name — so a variety pack
+  // otherwise reads as one flavor being dropped and another added, and the same pack gets two
+  // columns that ramp against each other. makeSlotKeyer maps every member name (and the active
+  // flavor) to one key; it's the same keyer lib/transition.js uses to build the Log plan, so the
+  // schedule and what Log actually asks you to feed can't drift apart.
   const key = (n) => (n || "").trim().toLowerCase();
+  const { keyOfName } = makeSlotKeyer(start.items, rationItems);
   const cols = [];
   const seen = new Map();
-  newRows.forEach((r) => { const k = key(r.name); if (k && !seen.has(k)) { seen.set(k, cols.length); cols.push({ name: r.name, nu: r, old: null }); } });
-  startDist.rows.forEach((r) => { const k = key(r.name); if (!k) return; if (seen.has(k)) cols[seen.get(k)].old = r; else { seen.set(k, cols.length); cols.push({ name: r.name, nu: null, old: r }); } });
+  newRows.forEach((r) => { if (!key(r.name)) return; const k = keyOfName(r.name); if (!seen.has(k)) { seen.set(k, cols.length); cols.push({ name: r.name, nu: r, old: null }); } });
+  startDist.rows.forEach((r) => { if (!key(r.name)) return; const k = keyOfName(r.name); if (seen.has(k)) cols[seen.get(k)].old = r; else { seen.set(k, cols.length); cols.push({ name: r.name, nu: null, old: r }); } });
   const amountOf = (row) => (row ? (unit === "kcal" ? num(row.kcal) : (row.grams != null ? num(row.grams) : num(row.kcal))) : 0);
   const colCell = (col, toNew) => {
     const v = (1 - toNew) * amountOf(col.old) + toNew * amountOf(col.nu);
