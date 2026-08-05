@@ -20,6 +20,8 @@ const r1 = (n) => Math.round(n * 10) / 10; // store kcal to 0.1 so a 3.7 kcal sa
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`);
 const kc = (n) => { const v = num(n); return v > 0 && v < 10 ? String(Number(v.toFixed(1))) : String(Math.round(v)); }; // small kcal show 1 decimal
+// Keep in step with Trend.jsx's METHOD_COLOR so a method is the same colour on both screens.
+const WEIGH_METHOD_COLOR = { litterRobot: A.chart.weighDot, petScale: A.good, difference: A.caution.text, other: A.muted };
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 function Card({ children, style, className }) {
   return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
@@ -96,7 +98,7 @@ export default function LogPage() {
 
         {tab === "food"
           ? <FoodTab {...{ intakeLog, ration, tr, startItems: start.items, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan, setCanRemaining }} />
-          : <WeightTab {...{ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings }} />}
+          : <WeightTab {...{ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings, selectDay }} />}
       </div>
     </div>
   );
@@ -590,8 +592,66 @@ function EntryRow({ en, onEdit, onRemove, onReconcile }) {
   );
 }
 
+
+/* ---------- weight-over-time chart (weight tab) ---------- */
+// The counterpart to KcalChart above: the calories tab has always shown a 10-day history, while the
+// weight tab showed only the selected day's reads — so the shape of the thing you're actually
+// tracking was invisible from the page where you record it. Daily medians as a line, every
+// individual reading as a dot COLOURED BY METHOD, so a reading that sits off the trend and a
+// reading taken a different way are visible as the same glance.
+function WeightHistoryChart({ items, days, selected, onSelect, unit, disp }) {
+  const byDay = useMemo(() => {
+    const m = new Map();
+    for (const e of items) { if (!m.has(e.date)) m.set(e.date, []); m.get(e.date).push(num(e.kg)); }
+    return m;
+  }, [items]);
+  const pts = days.map((d, i) => ({ i, date: d, kg: byDay.has(d) ? median(byDay.get(d)) : null }));
+  const vals = pts.map((p) => p.kg).filter((v) => v != null).map(disp);
+  const reads = items.filter((e) => days.includes(e.date));
+  if (vals.length < 1) return <p style={{ fontSize: 12, color: A.muted }}>No weigh-ins in the last {days.length} days.</p>;
+  const lo = Math.min(...vals, ...reads.map((r) => disp(num(r.kg))));
+  const hi = Math.max(...vals, ...reads.map((r) => disp(num(r.kg))));
+  const pad = (hi - lo) * 0.25 || 0.05;
+  const H = 84, W = 320, PADL = 4;
+  const x = (i) => PADL + (days.length <= 1 ? (W - PADL) / 2 : (i / (days.length - 1)) * (W - PADL * 2));
+  const y = (v) => H - 8 - ((v - (lo - pad)) / ((hi + pad) - (lo - pad))) * (H - 16);
+  const line = pts.filter((p) => p.kg != null).map((p) => [x(p.i), y(disp(p.kg))]);
+  const idxOf = (d) => days.indexOf(d);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <span style={label()}>Weight · last {days.length} days</span>
+        <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{Number(lo.toFixed(2))}–{Number(hi.toFixed(2))} {weightLabel(unit)}</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: "block" }}>
+        {line.length > 1 && <path d={line.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ")}
+          fill="none" stroke={A.chart.trend} strokeWidth="1.8" opacity="0.85" />}
+        {reads.map((r, k) => (
+          <circle key={k} cx={x(idxOf(r.date))} cy={y(disp(num(r.kg)))} r={r.date === selected ? 3.6 : 2.4}
+            fill={WEIGH_METHOD_COLOR[r.method] || A.muted} opacity={r.date === selected ? 1 : 0.6} />
+        ))}
+        {days.map((d, i) => (
+          <rect key={d} x={x(i) - 6} y={0} width={12} height={H} fill="transparent" style={{ cursor: "pointer" }} onClick={() => onSelect(d)} />
+        ))}
+        {selected && idxOf(selected) >= 0 && <line x1={x(idxOf(selected))} x2={x(idxOf(selected))} y1={0} y2={H} stroke={A.cardBorder} strokeWidth="1" />}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: TYPE.mono, fontSize: 9, color: A.muted, padding: "2px 2px 0" }}>
+        <span>{days[0]?.slice(5)}</span><span>{days[days.length - 1]?.slice(5)}</span>
+      </div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 6, fontFamily: TYPE.mono, fontSize: 10, color: A.muted }}>
+        {[...new Set(reads.map((r) => r.method || "other"))].map((m) => (
+          <span key={m} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: WEIGH_METHOD_COLOR[m] || A.muted }} />
+            {(WEIGH_METHODS[m] || {}).label || "unknown"}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- weight tab ---------- */
-function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings }) {
+function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings, selectDay }) {
   const [val, setVal] = useState("");
   const [method, setMethod] = useState(expSettings.lastMethod || DEFAULT_METHOD);
   const dayItems = weightLog.items.filter((e) => e.date === viewedDate);
@@ -602,8 +662,17 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
       setExpSettings({ lastMethod: method }); setVal("");
     }
   };
+  const histDays = useMemo(() => {
+    const out = [];
+    for (let i = 29; i >= 0; i--) out.push(shiftDay(viewedDate, -i, "0000-01-01", viewedDate));
+    return out;
+  }, [viewedDate]);
   return (
     <>
+      <Card className="span-all">
+        <WeightHistoryChart items={weightLog.items} days={histDays} selected={viewedDate}
+          onSelect={selectDay} unit={unit} disp={(kg) => toDisplayWeight(kg, unit)} />
+      </Card>
       {(
         <Card className="span-all">
           <div style={label({ marginBottom: 8 })}>Add a weigh-in</div>

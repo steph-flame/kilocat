@@ -7,6 +7,7 @@ import {
   migrateLegacyFood, ensureBuiltins, backfillBuiltinMacros, migrateSplitMode, sumPct, blankFood, normalizePct, waterfall,
 } from "../lib/foods.js";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
+import { methodOffsets, alignToReference } from "../lib/methodBias.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "../lib/series.js";
 import { usePersistence, store, probeStorage } from "../lib/storage.js";
 import { useFoodLibrary } from "../hooks/useFoodLibrary.js";
@@ -395,8 +396,20 @@ export function AppProvider({ children }) {
   };
 
   const t = useMemo(() => computeTargets({ ...p, ageMonths: effAgeMonths, weightKg: currentWeight.kg }), [p, effAgeMonths, currentWeight.kg]);
+  // Measured between-method offsets — surfaced so the owner can SEE whether their methods
+  // disagree (and by how much), not just have it silently corrected underneath them.
+  const weighOffsets = useMemo(
+    () => methodOffsets(weightLog.items.map((e) => ({ date: e.date, kg: e.kg, method: e.method }))),
+    [weightLog.items]
+  );
+
   const expenditure = useMemo(() => {
-    const w = weightLog.items.map((e) => ({ date: e.date, value: e.kg, method: e.method }));
+    // Align every weigh-in into one method's frame before fitting. Expenditure is inferred from
+    // the RATE of weight change, so a constant per-method offset is harmless while you stay on one
+    // method — but MIXING them injects a step that reads as real weight loss/gain. See
+    // lib/methodBias.js; readings whose offset isn't yet trusted pass through unchanged.
+    const wRaw = weightLog.items.map((e) => ({ date: e.date, value: e.kg, method: e.method }));
+    const w = alignToReference(wRaw, methodOffsets(wRaw));
     const i = intakeLog.items.map((e) => ({ date: e.date, value: e.kcal }));
     // cold-start the filter prior from the vet formula; intakeDayStatus feeds every estimator
     // through the same buildIntakeDayMap seam (see lib/expenditure.js). excludeDay: `today` is
@@ -607,7 +620,7 @@ export function AppProvider({ children }) {
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
     fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
-    t, expenditure, intent,
+    t, expenditure, intent, weighOffsets,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,
     // Never serialise persistData directly — it carries the Litter-Robot refreshToken. See
     // lib/portableExport.js; the assertion turns a future regression into a loud failure here

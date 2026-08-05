@@ -6,6 +6,8 @@ import { dailyReduce, median, ewma, addDays, linregXY } from "../lib/series.js";
 import { extent, linScale } from "../lib/scale.js";
 import { toDisplayWeight, weightLabel } from "../lib/units.js";
 import { bcsToPct, pctToBcs, RER } from "../lib/nutrition.js";
+import { WEIGH_METHODS } from "../lib/expenditure.js";
+import { describeOffsets } from "../lib/methodBias.js";
 
 // Trend — the measured burn, its uncertainty, and the evidence the plan is working. Three
 // SEPARATE plots (weight / rate-of-change / energy-balance), each on its own honest scale, with
@@ -71,7 +73,7 @@ const HoverGuide = ({ x }) => <line x1={x} x2={x} y1={0} y2={999} stroke={A.card
 const RANGES = [["1w", 7, "1w"], ["2w", 14, "2w"], ["1m", 30, "1m"], ["3m", 90, "3m"], ["6m", 180, "6m"], ["all", null, "all"]];
 
 export default function Trend() {
-  const { p, t, expenditure: e, intakeLog, weightLog, intakeDayStatus, unit, today, currentWeight } = useApp();
+  const { p, t, expenditure: e, intakeLog, weightLog, intakeDayStatus, unit, today, currentWeight, weighOffsets } = useApp();
   // Fit the range control to the cat's actual history: the default is the tightest window that
   // still shows every logged day, and windows longer than that are disabled (they'd show the exact
   // same chart as "all"). Until the owner picks a window explicitly, we follow the fit as data grows.
@@ -82,6 +84,7 @@ export default function Trend() {
   const effRange = range ?? fit;
   const rangeDays = RANGES.find((r) => r[0] === effRange)[1];
 
+  const offsetLines = describeOffsets(weighOffsets, (m) => (WEIGH_METHODS[m] || {}).label || m);
   const bcs = pctToBcs(t.pctOver);
   const idealKg = currentWeight.kg > 0 ? currentWeight.kg / (1 + bcsToPct(bcs) / 100) : t.idealWeight;
 
@@ -103,7 +106,7 @@ export default function Trend() {
     const sm = ewma(daily.map((d) => d.value), 0.4); // light EWMA trend line — responsive, rides out the ±40 g bounce
     const dispFrame = daily.map((d, i) => ({ date: d.date, w: sm[i] }));
     const idxByDate = new Map(daily.map((d, i) => [d.date, i]));
-    const dots = weightLog.items.filter((w) => idxByDate.has(w.date)).map((w) => ({ i: idxByDate.get(w.date), kg: w.kg }));
+    const dots = weightLog.items.filter((w) => idxByDate.has(w.date)).map((w) => ({ i: idxByDate.get(w.date), kg: w.kg, method: w.method }));
     // Per-day rate = a trailing-7-day line fit on the raw medians (same method as trailingWeeklyRate),
     // so the last point of this chart equals the headline %/wk instead of the old Kalman-derived one.
     // A "per-week" rate needs most of a week behind it: with only 2–3 daily medians the fit just
@@ -224,7 +227,17 @@ export default function Trend() {
         <Card style={{ padding: "12px 14px" }}>
           <div style={label({ marginBottom: 4 })}>Weight · {weightLabel(unit)}</div>
           <WeightChart frame={wdisp.frame} dots={wdisp.dots} idealKg={idealKg} disp={dispW} unit={unit} />
-          <Legend items={[[A.chart.trend, "trend", "line"], [A.chart.weighDot, "weigh-in", "dot"], [A.chart.ideal, "ideal", "dash"]]} />
+          <Legend items={[
+            [A.chart.trend, "trend", "line"],
+            ...[...new Set(wdisp.dots.map((d) => d.method || "other"))]
+              .map((m) => [methodColor(m), (WEIGH_METHODS[m] || {}).label || "unknown", "dot"]),
+            [A.chart.ideal, "ideal", "dash"],
+          ]} />
+          {/* Whether the methods agree — measured, not assumed. Relative only: it can say one reads
+              lower than the other, never which is closer to the true weight. */}
+          {offsetLines.map((o) => (
+            <p key={o.method} style={{ ...cap, fontSize: 11.5, color: o.applied ? A.bodyOnFill : A.muted }}>{o.text}</p>
+          ))}
         </Card>
 
         <Card style={{ padding: "12px 14px" }}>
@@ -312,6 +325,18 @@ function BurnChart({ frame, formula }) {
   );
 }
 
+// Weigh-ins are coloured by HOW they were measured. Precision differs by an order of magnitude
+// between methods (pet scale σ=0.01 kg, bathroom-scale subtraction σ=0.15), and so can their
+// calibration — so when a dot sits off the trend, "was that a different method?" is the first
+// useful question, and this answers it without a trip to the log.
+const METHOD_COLOR = {
+  litterRobot: A.chart.weighDot,
+  petScale: A.good,
+  difference: A.caution.text,
+  other: A.muted,
+};
+export const methodColor = (m) => METHOD_COLOR[m] || A.muted;
+
 function WeightChart({ frame, dots, idealKg, disp, unit }) {
   const { idx, bind } = useHoverIndex(frame.length);
   const H = 130, PADY = 12;
@@ -332,7 +357,7 @@ function WeightChart({ frame, dots, idealKg, disp, unit }) {
       <svg viewBox={`0 0 ${VW} ${H}`} width="100%" height={H} style={{ display: "block" }}>
         {hv && <HoverGuide x={hv.x} />}
         {/* weigh-in dots BEHIND the trend line, dimmed so the trend reads clearly */}
-        {dots.map((d, k) => <circle key={k} cx={xAt(d.i, frame.length)} cy={y(disp(d.kg))} r="3" fill={A.chart.weighDot} opacity="0.5" />)}
+        {dots.map((d, k) => <circle key={k} cx={xAt(d.i, frame.length)} cy={y(disp(d.kg))} r="3" fill={methodColor(d.method)} opacity="0.6" />)}
         <line x1={PADL} y1={idealY} x2={VW - PADR} y2={idealY} stroke={A.chart.ideal} strokeWidth="1.6" strokeDasharray="5 4" />
         <text x={VW - PADR} y={idealY - 3} textAnchor="end" style={{ ...axisText, fill: A.chart.ideal }}>ideal {f2(disp(idealKg))}</text>
         {line.length > 1 && <path d={dPath(line)} fill="none" stroke={A.chart.trend} strokeWidth="2.2" />}
