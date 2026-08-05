@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, buildIntakeDayMap, floorSdKcal, WEIGH_METHODS, DEFAULT_METHOD } from "./expenditure.js";
+import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, buildIntakeDayMap, floorSdKcal, dailyWeightWithVariance, UNKNOWN_SIGMA_KG, WEIGH_METHODS, DEFAULT_METHOD } from "./expenditure.js";
 import { addDays, localDateOf } from "./series.js";
 
 // Build a synthetic history: constant daily intake, weight moving at the exact rate that
@@ -343,5 +343,51 @@ describe("excludeDay: a partial/in-progress 'today' never moves the estimate", (
         if (originalTZ === undefined) delete process.env.TZ; else process.env.TZ = originalTZ;
       }
     });
+  });
+});
+
+describe("an unlabelled weigh-in must not be trusted like a pet scale", () => {
+  // Reported: a bathroom-scale [me+cat]-[me] reading came out 0.2 lb (~0.09 kg) below the
+  // Litter-Robot minutes earlier. The old fallback treated a method-less reading as DEFAULT_METHOD
+  // (petScale, σ=0.01) — the MOST precise setting — so it outweighed each Litter-Robot read 10×,
+  // and a routine 0.09 kg disagreement became a 9-sigma event the filter could only explain as real
+  // weight loss. On real data that moved the burn estimate by ~37 kcal/day.
+  const day = (d, kg, method) => ({ date: d, value: kg, method });
+
+  it("falls back to an imprecise sigma, not the most precise one", () => {
+    expect(UNKNOWN_SIGMA_KG).toBeGreaterThan(WEIGH_METHODS.petScale.sigmaKg);
+    expect(UNKNOWN_SIGMA_KG).toBeGreaterThan(WEIGH_METHODS.litterRobot.sigmaKg);
+  });
+
+  it("an unlabelled outlier no longer overrides several Litter-Robot reads", () => {
+    const reads = [
+      day("2026-03-01", 4.40, "litterRobot"),
+      day("2026-03-01", 4.41, "litterRobot"),
+      day("2026-03-01", 4.39, "litterRobot"),
+      day("2026-03-01", 4.31, undefined), // the manual subtraction, 0.09 kg low, method never set
+    ];
+    const [d] = dailyWeightWithVariance(reads);
+    // with σ=0.01 the stray would have dragged the day's value to ~4.32; it now stays near the pack
+    expect(d.z).toBeGreaterThan(4.38);
+    expect(d.z).toBeLessThan(4.41);
+  });
+
+  it("an explicitly labelled 'difference' read barely moves the day at all", () => {
+    const reads = [
+      day("2026-03-01", 4.40, "litterRobot"),
+      day("2026-03-01", 4.41, "litterRobot"),
+      day("2026-03-01", 4.31, "difference"),
+    ];
+    const [d] = dailyWeightWithVariance(reads);
+    expect(d.z).toBeGreaterThan(4.399);
+  });
+
+  it("a labelled pet-scale read is still trusted most — the fix is about the FALLBACK", () => {
+    const reads = [
+      day("2026-03-01", 4.40, "litterRobot"),
+      day("2026-03-01", 4.31, "petScale"),
+    ];
+    const [d] = dailyWeightWithVariance(reads);
+    expect(d.z).toBeLessThan(4.33); // an explicit claim of precision is still honoured
   });
 });

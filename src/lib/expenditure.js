@@ -171,7 +171,15 @@ export function floorSdKcal(nDays, priorKcal, { floorPct = 0.15, threshold = 10 
 // weights each day by its measurement precision (from the weigh-in method). The prediction-
 // error → estimate update is the same recursive shape MacroFactor describes; see README.
 
-const sigmaFor = (method) => (WEIGH_METHODS[method] || WEIGH_METHODS[DEFAULT_METHOD]).sigmaKg;
+// An unlabelled or unrecognised reading is treated as IMPRECISE, not as the most precise method.
+// The errors are wildly asymmetric: assuming too much noise costs a little efficiency, while
+// assuming too little makes one reading outrank everything else. This used to fall back to
+// DEFAULT_METHOD (petScale, σ=0.01), so a manual weigh-in whose method was never set outweighed
+// each Litter-Robot read 10×, and a 0.09 kg disagreement — routine for a bathroom-scale
+// subtraction — became a 9-sigma event the filter could only explain as real weight loss. On real
+// data that pulled the burn estimate down by ~37 kcal/day (19%).
+export const UNKNOWN_SIGMA_KG = 0.05;
+const sigmaFor = (method) => (WEIGH_METHODS[method] ? WEIGH_METHODS[method].sigmaKg : UNKNOWN_SIGMA_KG);
 
 // Collapse a day's weigh-ins to one measurement (z) and its variance (R), inverse-variance
 // weighting by each reading's method precision, after gating gross outliers off the median.
