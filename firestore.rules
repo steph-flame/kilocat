@@ -1,0 +1,91 @@
+rules_version = '2';
+
+// Kilocat sync rules.
+//
+// The document at users/{uid}/sync/state is an ENVELOPE (see src/lib/syncEnvelope.js): a few
+// plaintext version fields wrapping one encrypted blob. The server can't read the blob — that's the
+// point — so these rules validate only what's outside it. That turns out to be enough for the
+// guarantees that matter:
+//
+//   * ONLY the owner reads or writes. This is the one that would be a breach if wrong, so it's
+//     asserted first and tested three ways in the emulator (cross-user, unauthenticated, owner).
+//   * REVISION MOVES FORWARD BY EXACTLY ONE. This makes the compare-and-swap in the Store contract
+//     server-enforced rather than client-honour-system: two devices racing can't both "win", and a
+//     stale device can't replay an old state over a newer one.
+//   * SCHEMA NEVER GOES BACKWARDS. An out-of-date client that ignored its own read-only guard still
+//     can't downgrade the document and drop fields it doesn't understand.
+//   * SIZE IS CAPPED, so an account can't be used as free bulk storage.
+//
+// What these rules deliberately CANNOT do: validate the cat data. It's ciphertext. A user can write
+// garbage into their own blob and their own client will fail to decrypt it — a self-inflicted
+// wound, contained to that account. Provider-blind storage means the provider can't police content;
+// accepting that is the trade that keeps the data unreadable to Google, to us, and to an attacker
+// who breaches the database.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{uid} {
+      // The account's own record and anything under it: owner only, always.
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      // ---- the synced state ----
+      match /sync/state {
+        function envelope() { return request.resource.data; }
+        function prior()    { return resource.data; }
+
+        // Shape: the plaintext fields must be present and the right type, or the no-downgrade and
+        // revision checks below would be comparing against nulls.
+        function wellFormed() {
+          return envelope().keys().hasOnly(['v', 'schemaVersion', 'cryptoVersion', 'revision', 'updatedAt', 'blob'])
+              && envelope().v is int
+              && envelope().schemaVersion is int && envelope().schemaVersion >= 1
+              && envelope().cryptoVersion is int && envelope().cryptoVersion >= 1
+              && envelope().revision is int && envelope().revision >= 1
+              && envelope().blob is string
+              && envelope().blob.size() > 0
+              // 700 KB: comfortably above a real cat's full history as ciphertext, far below
+              // Firestore's 1 MiB document ceiling, so a legitimate user never hits it first.
+              && envelope().blob.size() < 700000;
+        }
+
+        allow read: if isOwner();
+
+        // First write: nothing stored yet, so it must start the revision sequence at 1.
+        allow create: if isOwner() && wellFormed() && envelope().revision == 1;
+
+        // Update: exactly one step forward, and never back to an older schema.
+        allow update: if isOwner() && wellFormed()
+                      && envelope().revision == prior().revision + 1
+                      && envelope().schemaVersion >= prior().schemaVersion;
+
+        // No deletes. "Start over" is a write of fresh state, which keeps the revision chain intact;
+        // allowing delete would let a stale client reset the chain and clobber a newer device.
+        allow delete: if false;
+      }
+
+      // ---- the passphrase-wrapped data key (see accountKeyring.js) ----
+      // Safe to store: without the recovery key it's inert. Owner-only all the same, and shape-
+      // checked so a malformed blob can't lock the account out in a way that looks like a bad key.
+      match /keys/wrapped {
+        function k() { return request.resource.data; }
+        allow read: if isOwner();
+        allow write: if isOwner()
+                     && k().keys().hasOnly(['v', 'kdf', 'iterations', 'salt', 'wrappedDek'])
+                     && k().kdf is string
+                     && k().iterations is int && k().iterations >= 100000
+                     && k().salt is string && k().salt.size() == 32
+                     && k().wrappedDek is string && k().wrappedDek.size() < 4096;
+        allow delete: if false;
+      }
+
+      // Anything else under the account: owner-only, but nothing is expected here yet. Listed
+      // explicitly so a future collection doesn't inherit a permissive default by accident.
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+  }
+}
