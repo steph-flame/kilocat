@@ -472,8 +472,7 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
                 </label>
               )
               : <NumBox label="kcal" suf="kcal" value={kcal} onChange={setKcal} />}
-            <button onClick={add} disabled={!method || !(num(val) > 0)} title={!method ? "Pick how she was weighed first" : undefined}
-              style={{ background: method && num(val) > 0 ? A.good : A.cardBorder, color: A.card, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 18, cursor: method && num(val) > 0 ? "pointer" : "default" }}>+</button>
+            <button onClick={add} style={{ background: A.good, color: A.card, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 18, cursor: "pointer" }}>+</button>
           </div>
           <button onClick={() => intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: 0, grams: null, name: "nothing eaten" })}
             style={{ marginTop: 8, background: "none", border: "none", color: A.muted, fontFamily: TYPE.mono, fontSize: 11, textDecoration: "underline", cursor: "pointer" }}>
@@ -594,15 +593,11 @@ function EntryRow({ en, onEdit, onRemove, onReconcile }) {
 /* ---------- weight tab ---------- */
 function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings }) {
   const [val, setVal] = useState("");
-  // NOT pre-set to a method. Precision is the most consequential field on this form — a reading
-  // labelled petScale (σ=0.01) outranks each Litter-Robot read 10×, so silently guessing the most
-  // precise option let an unlabelled bathroom-scale subtraction dominate the whole fit. Once you've
-  // chosen once it's remembered (lastMethod); the first time, you pick.
-  const [method, setMethod] = useState(expSettings.lastMethod || "");
+  const [method, setMethod] = useState(expSettings.lastMethod || DEFAULT_METHOD);
   const dayItems = weightLog.items.filter((e) => e.date === viewedDate);
   const dayKg = dayItems.length ? median(dayItems.map((e) => num(e.kg))) : null;
   const add = () => {
-    if (num(val) > 0 && method) {
+    if (num(val) > 0) {
       weightLog.add({ ...manualWeighInStamp(viewedDate), kg: fromDisplayWeight(num(val), unit), method, source: WEIGH_SOURCES.manual });
       setExpSettings({ lastMethod: method }); setVal("");
     }
@@ -612,7 +607,6 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
       {(
         <Card className="span-all">
           <div style={label({ marginBottom: 8 })}>Add a weigh-in</div>
-          {!method && <p style={{ fontSize: 11.5, color: A.muted, margin: "0 0 8px", lineHeight: 1.4 }}>How was she weighed? This sets how much the reading is trusted, so it's worth getting right.</p>}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
             {Object.entries(WEIGH_METHODS).map(([k, m]) => (
               <button key={k} onClick={() => setMethod(k)} aria-pressed={method === k}
@@ -622,8 +616,7 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             <NumBox label="Weight" suf={weightLabel(unit)} value={val} onChange={setVal} step="0.01" />
-            <button onClick={add} disabled={!method || !(num(val) > 0)} title={!method ? "Pick how she was weighed first" : undefined}
-              style={{ background: method && num(val) > 0 ? A.good : A.cardBorder, color: A.card, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 18, cursor: method && num(val) > 0 ? "pointer" : "default" }}>+</button>
+            <button onClick={add} style={{ background: A.good, color: A.card, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 18, cursor: "pointer" }}>+</button>
           </div>
         </Card>
       )}
@@ -636,17 +629,7 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
           <p style={{ fontSize: 12, color: A.muted }}>No weigh-ins {isToday ? "today" : "this day"}.</p>
         ) : dayItems.map((en) => (
           <div key={en.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontFamily: TYPE.mono, fontSize: 12 }}>
-            {/* editable: a reading logged under the wrong method skews the fit badly, and until now
-                the only fix was to delete and re-add it. */}
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-              <select value={en.method || ""} onChange={(e) => weightLog.edit(en.id, { method: e.target.value })}
-                aria-label="How this was weighed"
-                style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, background: "transparent", border: `1px solid ${A.cardBorder}`, borderRadius: 7, padding: "1px 4px", maxWidth: 128 }}>
-                {!en.method && <option value="">unknown</option>}
-                {Object.entries(WEIGH_METHODS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
-              </select>
-              <span style={{ color: A.muted }}>{en.source === WEIGH_SOURCES.litterRobot ? "auto" : ""}{en.ts != null ? `${en.source === WEIGH_SOURCES.litterRobot ? " · " : ""}${new Date(en.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</span>
-            </span>
+            <span style={{ color: A.muted }}>{(WEIGH_METHODS[en.method] || WEIGH_METHODS[DEFAULT_METHOD]).label}{en.source === WEIGH_SOURCES.litterRobot ? " · auto" : ""}{en.ts != null ? ` · ${new Date(en.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
               <span style={{ color: A.body }}>{fmtWeight(num(en.kg), unit)} {weightLabel(unit)}</span>
               {<button onClick={() => weightLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
