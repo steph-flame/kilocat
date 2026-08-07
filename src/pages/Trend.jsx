@@ -182,7 +182,7 @@ export default function Trend() {
             <div style={{ fontFamily: TYPE.mono, fontSize: wide ? 27 : 40, fontWeight: 600, color: A.ink, lineHeight: 1 }}>{wide ? `${r0(e.low)}–${r0(e.high)}` : burn}</div>
             <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textAlign: "right" }}>{wide ? "95% range" : <>{asym ? `+${plus} / −${minus}` : `±${plus}`} kcal<br />95% interval</>}</div>
           </div>
-          <IntervalBar lo={e.low} hi={e.high} point={e.kcal} />
+          <PosteriorDensity kcal={e.kcal} sd={e.sd} priorKcal={e.priorKcal} priorSd={e.priorSdKcal} sdFilter={e.sdFilter} sdIntake={e.sdIntake} />
           <p style={{ ...cap, fontSize: 11.5 }}>{wide ? `Best single guess ~${burn}, but it's genuinely uncertain this early — trust the range. It tightens as you log` : "The band narrows as you log"}{e.missingIntake > 0 ? `; ${r0(e.missingIntake * 100)}% of days in range are incomplete and left out` : ""}.</p>
         </Card>
 
@@ -261,19 +261,61 @@ export default function Trend() {
   );
 }
 
-function IntervalBar({ lo, hi, point }) {
-  const padKcal = Math.max(20, (hi - lo) * 0.6);
-  const s = linScale([lo - padKcal, hi + padKcal], [0, 100]);
-  const L = s(lo), Hh = s(hi), P = s(point);
+// The POSTERIOR, drawn as a density rather than a bar.
+//
+// v2-v4 are Bayesian: the Kalman/EKF covariance IS a posterior variance, and with Gaussian noise the
+// posterior over expenditure is Gaussian. A bar throws that away — it shows the 95% endpoints and
+// implies everything inside is equally likely, which is exactly what a posterior does NOT say. The
+// curve shows where the mass actually is.
+//
+// The vet formula is drawn behind it as the PRIOR it genuinely is (the filters are seeded with it —
+// see AppState's priorKcal/priorSdKcal). Both curves are scaled by the SAME factor, so each encloses
+// the same area and the narrower one is correspondingly taller: the visible gap between them is the
+// information the cat's own data added. That's the app's whole claim, shown instead of asserted.
+function PosteriorDensity({ kcal, sd, priorKcal, priorSd, sdFilter, sdIntake, unitLabel = "kcal/day" }) {
+  const W = 360, H = 96, PADB = 16;
+  const hasPrior = priorKcal > 0 && priorSd > 0;
+  // Span both curves, so neither is clipped and their relative width is honest.
+  const lo = Math.min(kcal - 3.4 * sd, hasPrior ? priorKcal - 3.4 * priorSd : Infinity);
+  const hi = Math.max(kcal + 3.4 * sd, hasPrior ? priorKcal + 3.4 * priorSd : -Infinity);
+  const x = (v) => ((v - lo) / (hi - lo)) * W;
+  const pdf = (v, mu, s) => Math.exp(-0.5 * ((v - mu) / s) ** 2) / (s * Math.sqrt(2 * Math.PI));
+  // one shared vertical scale => equal area under each curve
+  const peak = Math.max(pdf(kcal, kcal, sd), hasPrior ? pdf(priorKcal, priorKcal, priorSd) : 0);
+  const y = (d) => H - PADB - (d / peak) * (H - PADB - 6);
+  const N = 160;
+  const curve = (mu, s) => Array.from({ length: N + 1 }, (_, i) => {
+    const v = lo + ((hi - lo) * i) / N;
+    return [x(v), y(pdf(v, mu, s))];
+  });
+  const path = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+  const post = curve(kcal, sd);
+  const inner = post.filter((_, i) => { const v = lo + ((hi - lo) * i) / N; return v >= kcal - 1.96 * sd && v <= kcal + 1.96 * sd; });
+  const fill = inner.length > 1
+    ? `${path(inner)} L${inner[inner.length - 1][0].toFixed(1)},${H - PADB} L${inner[0][0].toFixed(1)},${H - PADB} Z`
+    : null;
+  const tick = (v, extra = {}) => <line x1={x(v)} x2={x(v)} y1={6} y2={H - PADB} {...extra} />;
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ position: "relative", height: 8, borderRadius: 4, background: A.track }}>
-        <div style={{ position: "absolute", left: `${L}%`, width: `${Hh - L}%`, top: 0, bottom: 0, background: A.good, borderRadius: 4, opacity: 0.85 }} />
-        <div style={{ position: "absolute", left: `${P}%`, top: -2, width: 2, height: 12, background: A.ink }} />
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: TYPE.mono, fontSize: 10, color: A.muted, marginTop: 3 }}>
-        <span>{r0(lo - padKcal)}</span><span>{r0(lo)}–{r0(hi)}</span><span>{r0(hi + padKcal)}</span>
-      </div>
+    <div style={{ marginTop: 10 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: "block", overflow: "visible" }} role="img"
+        aria-label={`Posterior distribution for expenditure, most likely ${r0(kcal)} kcal per day, 95% between ${r0(kcal - 1.96 * sd)} and ${r0(kcal + 1.96 * sd)}`}>
+        {/* the prior — what the vet formula alone believed, before this cat's data */}
+        {hasPrior && <path d={path(curve(priorKcal, priorSd))} fill="none" stroke={A.muted} strokeWidth="1.3" strokeDasharray="3 3" opacity="0.55" />}
+        {fill && <path d={fill} fill={A.chart.expenditure || A.good} opacity="0.18" />}
+        <path d={path(post)} fill="none" stroke={A.chart.expenditure || A.good} strokeWidth="2" />
+        {tick(kcal, { stroke: A.ink, strokeWidth: 1.5 })}
+        <line x1={0} x2={W} y1={H - PADB} y2={H - PADB} stroke={A.cardBorder} strokeWidth="1" />
+        <text x={x(kcal)} y={H - 4} textAnchor="middle" style={{ ...axisText, fill: A.ink }}>{r0(kcal)}</text>
+        <text x={x(kcal - 1.96 * sd)} y={H - 4} textAnchor="middle" style={axisText}>{r0(kcal - 1.96 * sd)}</text>
+        <text x={x(kcal + 1.96 * sd)} y={H - 4} textAnchor="middle" style={axisText}>{r0(kcal + 1.96 * sd)}</text>
+        {hasPrior && <text x={x(priorKcal)} y={12} textAnchor="middle" style={{ ...axisText, fill: A.muted }}>vet formula</text>}
+      </svg>
+      <p style={{ ...cap, fontSize: 11.5 }}>
+        The shaded area is the middle 95% — the curve's height is how likely each value is, so the
+        peak is the best estimate and the tails are genuinely less believable, which a plain bar
+        can't say.{hasPrior ? " The dashed curve is the vet formula's guess before your cat's own data; both enclose the same area, so the taller, narrower shape is what the logging bought." : ""}
+        {sdFilter > 0 && sdIntake > 0 && <> Width here is <b style={{ fontWeight: 600 }}>±{r0(1.96 * sdFilter)}</b> from the model and <b style={{ fontWeight: 600 }}>±{r0(1.96 * sdIntake)}</b> from how exactly food is measured.</>}
+      </p>
     </div>
   );
 }

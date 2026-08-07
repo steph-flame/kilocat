@@ -432,7 +432,10 @@ export function AppProvider({ children }) {
     // A systematic food-logging error passes into the burn estimate ~1:1 while the filter's own
     // band doesn't move, so a band without it is a lie of omission — see withIntakeUncertainty.
     // Applied to EVERY estimator so v1..v4 stay comparable.
-    const withIntake = (r) => withIntakeUncertainty(r, meanIntake);
+    // Carry the PRIOR through with the result: v2-v4 are Bayesian, so the vet formula is a real
+    // prior distribution, and showing it beside the posterior is what makes "the data moved us off
+    // the formula" visible rather than asserted.
+    const withIntake = (r) => ({ ...withIntakeUncertainty(r, meanIntake), priorKcal: t.refs.maintain, priorSdKcal, meanIntake });
     if (estimator === "v1") return withIntake(estimateExpenditure(w, i, opts));
     if (estimator === "v2") return withIntake(kalmanEstimateExpenditure(w, i, opts));
     // v4 models E = k·W^0.75 instead of letting E random-walk, which removes v3's tracking lag
