@@ -29,7 +29,7 @@ export function resolveUnit(topUnit, legacyUnit) {
   return undefined;
 }
 
-const ESTIMATORS = ["v1", "v2", "v3"];
+const ESTIMATORS = ["v1", "v2", "v3", "v4"];
 // Resolve the shared expenditure estimator on load/import: same courtesy pattern as
 // resolveUnit above. The blob's own top-level field if it's a valid estimator, else (an
 // older export from before `estimator` was promoted out of per-cat expSettings.algo) the

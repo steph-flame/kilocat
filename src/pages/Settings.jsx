@@ -173,8 +173,8 @@ export default function Settings() {
           <div className="flex items-center justify-between mb-1">
             <h2 className="font-medium">Estimator</h2>
             <div className="flex rounded-full overflow-hidden border" style={{ borderColor: C.line }}>
-              {["v3", "v2", "v1"].map((a) => (
-                <button key={a} onClick={() => setEstimator(a)} aria-pressed={estimator === a} style={{ background: estimator === a ? C.spruce : "transparent", color: estimator === a ? "#fff" : C.sub }} className="text-xs px-2.5 py-1.5 font-mono">{a}{a === "v3" ? " · recommended" : ""}</button>
+              {["v3", "v4", "v2", "v1"].map((a) => (
+                <button key={a} onClick={() => setEstimator(a)} aria-pressed={estimator === a} style={{ background: estimator === a ? C.spruce : "transparent", color: estimator === a ? "#fff" : C.sub }} className="text-xs px-2.5 py-1.5 font-mono">{a}{a === "v3" ? " · recommended" : a === "v4" ? " · beta" : ""}</button>
               ))}
             </div>
           </div>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { simulateCat, scoreEstimator, rng, SIM_DEFAULTS } from "./simCat.js";
-import { ucEstimateExpenditure, KCAL_PER_KG } from "./expenditure.js";
+import { ucEstimateExpenditure, alloEstimateExpenditure, KCAL_PER_KG } from "./expenditure.js";
 
 const v3 = (opts = {}) => (w, i) => ucEstimateExpenditure(w, i, { priorKcal: 250, priorSdKcal: 60, ...opts });
 
@@ -90,5 +90,70 @@ describe("v3 calibration, scored against known truth", () => {
     const precise = scoreEstimator(v3(), { cases: 30, deficit: 45, sigmaW: 0.01, gutPct: 0.005 });
     const sloppy = scoreEstimator(v3(), { cases: 30, deficit: 45, sigmaW: 0.08, gutPct: 0.005 });
     expect(Math.abs(precise.halfWidth - sloppy.halfWidth) / precise.halfWidth).toBeLessThan(0.15);
+  });
+});
+
+// v4 exists because of two measured v3 failures pinned above: a tracking lag no qE removes, and a
+// band set by assumed drift rather than by the data. These lock in that v4 actually fixes both —
+// if a future change regresses either, this fails rather than quietly shipping.
+describe("v4 (allometric) vs v3, scored against known truth", () => {
+  const v4 = (o = {}) => (w, i) => alloEstimateExpenditure(w, i, { priorKcal: 250, priorSdKcal: 60, ...o });
+  // Mithril's measured profile: gut fill 0.42% of body mass, persistence 0.58, Litter-Robot at
+  // ~6 reads/day — derived from ~150 real readings, see the project notes.
+  const REAL = { gutPct: 0.0042, gutPhi: 0.58, sigmaW: 0.026, readsPerDay: 6, days: 56 };
+
+  it("removes the lag on a LOSING cat (v3 reads high; v4 doesn't)", () => {
+    const a = scoreEstimator(v3(), { cases: 60, deficit: 45, ...REAL });
+    const b = scoreEstimator(v4(), { cases: 60, deficit: 45, ...REAL });
+    expect(a.bias).toBeGreaterThan(2);          // v3 lags above the falling truth
+    expect(Math.abs(b.bias)).toBeLessThan(1.5); // v4 predicts the fall instead of chasing it
+  });
+
+  it("removes the mirror lag on a GAINING cat", () => {
+    const a = scoreEstimator(v3(), { cases: 60, deficit: -45, ...REAL });
+    const b = scoreEstimator(v4(), { cases: 60, deficit: -45, ...REAL });
+    expect(a.bias).toBeLessThan(-2);
+    expect(Math.abs(b.bias)).toBeLessThan(1.5);
+  });
+
+  it("is more accurate, not just more confident", () => {
+    const a = scoreEstimator(v3(), { cases: 60, deficit: 45, ...REAL });
+    const b = scoreEstimator(v4(), { cases: 60, deficit: 45, ...REAL });
+    expect(b.mae).toBeLessThan(a.mae * 0.8);
+  });
+
+  it("roughly halves the reported band", () => {
+    const a = scoreEstimator(v3(), { cases: 40, deficit: 45, ...REAL });
+    const b = scoreEstimator(v4(), { cases: 40, deficit: 45, ...REAL });
+    expect(b.halfWidth).toBeLessThan(a.halfWidth * 0.65);
+  });
+
+  // The band is only worth halving if it's still honest. This is the test that matters most:
+  // a narrower interval that under-covers is worse than a wide one, because it misleads.
+  it("stays calibrated across other cats and scales — the default qK is chosen for THIS", () => {
+    const r = scoreEstimator(v4(), { cases: 100, deficit: 45, days: 56, vary: { gutPct: [0.002, 0.015], sigmaW: [0.01, 0.08] } });
+    expect(r.coverage).toBeGreaterThanOrEqual(90); // nominal 95; measured ~94
+    expect(Math.abs(r.bias)).toBeLessThan(2);
+  });
+
+  it("a tighter qK would be over-confident — documenting why the default isn't smaller", () => {
+    const tight = scoreEstimator(v4({ qK: 0.01 }), { cases: 100, deficit: 45, days: 56, vary: { gutPct: [0.002, 0.015], sigmaW: [0.01, 0.08] } });
+    expect(tight.coverage).toBeLessThan(90); // narrower, but it starts lying
+  });
+
+  it("handles the degenerate inputs the real app will hand it", () => {
+    expect(alloEstimateExpenditure([], []).enoughData).toBe(false);
+    expect(alloEstimateExpenditure([{ date: "2026-01-01", value: 4.4 }], []).kcal).toBeNull();
+    // a nonsense weight must not produce NaN — W^0.75 is undefined at or below zero
+    const junk = [{ date: "2026-01-01", value: 0 }, { date: "2026-01-02", value: 0 }];
+    const out = alloEstimateExpenditure(junk, [{ date: "2026-01-01", value: 200 }]);
+    expect(out.kcal === null || Number.isFinite(out.kcal)).toBe(true);
+  });
+
+  it("reports a per-day trend series like every other estimator", () => {
+    const sim = simulateCat({ ...REAL, deficit: 45 });
+    const out = alloEstimateExpenditure(sim.weightEntries, sim.intakeEntries, { priorKcal: 250 });
+    expect(out.trend.length).toBeGreaterThan(50);
+    expect(out.trend.every((p) => Number.isFinite(p.e) && Number.isFinite(p.sd) && Number.isFinite(p.kg))).toBe(true);
   });
 });

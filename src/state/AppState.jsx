@@ -6,7 +6,7 @@ import {
   makeLibrarySeed, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName,
   migrateLegacyFood, ensureBuiltins, backfillBuiltinMacros, migrateSplitMode, sumPct, blankFood, normalizePct, waterfall,
 } from "../lib/foods.js";
-import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
+import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, alloEstimateExpenditure, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
 import { methodOffsets, alignToReference } from "../lib/methodBias.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "../lib/series.js";
 import { usePersistence, store, probeStorage } from "../lib/storage.js";
@@ -427,6 +427,10 @@ export function AppProvider({ children }) {
     const opts = { priorKcal: t.refs.maintain, priorSdKcal, intakeDayStatus, excludeDay: today };
     if (estimator === "v1") return estimateExpenditure(w, i, opts);
     if (estimator === "v2") return kalmanEstimateExpenditure(w, i, opts);
+    // v4 models E = k·W^0.75 instead of letting E random-walk, which removes v3's tracking lag
+    // and roughly halves the band (see the V4 banner in lib/expenditure.js). Opt-in for now:
+    // it wins on simulated cats, but v3 stays the default until it's been run on real histories.
+    if (estimator === "v4") return alloEstimateExpenditure(w, i, opts);
     return ucEstimateExpenditure(w, i, opts); // v3 (default)
   }, [weightLog.items, intakeLog.items, intakeDayStatus, estimator, t.refs.maintain, today]);
 

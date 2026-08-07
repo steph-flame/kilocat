@@ -365,3 +365,138 @@ export function ucEstimateExpenditure(weightEntries = [], intakeEntries = [], op
   return { enoughData, kcal, sd, low: kcal - 1.96 * sd, high: kcal + 1.96 * sd,
     trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend };
 }
+
+/* ==================== v4: allometric expenditure ==================== */
+// v3 lets E random-walk and hopes the filter rediscovers where it went. But most of E's real
+// movement is NOT random — it's a consequence of the weight we already track. Maintenance scales
+// with metabolic body size, E ≈ k·W^0.75 (the RER exponent), so a cat that loses 300 g genuinely
+// needs ~11 kcal/day less, and v3 can only learn that AFTER the weight has moved and the fit has
+// caught up. Measured on simulated cats with known truth (see simCat.js), that shows up as a
+// systematic lag: v3 reads ~4-5 kcal HIGH for a losing cat and equally LOW for a gaining one, and
+// — the key finding — the lag barely moves between qE=2 and qE=10, so no amount of process-noise
+// tuning removes it. It's a property of the model's shape.
+//
+// v4 changes the state so the predictable part is PREDICTED. Instead of tracking E directly it
+// tracks k — the cat's own metabolic constant — and derives E from the weight it already has:
+//
+//   state x = [W, k, T],  E = k·W^0.75
+//   W_t = W + (I − k·W^0.75)/ρ      k_t = k + tiny drift      T_t = φ·T + drift
+//   measurement z = W + T           (same as v3: the scale sees body mass plus gut fill)
+//
+// Two consequences. The declining burn of a slimming cat needs no learning at all — it falls out
+// of W. And k really is near-constant (it changes with age, season, illness — not with this week's
+// weight), so its process noise can be far smaller than v3's qE, which is what lets the reported
+// band tighten instead of sitting at a floor set by assumed drift.
+//
+// The transient state T is KEPT and unchanged. Measuring a real cat's Litter-Robot series
+// (~150 reads) put the day-to-day persistence at φ≈0.58 after correcting for the attenuation that
+// measurement noise induces — v3's 0.5 is right, and the gut-fill state is modelling something
+// real. Only the E-vs-k part changes.
+//
+// Nonlinear (E depends on W^0.75), so this is an EXTENDED Kalman filter: the same predict/update
+// as v3 with the transition linearised about the current state each step. `sd` comes from the
+// delta method — the variance of k·W^0.75 given the covariance of (W, k).
+export const ALLO_EXP = 0.75; // RER's metabolic-body-size exponent; see nutrition.js's RER()
+export const V4_DEFAULTS = {
+  // qK 0.2 is CHOSEN BY COVERAGE, not by taste: scored across simulated cats spanning gut fill
+  // 0.2-1.5% of body mass and scale noise 0.01-0.08 kg, it holds 94% coverage against a nominal
+  // 95%. Tighter values look tempting (qK 0.05 halves the band again) but under-cover at 86% —
+  // over-confident, which is the failure mode that actually misleads. See simCat.test.js.
+  rho: KCAL_PER_KG, qW: 1e-5, qK: 0.2, qT: 0.0025, phi: 0.5,
+  priorKcal: 200, priorSdKcal: 120, transientSd0: 0.06,
+  minDays: 10, maxMissing: 0.5, recentIntakeDays: 7, maxJumpKg: 0.3, maxReject: 3,
+};
+
+export function alloEstimateExpenditure(weightEntries = [], intakeEntries = [], opts = {}) {
+  const P = { ...V4_DEFAULTS, ...opts };
+  const rho = P.rho;
+  const wEntries = P.excludeDay ? weightEntries.filter((e) => e.date !== P.excludeDay) : weightEntries;
+  const dW = dailyWeightWithVariance(wEntries);
+  const empty = { enoughData: false, kcal: null, sd: null, low: null, high: null,
+    trendWeightKg: dW.length ? dW[dW.length - 1].z : null, rateKgPerWeek: null, ratePctPerWeek: null,
+    nDays: dW.length, missingIntake: null, trend: [] };
+  if (dW.length < 2) return empty;
+
+  const first = dW[0].date, last = dW[dW.length - 1].date;
+  const days = enumerateDays(first, last);
+  const iByDay = buildIntakeDayMap(intakeEntries, P.intakeDayStatus, P.excludeDay);
+  const countedDays = P.excludeDay ? days.filter((d) => d !== P.excludeDay) : days;
+  const present = countedDays.filter((d) => iByDay.has(d));
+  const missingIntake = countedDays.length ? 1 - present.length / countedDays.length : 0;
+  const meanI = present.length ? mean(present.map((d) => iByDay.get(d))) : 0;
+  const intakeOn = (d) => (iByDay.has(d) ? iByDay.get(d) : meanI);
+  const wByDay = new Map(dW.map((d) => [d.date, d]));
+
+  // Metabolic size and its derivative, guarded: a non-positive weight would make W^0.75 and its
+  // derivative undefined, and one bad row must never take the whole estimate with it.
+  const msize = (W) => (W > 0 ? Math.pow(W, ALLO_EXP) : 0);
+  const dmsize = (W) => (W > 0 ? ALLO_EXP * Math.pow(W, ALLO_EXP - 1) : 0);
+
+  const Q = diag([P.qW, P.qK, P.qT]);
+  const H = [1, 0, 1];
+  const W0 = wByDay.get(first).z;
+  // Seed k from the vet-formula prior so the cold start matches v3's: k0·W0^0.75 === priorKcal.
+  const m0 = msize(W0) || 1;
+  let x = [W0, P.priorKcal / m0, 0];
+  let Pcov = diag([wByDay.get(first).R, (P.priorSdKcal / m0) ** 2, P.transientSd0 ** 2]);
+
+  // E and its sd from (W, k) — the delta method: J = [∂E/∂W, ∂E/∂k, 0].
+  const eOf = (xx) => xx[1] * msize(xx[0]);
+  const sdOf = (xx, PP) => {
+    const J = [xx[1] * dmsize(xx[0]), msize(xx[0]), 0];
+    let v = 0;
+    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) v += J[a] * PP[a][b] * J[b];
+    return Math.sqrt(Math.max(0, v));
+  };
+
+  const trend = [{ date: first, kg: x[0], e: eOf(x), sd: sdOf(x, Pcov) }];
+  let lastAcceptK = 0, rejects = 0, accepted = 0;
+
+  for (let k = 1; k < days.length; k++) {
+    const d = days[k];
+    const W = x[0], kk = x[1];
+    // predict — the nonlinear transition, then linearise about (W, k) for the covariance
+    const xPred = [W + (intakeOn(d) - kk * msize(W)) / rho, kk, P.phi * x[2]];
+    const F = [
+      [1 - (kk * dmsize(W)) / rho, -msize(W) / rho, 0],
+      [0, 1, 0],
+      [0, 0, P.phi],
+    ];
+    const Ppred = matadd(matmul(matmul(F, Pcov), transpose(F)), Q);
+    const zPred = xPred[0] + xPred[2];
+
+    const meas = wByDay.get(d);
+    if (meas) {
+      const gate = P.maxJumpKg * Math.max(1, k - lastAcceptK);
+      const y = meas.z - zPred;
+      if (Math.abs(y) <= gate || rejects >= P.maxReject) {
+        const { R } = meas;
+        const PHt = [Ppred[0][0] + Ppred[0][2], Ppred[1][0] + Ppred[1][2], Ppred[2][0] + Ppred[2][2]];
+        const S = PHt[0] + PHt[2] + R;
+        const K = PHt.map((v) => v / S);
+        x = xPred.map((xi, i) => xi + K[i] * y);
+        const ImKH = identity(3).map((row, i) => row.map((v, j) => v - K[i] * H[j]));
+        Pcov = symmetrize(matmul(ImKH, Ppred));
+        lastAcceptK = k; rejects = 0; accepted += 1;
+      } else {
+        x = xPred; Pcov = Ppred; rejects += 1;
+      }
+    } else {
+      x = xPred; Pcov = Ppred;
+    }
+    trend.push({ date: d, kg: x[0], e: eOf(x), sd: sdOf(x, Pcov) });
+  }
+
+  const kcal = eOf(x);
+  const sd = sdOf(x, Pcov);
+  const recent = present.slice(-P.recentIntakeDays);
+  const recentI = recent.length ? mean(recent.map((d) => iByDay.get(d))) : meanI;
+  const rateKgPerWeek = ((recentI - kcal) / rho) * 7;
+  const trendWeightKg = x[0];
+  const ratePctPerWeek = trendWeightKg > 0 ? (rateKgPerWeek / trendWeightKg) * 100 : 0;
+  const span = diffDays(first, last) + 1;
+  const enoughData = span >= P.minDays && present.length >= 2 && missingIntake <= P.maxMissing && accepted >= 2;
+
+  return { enoughData, kcal, sd, low: kcal - 1.96 * sd, high: kcal + 1.96 * sd,
+    trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend };
+}
