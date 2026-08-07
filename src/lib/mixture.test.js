@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  mixtureEstimateExpenditure, alloEstimateExpenditure, mixtureMoments, mixtureQuantile, V5_GRID,
+  mixtureEstimateExpenditure, alloEstimateExpenditure, mixtureMoments, mixtureQuantile,
+  withIntakeUncertainty, V5_GRID,
 } from "./expenditure.js";
 import { simulateCat, scoreEstimator } from "./simCat.js";
 
@@ -118,5 +119,80 @@ describe("v5 is insurance: it holds up where v4's assumptions break", () => {
     const a = scoreEstimator(v4, cfg), b = scoreEstimator(v5, cfg);
     expect(b.coverage).toBeGreaterThanOrEqual(a.coverage - 2);
     expect(Math.abs(b.bias)).toBeLessThan(2);
+  });
+});
+
+// A skewed posterior has more than one defensible "95% interval". We report the CENTRAL
+// (equal-tailed) one: 2.5% of the mass below, 2.5% above. The alternative is HPD — the shortest
+// interval holding 95% — which sits off-centre on a skewed posterior and is narrower. Central is
+// the choice because it reads plainly ("2.5% chance she's under this") and is monotone under
+// reparameterisation, so it can't be gamed by rescaling. These pin the convention.
+describe("the reported interval is the CENTRAL 95%", () => {
+  const normCdf = (z) => {
+    const t = 1 / (1 + (0.3275911 * Math.abs(z)) / Math.SQRT2);
+    const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp((-z * z) / 2);
+    return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
+  };
+  const cdfAt = (comps, v) => {
+    const W = comps.reduce((a, c) => a + c.w, 0);
+    return comps.reduce((a, c) => a + (c.w / W) * normCdf((v - c.kcal) / c.sd), 0);
+  };
+  // deliberately skewed: a sharp component plus a diffuse one displaced to one side
+  const skewed = [{ w: 3, kcal: 200, sd: 6 }, { w: 1, kcal: 250, sd: 25 }];
+
+  it("puts 2.5% of the mass in each tail", () => {
+    expect(cdfAt(skewed, mixtureQuantile(skewed, 0.025))).toBeCloseTo(0.025, 3);
+    expect(cdfAt(skewed, mixtureQuantile(skewed, 0.975))).toBeCloseTo(0.975, 3);
+  });
+
+  it("is genuinely asymmetric about the mean when the posterior is skewed", () => {
+    const m = mixtureMoments(skewed);
+    const lo = mixtureQuantile(skewed, 0.025), hi = mixtureQuantile(skewed, 0.975);
+    expect(hi - m.kcal).toBeGreaterThan((m.kcal - lo) * 1.2); // the long tail is the upper one
+  });
+
+  it("is NOT the same as mean ± 1.96·sd — that would be the symmetric approximation", () => {
+    const m = mixtureMoments(skewed);
+    expect(Math.abs(mixtureQuantile(skewed, 0.975) - (m.kcal + 1.96 * m.sd))).toBeGreaterThan(1);
+  });
+});
+
+describe("intake uncertainty must not flatten an asymmetric posterior", () => {
+  const OPTS2 = { priorKcal: 250, priorSdKcal: 60 };
+  const sim = simulateCat({ days: 56, deficit: 45, gutPct: 0.0042, gutPhi: 0.58, sigmaW: 0.026, readsPerDay: 6, seed: 77 });
+
+  it("keeps the mixture and re-derives the quantiles rather than overwriting them", () => {
+    const raw = mixtureEstimateExpenditure(sim.weightEntries, sim.intakeEntries, OPTS2);
+    const wide = withIntakeUncertainty(raw, 215, 0.05);
+    expect(wide.mixture).toBeTruthy();
+    expect(wide.mixture.length).toBe(raw.mixture.length);
+    // every component widened by the same independent variance
+    wide.mixture.forEach((c, i) => {
+      expect(c.sd).toBeCloseTo(Math.sqrt(raw.mixture[i].sd ** 2 + (0.05 * 215) ** 2), 6);
+    });
+    expect(wide.high - wide.low).toBeGreaterThan(raw.high - raw.low);
+  });
+
+  it("the widened interval is still the central 95%, not mean ± 1.96·sd", () => {
+    const wide = withIntakeUncertainty(
+      mixtureEstimateExpenditure(sim.weightEntries, sim.intakeEntries, OPTS2), 215, 0.05);
+    const sym = { lo: wide.kcal - 1.96 * wide.sd, hi: wide.kcal + 1.96 * wide.sd };
+    // they may be close, but the reported bounds come from the CDF, not from the moments
+    expect(wide.low).toBeCloseTo(mixtureQuantile(wide.mixture, 0.025), 6);
+    expect(wide.high).toBeCloseTo(mixtureQuantile(wide.mixture, 0.975), 6);
+    expect(Number.isFinite(sym.lo)).toBe(true);
+  });
+
+  it("widens the per-day trend band too, so the timeline matches the headline", () => {
+    const raw = mixtureEstimateExpenditure(sim.weightEntries, sim.intakeEntries, OPTS2);
+    const wide = withIntakeUncertainty(raw, 215, 0.05);
+    expect(wide.trend[wide.trend.length - 1].sd).toBeGreaterThan(raw.trend[raw.trend.length - 1].sd);
+  });
+
+  it("a non-mixture result still gets the plain symmetric treatment", () => {
+    const v4r = alloEstimateExpenditure(sim.weightEntries, sim.intakeEntries, OPTS2);
+    const wide = withIntakeUncertainty(v4r, 215, 0.05);
+    expect(wide.mixture).toBeUndefined();
+    expect(wide.kcal - wide.low).toBeCloseTo(wide.high - wide.kcal, 6); // Gaussian: symmetric
   });
 });

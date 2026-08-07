@@ -61,7 +61,11 @@ export default function TodayPage() {
 
   const measured = !!e?.enoughData;
   const burn = measured ? r0(e.kcal) : r0(intent.maintenance);
-  const pm = measured ? r0(e.kcal - e.low) : null;
+  // The posterior isn't necessarily symmetric (v5's is a mixture), so quote both sides when they
+  // actually differ rather than printing one half-width with a ± in front of it.
+  const plus = measured ? r0(e.high - e.kcal) : null;
+  const minus = measured ? r0(e.kcal - e.low) : null;
+  const asym = measured && Math.abs(plus - minus) > 1;
   // Early / weight-stable: the interval is wide, so lead with the range, not a precise-looking number.
   const wide = measured && e.kcal > 0 && (e.high - e.low) / 2 > 0.15 * e.kcal;
 
@@ -106,7 +110,7 @@ export default function TodayPage() {
             <div style={{ fontFamily: TYPE.mono, fontSize: wide ? 30 : 44, fontWeight: 600, color: A.inverted.text, lineHeight: 1 }}>
               {wide ? `${r0(e.low)}–${r0(e.high)}` : burn}<span style={{ fontSize: 15, color: A.inverted.sub, fontWeight: 400 }}> kcal/day</span>
             </div>
-            {measured && !wide && <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.inverted.sub, textAlign: "right" }}>±{pm} kcal<br />95% interval</div>}
+            {measured && !wide && <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.inverted.sub, textAlign: "right" }}>{asym ? `+${plus} / −${minus}` : `±${plus}`} kcal<br />95% interval</div>}
           </div>
           <p style={{ fontSize: 12, color: A.inverted.sub, margin: "10px 0 0", lineHeight: 1.45 }}>
             {measured

@@ -542,11 +542,35 @@ export function withIntakeUncertainty(result, meanIntakeKcal, intakeCv = DEFAULT
   const cv = Math.max(0, Number(intakeCv) || 0);
   const sdIntake = cv * Math.max(0, Number(meanIntakeKcal) || 0);
   if (!(sdIntake > 0)) return { ...result, sdFilter: result.sd, sdIntake: 0 };
+
+  // The same uncertainty applies on every day (a systematic logging bias doesn't come and go), so
+  // the per-day band has to carry it too — otherwise the timeline reads tighter than the headline
+  // it's supposed to be evidence for.
+  const widenTrend = (t) => (Array.isArray(t)
+    ? t.map((p) => (Number.isFinite(p?.sd) ? { ...p, sd: Math.sqrt(p.sd * p.sd + sdIntake * sdIntake) } : p))
+    : t);
+
+  // A MIXTURE posterior (v5) must not be collapsed to mean ± 1.96·sd here — that would throw away
+  // the asymmetry v5 exists to represent, which is exactly what this function used to do. Adding
+  // independent Gaussian noise to a Gaussian mixture just widens each component by the same amount,
+  // so widen them and re-derive the quantiles from the CDF.
+  if (Array.isArray(result.mixture) && result.mixture.length) {
+    const mixture = result.mixture.map((c) => ({ ...c, sd: Math.sqrt(c.sd * c.sd + sdIntake * sdIntake) }));
+    const m = mixtureMoments(mixture);
+    return {
+      ...result, mixture,
+      sd: m.sd,
+      low: mixtureQuantile(mixture, 0.025),
+      high: mixtureQuantile(mixture, 0.975),
+      sdFilter: result.sd, sdIntake, trend: widenTrend(result.trend),
+    };
+  }
+
   const sd = Math.sqrt(result.sd * result.sd + sdIntake * sdIntake);
   return {
     ...result,
     sd, low: result.kcal - 1.96 * sd, high: result.kcal + 1.96 * sd,
-    sdFilter: result.sd, sdIntake,
+    sdFilter: result.sd, sdIntake, trend: widenTrend(result.trend),
   };
 }
 
