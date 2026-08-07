@@ -500,3 +500,64 @@ export function alloEstimateExpenditure(weightEntries = [], intakeEntries = [], 
   return { enoughData, kcal, sd, low: kcal - 1.96 * sd, high: kcal + 1.96 * sd,
     trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend };
 }
+
+/* ==================== intake uncertainty ==================== */
+// Every estimator above treats logged intake as EXACT. It isn't, and the omission matters more
+// than anything left in the filter: a systematic logging error passes into the burn estimate
+// essentially 1:1 (E ≈ I − ρ·dW/dt, so a fractional bias in I is a fractional bias in E), while the
+// reported band doesn't move at all. Measured on simulated cats: a 5% intake error produces a
+// ~10 kcal error against a ±15.6 band — two-thirds of the interval, unrepresented — and a 10% error
+// puts the truth OUTSIDE the band entirely. The filter is then confidently wrong.
+//
+// Why it's a FLOOR and not a shrinking term: random day-to-day slop (a gram here, leftovers there)
+// does average away over weeks, and the filters already benefit from that. A SYSTEMATIC error does
+// not. If the label overstates energy by 5%, or the scoop is consistently heaped, every additional
+// day carries the same bias, so no quantity of data reduces it. It therefore enters as a constant
+// variance added to the filter's, which is exactly what stops the band converging to a precision
+// the data cannot support.
+//
+// Where the default comes from: pet-food energy statements are typically accurate to a few percent
+// at best (regulatory tolerances on the ME statement are themselves several percent), before adding
+// leftovers, spillage, a housemate's treats, or another pet sharing the bowl. 5% is a deliberately
+// unremarkable figure for someone weighing portions on a scale, and it should be raised, not
+// lowered, for anyone using scoops or free-feeding — kcal-per-cup varies a lot with how kibble
+// settles. Exposed as an option rather than baked in, because it's an assumption about the OWNER,
+// not about the cat.
+export const DEFAULT_INTAKE_CV = 0.05;
+
+// Widen a result's band to include intake uncertainty. Returns a new object carrying both parts
+// separately (sdFilter / sdIntake) so the UI can explain WHICH uncertainty dominates — the honest
+// answer for a well-logged cat past a few weeks is "your food measurement, not the model".
+export function withIntakeUncertainty(result, meanIntakeKcal, intakeCv = DEFAULT_INTAKE_CV) {
+  if (!result || result.kcal == null || !(result.sd >= 0)) return result;
+  const cv = Math.max(0, Number(intakeCv) || 0);
+  const sdIntake = cv * Math.max(0, Number(meanIntakeKcal) || 0);
+  if (!(sdIntake > 0)) return { ...result, sdFilter: result.sd, sdIntake: 0 };
+  const sd = Math.sqrt(result.sd * result.sd + sdIntake * sdIntake);
+  return {
+    ...result,
+    sd, low: result.kcal - 1.96 * sd, high: result.kcal + 1.96 * sd,
+    sdFilter: result.sd, sdIntake,
+  };
+}
+
+// Is the fitted metabolic constant physiologically believable? k = E / W^0.75, so RER's own
+// constant (70) is the natural yardstick: k/70 is the cat's maintenance expressed in multiples of
+// resting requirement. Adult cats span roughly 0.7-1.5×RER — neutered indoor cats cluster low,
+// active entire cats high — so anything outside that is more likely a DATA problem (over- or
+// under-reported portions, a label in the wrong units, another pet eating the food) than a genuinely
+// extraordinary cat. Deliberately wide: this should catch mistakes, not second-guess unusual cats.
+export const K_RER = 70;
+export const K_PLAUSIBLE = { lo: 0.7 * K_RER, hi: 1.5 * K_RER }; // 49 .. 105
+export function checkK(kcal, weightKg) {
+  if (!(kcal > 0) || !(weightKg > 0)) return null;
+  const k = kcal / Math.pow(weightKg, ALLO_EXP);
+  const xRer = k / K_RER;
+  const low = k < K_PLAUSIBLE.lo, high = k > K_PLAUSIBLE.hi;
+  return {
+    k, xRer, plausible: !low && !high,
+    note: low ? "This is well below what any cat should need. The likeliest cause is intake being under-recorded — check portions, labels, and whether meals are being missed from the log."
+      : high ? "This is well above what a cat should need. The likeliest cause is intake being over-recorded — check portion sizes, the label's kcal figure, and whether another pet is sharing the food."
+      : null,
+  };
+}

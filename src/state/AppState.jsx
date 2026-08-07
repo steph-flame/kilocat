@@ -6,7 +6,7 @@ import {
   makeLibrarySeed, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName,
   migrateLegacyFood, ensureBuiltins, backfillBuiltinMacros, migrateSplitMode, sumPct, blankFood, normalizePct, waterfall,
 } from "../lib/foods.js";
-import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, alloEstimateExpenditure, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
+import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, alloEstimateExpenditure, withIntakeUncertainty, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
 import { methodOffsets, alignToReference } from "../lib/methodBias.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "../lib/series.js";
 import { usePersistence, store, probeStorage } from "../lib/storage.js";
@@ -425,13 +425,21 @@ export function AppProvider({ children }) {
     // filter still moves the estimate wherever the data genuinely leads, below the prior included.
     const priorSdKcal = Math.min(120, Math.max(40, 0.25 * (t.refs.maintain || 200)));
     const opts = { priorKcal: t.refs.maintain, priorSdKcal, intakeDayStatus, excludeDay: today };
-    if (estimator === "v1") return estimateExpenditure(w, i, opts);
-    if (estimator === "v2") return kalmanEstimateExpenditure(w, i, opts);
+    // Mean logged intake per day, for the intake-uncertainty term below.
+    const perDay = new Map();
+    i.forEach((e) => perDay.set(e.date, (perDay.get(e.date) || 0) + e.value));
+    const meanIntake = perDay.size ? [...perDay.values()].reduce((a, b) => a + b, 0) / perDay.size : 0;
+    // A systematic food-logging error passes into the burn estimate ~1:1 while the filter's own
+    // band doesn't move, so a band without it is a lie of omission — see withIntakeUncertainty.
+    // Applied to EVERY estimator so v1..v4 stay comparable.
+    const withIntake = (r) => withIntakeUncertainty(r, meanIntake);
+    if (estimator === "v1") return withIntake(estimateExpenditure(w, i, opts));
+    if (estimator === "v2") return withIntake(kalmanEstimateExpenditure(w, i, opts));
     // v4 models E = k·W^0.75 instead of letting E random-walk, which removes v3's tracking lag
     // and roughly halves the band (see the V4 banner in lib/expenditure.js). Opt-in for now:
     // it wins on simulated cats, but v3 stays the default until it's been run on real histories.
-    if (estimator === "v4") return alloEstimateExpenditure(w, i, opts);
-    return ucEstimateExpenditure(w, i, opts); // v3 (default)
+    if (estimator === "v4") return withIntake(alloEstimateExpenditure(w, i, opts));
+    return withIntake(ucEstimateExpenditure(w, i, opts)); // v3 (default)
   }, [weightLog.items, intakeLog.items, intakeDayStatus, estimator, t.refs.maintain, today]);
 
   // The single resolved "current target" (redesign) — basis + signed rate → target/floor/rate,
