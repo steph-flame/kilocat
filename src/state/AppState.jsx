@@ -13,7 +13,7 @@ import { usePersistence, store, probeStorage } from "../lib/storage.js";
 import { useFoodLibrary } from "../hooks/useFoodLibrary.js";
 import {
   addCat as addCatPure, deleteCat as deleteCatPure, clearCatHistory as clearCatHistoryPure, switchCat as switchCatPure,
-  updateCatProfile as updateCatProfilePure, updateActiveCatState, freshCatState, freshProfile, defaultTr, defaultExpSettings, resolveUnit, resolveEstimator, DEMO_CAT_ID,
+  updateCatProfile as updateCatProfilePure, updateActiveCatState, freshCatState, freshProfile, defaultTr, defaultExpSettings, resolveUnit, resolveEstimator, ESTIMATORS, DEMO_CAT_ID,
 } from "../lib/catStore.js";
 import { buildDemoCat } from "../lib/demoCat.js";
 import { toV2, migrateV1 } from "../lib/migrate.js";
@@ -137,7 +137,7 @@ export function AppProvider({ children }) {
   // not per-cat data — used to live in each cat's expSettings.algo. Defaults to "v3", the
   // recommended unobserved-components estimator (see lib/expenditure.js).
   const [estimator, setEstimatorState] = useState("v3");
-  const setEstimator = (a) => { if (a === "v1" || a === "v2" || a === "v3") { setEstimatorState(a); setSettingsModAt(Date.now()); } };
+  const setEstimator = (a) => { if (ESTIMATORS.includes(a)) { setEstimatorState(a); setSettingsModAt(Date.now()); } };
   // fridgeDays' public setter — stamps settingsModAt like the three above. eraseAll uses
   // setFridgeDaysRaw directly (see below) so a full reset doesn't stamp a bundle edit.
   const setFridgeDays = (n) => { setFridgeDaysRaw(n); setSettingsModAt(Date.now()); };
