@@ -84,6 +84,16 @@ describe("Trend renders the posterior as a density", () => {
     expect(container.textContent).toMatch(/vet formula/);
   });
 
+  it("draws the MIXTURE for v5, not a Gaussian fitted to it", async () => {
+    cleanup();
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed({ estimator: "v5" })));
+    const { container } = await mount();
+    const svg = container.querySelector('svg[aria-label*="Posterior"]');
+    expect(svg).toBeTruthy();
+    const d = svg.querySelector("path")?.getAttribute("d") || "";
+    expect((d.match(/L/g) || []).length).toBeGreaterThan(50);
+  });
+
   it("names both uncertainty sources, so the band isn't a single opaque number", async () => {
     const { container } = await mount();
     expect(container.textContent).toMatch(/from the model/);
@@ -91,7 +101,7 @@ describe("Trend renders the posterior as a density", () => {
   });
 
   it("renders for every estimator, including v4", async () => {
-    for (const est of ["v1", "v2", "v3", "v4"]) {
+    for (const est of ["v1", "v2", "v3", "v4", "v5"]) {
       cleanup();
       window.localStorage.setItem("catration_v1", JSON.stringify(seed({ estimator: est })));
       const { container } = await mount();

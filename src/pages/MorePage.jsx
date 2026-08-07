@@ -110,7 +110,7 @@ export default function MorePage() {
           <PrefRow title="Weight units" sub="Shown everywhere · shared across cats"
             control={<Seg options={[["kg", "kg"], ["lb", "lb"]]} value={unit} onChange={setUnit} />} />
           <PrefRow title="Estimator" sub="How measured burn is computed · shared"
-            control={<Seg options={[["v3", "v3 ✓"], ["v4", "v4 β"], ["v2", "v2"], ["v1", "v1"]]} value={estimator} onChange={setEstimator} />} />
+            control={<Seg options={[["v3", "v3 ✓"], ["v4", "v4 β"], ["v5", "v5 β"], ["v2", "v2"], ["v1", "v1"]]} value={estimator} onChange={setEstimator} />} />
           <PrefRow title="Opened cans keep" sub="Drives fridge warnings"
             control={<span style={{ display: "inline-flex", alignItems: "baseline", gap: 4, borderBottom: `1px solid ${A.cardBorder}` }}>
               <input type="number" min="1" step="1" value={fridgeDays} onChange={(e) => setFridgeDays(Math.max(1, Number(e.target.value) || 1))}

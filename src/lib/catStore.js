@@ -32,7 +32,7 @@ export function resolveUnit(topUnit, legacyUnit) {
 // The one list of valid estimator ids. EXPORTED because it was duplicated as a hardcoded
 // condition in AppState's setEstimator, so adding v4 rendered a button that silently did nothing —
 // the setter dropped the value on the floor. Anything validating an estimator id reads this.
-export const ESTIMATORS = ["v1", "v2", "v3", "v4"];
+export const ESTIMATORS = ["v1", "v2", "v3", "v4", "v5"];
 // Resolve the shared expenditure estimator on load/import: same courtesy pattern as
 // resolveUnit above. The blob's own top-level field if it's a valid estimator, else (an
 // older export from before `estimator` was promoted out of per-cat expSettings.algo) the

@@ -182,7 +182,7 @@ export default function Trend() {
             <div style={{ fontFamily: TYPE.mono, fontSize: wide ? 27 : 40, fontWeight: 600, color: A.ink, lineHeight: 1 }}>{wide ? `${r0(e.low)}–${r0(e.high)}` : burn}</div>
             <div style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted, textAlign: "right" }}>{wide ? "95% range" : <>{asym ? `+${plus} / −${minus}` : `±${plus}`} kcal<br />95% interval</>}</div>
           </div>
-          <PosteriorDensity kcal={e.kcal} sd={e.sd} priorKcal={e.priorKcal} priorSd={e.priorSdKcal} sdFilter={e.sdFilter} sdIntake={e.sdIntake} />
+          <PosteriorDensity kcal={e.kcal} sd={e.sd} priorKcal={e.priorKcal} priorSd={e.priorSdKcal} sdFilter={e.sdFilter} sdIntake={e.sdIntake} mixture={e.mixture} low={e.low} high={e.high} />
           <p style={{ ...cap, fontSize: 11.5 }}>{wide ? `Best single guess ~${burn}, but it's genuinely uncertain this early — trust the range. It tightens as you log` : "The band narrows as you log"}{e.missingIntake > 0 ? `; ${r0(e.missingIntake * 100)}% of days in range are incomplete and left out` : ""}.</p>
         </Card>
 
@@ -272,25 +272,36 @@ export default function Trend() {
 // see AppState's priorKcal/priorSdKcal). Both curves are scaled by the SAME factor, so each encloses
 // the same area and the narrower one is correspondingly taller: the visible gap between them is the
 // information the cat's own data added. That's the app's whole claim, shown instead of asserted.
-function PosteriorDensity({ kcal, sd, priorKcal, priorSd, sdFilter, sdIntake, unitLabel = "kcal/day" }) {
+function PosteriorDensity({ kcal, sd, priorKcal, priorSd, sdFilter, sdIntake, mixture, low, high }) {
   const W = 360, H = 96, PADB = 16;
   const hasPrior = priorKcal > 0 && priorSd > 0;
   // Span both curves, so neither is clipped and their relative width is honest.
   const lo = Math.min(kcal - 3.4 * sd, hasPrior ? priorKcal - 3.4 * priorSd : Infinity);
   const hi = Math.max(kcal + 3.4 * sd, hasPrior ? priorKcal + 3.4 * priorSd : -Infinity);
   const x = (v) => ((v - lo) / (hi - lo)) * W;
-  const pdf = (v, mu, s) => Math.exp(-0.5 * ((v - mu) / s) ** 2) / (s * Math.sqrt(2 * Math.PI));
+  const gauss = (v, mu, s) => Math.exp(-0.5 * ((v - mu) / s) ** 2) / (s * Math.sqrt(2 * Math.PI));
+  // With v5 the posterior is a MIXTURE — uncertainty about the model's own parameters folded in —
+  // so draw the mixture itself rather than a Gaussian fitted to its first two moments. The visible
+  // difference is the tails: a mixture is heavier there, which is the honest shape.
+  const wsum = mixture?.length ? mixture.reduce((a, c) => a + c.w, 0) : 0;
+  const pdf = wsum > 0
+    ? (v) => mixture.reduce((a, c) => a + (c.w / wsum) * gauss(v, c.kcal, c.sd), 0)
+    : (v) => gauss(v, kcal, sd);
   // one shared vertical scale => equal area under each curve
-  const peak = Math.max(pdf(kcal, kcal, sd), hasPrior ? pdf(priorKcal, priorKcal, priorSd) : 0);
+  const peak = Math.max(pdf(kcal), hasPrior ? gauss(priorKcal, priorKcal, priorSd) : 0);
   const y = (d) => H - PADB - (d / peak) * (H - PADB - 6);
   const N = 160;
-  const curve = (mu, s) => Array.from({ length: N + 1 }, (_, i) => {
+  const curveOf = (f) => Array.from({ length: N + 1 }, (_, i) => {
     const v = lo + ((hi - lo) * i) / N;
-    return [x(v), y(pdf(v, mu, s))];
+    return [x(v), y(f(v))];
   });
   const path = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
-  const post = curve(kcal, sd);
-  const inner = post.filter((_, i) => { const v = lo + ((hi - lo) * i) / N; return v >= kcal - 1.96 * sd && v <= kcal + 1.96 * sd; });
+  const post = curveOf(pdf);
+  // Shade the reported 95% interval. For a mixture that is NOT mean ± 1.96 sd (see
+  // mixtureQuantile), so use the interval the estimator actually reported.
+  const q05 = low != null ? low : kcal - 1.96 * sd;
+  const q95 = high != null ? high : kcal + 1.96 * sd;
+  const inner = post.filter((_, i) => { const v = lo + ((hi - lo) * i) / N; return v >= q05 && v <= q95; });
   const fill = inner.length > 1
     ? `${path(inner)} L${inner[inner.length - 1][0].toFixed(1)},${H - PADB} L${inner[0][0].toFixed(1)},${H - PADB} Z`
     : null;
@@ -298,16 +309,16 @@ function PosteriorDensity({ kcal, sd, priorKcal, priorSd, sdFilter, sdIntake, un
   return (
     <div style={{ marginTop: 10 }}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: "block", overflow: "visible" }} role="img"
-        aria-label={`Posterior distribution for expenditure, most likely ${r0(kcal)} kcal per day, 95% between ${r0(kcal - 1.96 * sd)} and ${r0(kcal + 1.96 * sd)}`}>
+        aria-label={`Posterior distribution for expenditure, most likely ${r0(kcal)} kcal per day, 95% between ${r0(low != null ? low : kcal - 1.96 * sd)} and ${r0(high != null ? high : kcal + 1.96 * sd)}`}>
         {/* the prior — what the vet formula alone believed, before this cat's data */}
-        {hasPrior && <path d={path(curve(priorKcal, priorSd))} fill="none" stroke={A.muted} strokeWidth="1.3" strokeDasharray="3 3" opacity="0.55" />}
+        {hasPrior && <path d={path(curveOf((v) => gauss(v, priorKcal, priorSd)))} fill="none" stroke={A.muted} strokeWidth="1.3" strokeDasharray="3 3" opacity="0.55" />}
         {fill && <path d={fill} fill={A.chart.expenditure || A.good} opacity="0.18" />}
         <path d={path(post)} fill="none" stroke={A.chart.expenditure || A.good} strokeWidth="2" />
         {tick(kcal, { stroke: A.ink, strokeWidth: 1.5 })}
         <line x1={0} x2={W} y1={H - PADB} y2={H - PADB} stroke={A.cardBorder} strokeWidth="1" />
         <text x={x(kcal)} y={H - 4} textAnchor="middle" style={{ ...axisText, fill: A.ink }}>{r0(kcal)}</text>
-        <text x={x(kcal - 1.96 * sd)} y={H - 4} textAnchor="middle" style={axisText}>{r0(kcal - 1.96 * sd)}</text>
-        <text x={x(kcal + 1.96 * sd)} y={H - 4} textAnchor="middle" style={axisText}>{r0(kcal + 1.96 * sd)}</text>
+        <text x={x(q05)} y={H - 4} textAnchor="middle" style={axisText}>{r0(q05)}</text>
+        <text x={x(q95)} y={H - 4} textAnchor="middle" style={axisText}>{r0(q95)}</text>
         {hasPrior && <text x={x(priorKcal)} y={12} textAnchor="middle" style={{ ...axisText, fill: A.muted }}>vet formula</text>}
       </svg>
       <p style={{ ...cap, fontSize: 11.5 }}>

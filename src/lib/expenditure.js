@@ -200,7 +200,7 @@ export function dailyWeightWithVariance(entries, { outlierKg = 0.2 } = {}) {
 // maxJumpKg gates physically impossible day-over-day swings (a spurious single reading):
 // real feline weight change is < ~15 g/day even on an aggressive plan, and gut-fill swings
 // are smaller than this, so anything past it is a bad read and skips the update.
-export const KALMAN_DEFAULTS = { rho: KCAL_PER_KG, qW: 1e-5, qE: 2.0, priorKcal: 200, priorSdKcal: 120, minDays: 10, maxMissing: 0.5, recentIntakeDays: 7, maxJumpKg: 0.3, maxReject: 3 };
+export const KALMAN_DEFAULTS = { rho: KCAL_PER_KG, rScale: 1, qW: 1e-5, qE: 2.0, priorKcal: 200, priorSdKcal: 120, minDays: 10, maxMissing: 0.5, recentIntakeDays: 7, maxJumpKg: 0.3, maxReject: 3 };
 
 export function kalmanEstimateExpenditure(weightEntries = [], intakeEntries = [], opts = {}) {
   const P = { ...KALMAN_DEFAULTS, ...opts };
@@ -229,7 +229,7 @@ export function kalmanEstimateExpenditure(weightEntries = [], intakeEntries = []
   let x = [wByDay.get(first).z, P.priorKcal];
   let Pcov = [[wByDay.get(first).R, 0], [0, P.priorSdKcal * P.priorSdKcal]];
   const trend = [{ date: first, kg: x[0], e: x[1], sd: Math.sqrt(Pcov[1][1]) }];
-  let lastAcceptK = 0, rejects = 0, accepted = 0;
+  let lastAcceptK = 0, rejects = 0, accepted = 0, logLik = 0;
 
   for (let k = 1; k < days.length; k++) {
     const d = days[k];
@@ -274,7 +274,7 @@ export function kalmanEstimateExpenditure(weightEntries = [], intakeEntries = []
   const enoughData = span >= P.minDays && present.length >= 2 && missingIntake <= P.maxMissing && accepted >= 2;
 
   return { enoughData, kcal, sd, low: kcal - 1.96 * sd, high: kcal + 1.96 * sd,
-    trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend };
+    trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend, logLik, accepted };
 }
 
 /* ==================== v3: unobserved-components estimator ==================== */
@@ -287,7 +287,7 @@ export function kalmanEstimateExpenditure(weightEntries = [], intakeEntries = []
 // Because T soaks up the transient, qE can be raised for responsiveness without jitter —
 // the "stable AND responsive" shift. Parameters tuned in research/v3_expenditure.py.
 export const V3_DEFAULTS = {
-  rho: KCAL_PER_KG, qW: 1e-5, qE: 10, qT: 0.0025, phi: 0.5,
+  rho: KCAL_PER_KG, rScale: 1, qW: 1e-5, qE: 10, qT: 0.0025, phi: 0.5,
   priorKcal: 200, priorSdKcal: 120, transientSd0: 0.06,
   minDays: 10, maxMissing: 0.5, recentIntakeDays: 7, maxJumpKg: 0.3, maxReject: 3,
 };
@@ -320,7 +320,7 @@ export function ucEstimateExpenditure(weightEntries = [], intakeEntries = [], op
   let x = [wByDay.get(first).z, P.priorKcal, 0];
   let Pcov = diag([wByDay.get(first).R, P.priorSdKcal * P.priorSdKcal, P.transientSd0 * P.transientSd0]);
   const trend = [{ date: first, kg: x[0], e: x[1], sd: Math.sqrt(Pcov[1][1]) }];
-  let lastAcceptK = 0, rejects = 0, accepted = 0;
+  let lastAcceptK = 0, rejects = 0, accepted = 0, logLik = 0;
 
   for (let k = 1; k < days.length; k++) {
     const d = days[k];
@@ -335,13 +335,17 @@ export function ucEstimateExpenditure(weightEntries = [], intakeEntries = [], op
       const gate = P.maxJumpKg * Math.max(1, k - lastAcceptK);
       const y = meas.z - zPred;
       if (Math.abs(y) <= gate || rejects >= P.maxReject) {
-        const { R } = meas;
+        const R = meas.R * P.rScale;
         const PHt = [Ppred[0][0] + Ppred[0][2], Ppred[1][0] + Ppred[1][2], Ppred[2][0] + Ppred[2][2]];
         const S = PHt[0] + PHt[2] + R;
         const K = PHt.map((v) => v / S);
         x = xPred.map((xi, i) => xi + K[i] * y);
         const ImKH = identity(3).map((row, i) => row.map((v, j) => v - K[i] * H[j]));
         Pcov = symmetrize(matmul(ImKH, Ppred));
+        // Prediction-error decomposition: the filter yields log p(data | hyperparameters) for free
+        // from its own innovations. v5 uses this to WEIGHT hyperparameter settings by how well each
+        // actually explains this cat, instead of one set being asserted for every cat.
+        if (S > 0) logLik += -0.5 * (Math.log(2 * Math.PI * S) + (y * y) / S);
         lastAcceptK = k; rejects = 0; accepted += 1;
       } else {
         rejects += 1; x = xPred; Pcov = Ppred;
@@ -363,7 +367,7 @@ export function ucEstimateExpenditure(weightEntries = [], intakeEntries = [], op
   const enoughData = span >= P.minDays && present.length >= 2 && missingIntake <= P.maxMissing && accepted >= 2;
 
   return { enoughData, kcal, sd, low: kcal - 1.96 * sd, high: kcal + 1.96 * sd,
-    trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend };
+    trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend, logLik, accepted };
 }
 
 /* ==================== v4: allometric expenditure ==================== */
@@ -403,6 +407,7 @@ export const V4_DEFAULTS = {
   // 95%. Tighter values look tempting (qK 0.05 halves the band again) but under-cover at 86% —
   // over-confident, which is the failure mode that actually misleads. See simCat.test.js.
   rho: KCAL_PER_KG, qW: 1e-5, qK: 0.2, qT: 0.0025, phi: 0.5,
+  rScale: 1,          // multiplies each day's measurement variance — the knob v5 marginalises over
   priorKcal: 200, priorSdKcal: 120, transientSd0: 0.06,
   minDays: 10, maxMissing: 0.5, recentIntakeDays: 7, maxJumpKg: 0.3, maxReject: 3,
 };
@@ -450,7 +455,7 @@ export function alloEstimateExpenditure(weightEntries = [], intakeEntries = [], 
   };
 
   const trend = [{ date: first, kg: x[0], e: eOf(x), sd: sdOf(x, Pcov) }];
-  let lastAcceptK = 0, rejects = 0, accepted = 0;
+  let lastAcceptK = 0, rejects = 0, accepted = 0, logLik = 0;
 
   for (let k = 1; k < days.length; k++) {
     const d = days[k];
@@ -470,13 +475,17 @@ export function alloEstimateExpenditure(weightEntries = [], intakeEntries = [], 
       const gate = P.maxJumpKg * Math.max(1, k - lastAcceptK);
       const y = meas.z - zPred;
       if (Math.abs(y) <= gate || rejects >= P.maxReject) {
-        const { R } = meas;
+        const R = meas.R * P.rScale;
         const PHt = [Ppred[0][0] + Ppred[0][2], Ppred[1][0] + Ppred[1][2], Ppred[2][0] + Ppred[2][2]];
         const S = PHt[0] + PHt[2] + R;
         const K = PHt.map((v) => v / S);
         x = xPred.map((xi, i) => xi + K[i] * y);
         const ImKH = identity(3).map((row, i) => row.map((v, j) => v - K[i] * H[j]));
         Pcov = symmetrize(matmul(ImKH, Ppred));
+        // Prediction-error decomposition: the filter yields log p(data | hyperparameters) for free
+        // from its own innovations. v5 uses this to WEIGHT hyperparameter settings by how well each
+        // actually explains this cat, instead of one set being asserted for every cat.
+        if (S > 0) logLik += -0.5 * (Math.log(2 * Math.PI * S) + (y * y) / S);
         lastAcceptK = k; rejects = 0; accepted += 1;
       } else {
         x = xPred; Pcov = Ppred; rejects += 1;
@@ -498,7 +507,7 @@ export function alloEstimateExpenditure(weightEntries = [], intakeEntries = [], 
   const enoughData = span >= P.minDays && present.length >= 2 && missingIntake <= P.maxMissing && accepted >= 2;
 
   return { enoughData, kcal, sd, low: kcal - 1.96 * sd, high: kcal + 1.96 * sd,
-    trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend };
+    trendWeightKg, rateKgPerWeek, ratePctPerWeek, nDays: span, missingIntake, trend, logLik, accepted };
 }
 
 /* ==================== intake uncertainty ==================== */
@@ -559,5 +568,105 @@ export function checkK(kcal, weightKg) {
     note: low ? "This is well below what any cat should need. The likeliest cause is intake being under-recorded — check portions, labels, and whether meals are being missed from the log."
       : high ? "This is well above what a cat should need. The likeliest cause is intake being over-recorded — check portion sizes, the label's kcal figure, and whether another pet is sharing the food."
       : null,
+  };
+}
+
+/* ==================== v5: marginalised hyperparameters ==================== */
+// v2-v4 are Bayesian in the state but NOT in the hyperparameters: qK, φ and the measurement scale
+// are asserted as constants, tuned once, for every cat. So the reported interval is really
+// p(E | data, θ̂) — a posterior CONDITIONAL on tuning choices — which is why it deserved the name
+// "model interval" rather than a plain credible interval.
+//
+// v5 integrates them out:
+//
+//   p(E | data) = ∫ p(E | data, θ) · p(θ | data) dθ,   p(θ | data) ∝ p(θ) · p(data | θ)
+//
+// and p(data | θ) costs nothing extra: a Kalman filter's own innovations ARE its log marginal
+// likelihood (the prediction-error decomposition), which v4 now accumulates. So this is a grid over
+// θ, one v4 run per grid point, weighted by evidence. No MCMC; ~70 filter passes, each O(days).
+//
+// TWO THINGS THIS BUYS, and the second is the bigger one:
+//
+//  1. HONEST TAILS. The result is a MIXTURE of Gaussians, not one Gaussian. Uncertainty about how
+//     much a cat's metabolism drifts becomes uncertainty about the burn, which is where it belonged
+//     all along. Mixtures are heavier-tailed, so the interval widens — correctly.
+//
+//  2. IT CALIBRATES TO THE CAT. Evidence weighting means a cat whose readings are clean and whose
+//     k looks steady puts its weight on low qK and a small measurement scale, and gets a genuinely
+//     TIGHTER band; a cat on a bathroom scale with a wandering metabolism puts weight on high qK and
+//     gets an honestly wider one. v4 gives both cats the same width regardless of their data. This
+//     is the per-cat noise calibration that would otherwise need its own estimator.
+//
+// The grid is deliberately coarse and wide. It is not a search for the "best" θ — taking the peak
+// would just be v4 with extra steps. The width of the weighting is the point.
+export const V5_GRID = {
+  // spans "k is essentially fixed" to "metabolism wanders a lot"; log-spaced, since it's a variance
+  qK: [0.02, 0.05, 0.12, 0.3, 0.75, 1.8],
+  // measured φ≈0.58 on a real cat, but from 22 days — so span from no persistence to strong
+  phi: [0.0, 0.3, 0.55, 0.8],
+  // the per-method sigma is a guess about someone's scale; let the data say if it's 2x off
+  rScale: [0.35, 1, 2.8],
+};
+
+// Combine mixture components: mean and TOTAL variance (law of total variance — within-component
+// spread plus the spread BETWEEN component means, which is the part v4 was missing entirely).
+export function mixtureMoments(components) {
+  const wsum = components.reduce((a, c) => a + c.w, 0);
+  if (!(wsum > 0)) return null;
+  const mean = components.reduce((a, c) => a + (c.w / wsum) * c.kcal, 0);
+  const varTotal = components.reduce(
+    (a, c) => a + (c.w / wsum) * (c.sd * c.sd + (c.kcal - mean) ** 2), 0);
+  return { kcal: mean, sd: Math.sqrt(Math.max(0, varTotal)) };
+}
+
+// Quantile of a Gaussian mixture, by bisection on its CDF — needed because a mixture's 95% interval
+// is NOT mean ± 1.96·sd once the components disagree, and reporting it as if it were would quietly
+// reintroduce the Gaussian assumption v5 exists to remove.
+const normCdf = (z) => {
+  // Abramowitz & Stegun 7.1.26 on erf
+  const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z / 2);
+  return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
+};
+export function mixtureQuantile(components, p) {
+  const wsum = components.reduce((a, c) => a + c.w, 0);
+  if (!(wsum > 0)) return null;
+  const cdf = (v) => components.reduce((a, c) => a + (c.w / wsum) * normCdf((v - c.kcal) / c.sd), 0);
+  let lo = Math.min(...components.map((c) => c.kcal - 8 * c.sd));
+  let hi = Math.max(...components.map((c) => c.kcal + 8 * c.sd));
+  for (let i = 0; i < 80; i++) { const m = (lo + hi) / 2; if (cdf(m) < p) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+}
+
+export function mixtureEstimateExpenditure(weightEntries = [], intakeEntries = [], opts = {}) {
+  const grid = { ...V5_GRID, ...(opts.grid || {}) };
+  const components = [];
+  let best = null, maxLL = -Infinity;
+
+  for (const qK of grid.qK) for (const phi of grid.phi) for (const rScale of grid.rScale) {
+    const r = alloEstimateExpenditure(weightEntries, intakeEntries, { ...opts, qK, phi, rScale });
+    if (r.kcal == null || !(r.sd > 0) || !Number.isFinite(r.logLik)) continue;
+    components.push({ kcal: r.kcal, sd: r.sd, logLik: r.logLik, theta: { qK, phi, rScale } });
+    if (r.logLik > maxLL) { maxLL = r.logLik; best = r; }
+  }
+  if (!components.length) return alloEstimateExpenditure(weightEntries, intakeEntries, opts);
+
+  // Evidence weights, stabilised by subtracting the max before exponentiating. The prior over θ is
+  // flat on this grid — deliberately: the grid's SPAN encodes the prior belief, and a shaped prior
+  // on top would be a second, hidden tuning knob of exactly the kind v5 is removing.
+  components.forEach((c) => { c.w = Math.exp(c.logLik - maxLL); });
+  const m = mixtureMoments(components);
+
+  // The peak component is the closest thing to "what v4 would have said", kept for the trend series
+  // and for the diagnostics — v4's per-day trend is still the right thing to draw as a line.
+  return {
+    ...best,
+    kcal: m.kcal,
+    sd: m.sd,
+    low: mixtureQuantile(components, 0.025),
+    high: mixtureQuantile(components, 0.975),
+    mixture: components.map((c) => ({ w: c.w, kcal: c.kcal, sd: c.sd, theta: c.theta })),
+    // what the data actually preferred, so the UI can say so
+    thetaBest: components.reduce((a, c) => (c.w > a.w ? c : a), components[0]).theta,
   };
 }

@@ -6,7 +6,7 @@ import {
   makeLibrarySeed, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName,
   migrateLegacyFood, ensureBuiltins, backfillBuiltinMacros, migrateSplitMode, sumPct, blankFood, normalizePct, waterfall,
 } from "../lib/foods.js";
-import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, alloEstimateExpenditure, withIntakeUncertainty, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
+import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, alloEstimateExpenditure, mixtureEstimateExpenditure, withIntakeUncertainty, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
 import { methodOffsets, alignToReference } from "../lib/methodBias.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "../lib/series.js";
 import { usePersistence, store, probeStorage } from "../lib/storage.js";
@@ -442,6 +442,9 @@ export function AppProvider({ children }) {
     // and roughly halves the band (see the V4 banner in lib/expenditure.js). Opt-in for now:
     // it wins on simulated cats, but v3 stays the default until it's been run on real histories.
     if (estimator === "v4") return withIntake(alloEstimateExpenditure(w, i, opts));
+    // v5 marginalises the hyperparameters instead of asserting them, so the posterior is a MIXTURE
+    // and the band adapts to how well this cat's data actually pins things down.
+    if (estimator === "v5") return withIntake(mixtureEstimateExpenditure(w, i, opts));
     return withIntake(ucEstimateExpenditure(w, i, opts)); // v3 (default)
   }, [weightLog.items, intakeLog.items, intakeDayStatus, estimator, t.refs.maintain, today]);
 
