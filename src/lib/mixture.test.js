@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   mixtureEstimateExpenditure, alloEstimateExpenditure, mixtureMoments, mixtureQuantile,
-  withIntakeUncertainty, V5_GRID,
+  withIntakeUncertainty, ucEstimateExpenditure, V5_GRID,
 } from "./expenditure.js";
 import { simulateCat, scoreEstimator } from "./simCat.js";
 
@@ -194,5 +194,48 @@ describe("intake uncertainty must not flatten an asymmetric posterior", () => {
     const wide = withIntakeUncertainty(v4r, 215, 0.05);
     expect(wide.mixture).toBeUndefined();
     expect(wide.kcal - wide.low).toBeCloseTo(wide.high - wide.kcal, 6); // Gaussian: symmetric
+  });
+});
+
+// Reported by Steph: the estimate card said 204 while the timeline's last point said 210. For v5
+// the headline was the weighted MIXTURE mean but `trend` came from the single best-fitting
+// component — two different quantities on one screen. The chart is meant to be the evidence for the
+// headline, so its final point has to BE the headline.
+describe("the timeline's last point IS the headline", () => {
+  const OPTS3 = { priorKcal: 250, priorSdKcal: 60 };
+  const sim = simulateCat({ days: 56, deficit: 45, gutPct: 0.0042, gutPhi: 0.58, sigmaW: 0.026, readsPerDay: 6, seed: 31 });
+  const run = (fn) => fn(sim.weightEntries, sim.intakeEntries, OPTS3);
+
+  for (const [name, fn] of [
+    ["v3", ucEstimateExpenditure],
+    ["v4", alloEstimateExpenditure],
+    ["v5", mixtureEstimateExpenditure],
+  ]) {
+    it(`${name}: final trend point matches the reported estimate and sd`, () => {
+      const r = run(fn);
+      const last = r.trend[r.trend.length - 1];
+      expect(last.e).toBeCloseTo(r.kcal, 6);
+      expect(last.sd).toBeCloseTo(r.sd, 6);
+    });
+
+    it(`${name}: still matches after intake uncertainty widens both`, () => {
+      const r = withIntakeUncertainty(run(fn), 215, 0.05);
+      const last = r.trend[r.trend.length - 1];
+      expect(last.e).toBeCloseTo(r.kcal, 6);
+      expect(last.sd).toBeCloseTo(r.sd, 6);
+    });
+  }
+
+  it("v5's timeline is the mixture, not the best component's path", () => {
+    const r = run(mixtureEstimateExpenditure);
+    const best = r.mixture.reduce((a, c) => (c.w > a.w ? c : a), r.mixture[0]);
+    // the mixture sd exceeds any single component's, because it includes the spread BETWEEN them
+    expect(r.sd).toBeGreaterThan(best.sd);
+    expect(r.trend[r.trend.length - 1].sd).toBeGreaterThan(best.sd);
+  });
+
+  it("every day of the series is finite — no holes from a component that failed to fit", () => {
+    const r = run(mixtureEstimateExpenditure);
+    expect(r.trend.every((p) => Number.isFinite(p.e) && Number.isFinite(p.sd) && Number.isFinite(p.kg))).toBe(true);
   });
 });

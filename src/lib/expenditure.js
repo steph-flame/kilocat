@@ -670,7 +670,9 @@ export function mixtureEstimateExpenditure(weightEntries = [], intakeEntries = [
   for (const qK of grid.qK) for (const phi of grid.phi) for (const rScale of grid.rScale) {
     const r = alloEstimateExpenditure(weightEntries, intakeEntries, { ...opts, qK, phi, rScale });
     if (r.kcal == null || !(r.sd > 0) || !Number.isFinite(r.logLik)) continue;
-    components.push({ kcal: r.kcal, sd: r.sd, logLik: r.logLik, theta: { qK, phi, rScale } });
+    // keep each run's per-day series: the TIMELINE has to be the mixture too, or the chart's last
+    // point disagrees with the headline it's meant to be evidence for.
+    components.push({ kcal: r.kcal, sd: r.sd, logLik: r.logLik, theta: { qK, phi, rScale }, trend: r.trend });
     if (r.logLik > maxLL) { maxLL = r.logLik; best = r; }
   }
   if (!components.length) return alloEstimateExpenditure(weightEntries, intakeEntries, opts);
@@ -681,6 +683,19 @@ export function mixtureEstimateExpenditure(weightEntries = [], intakeEntries = [
   components.forEach((c) => { c.w = Math.exp(c.logLik - maxLL); });
   const m = mixtureMoments(components);
 
+  // Per-day mixture: at each day, combine every component's estimate with the same weights used for
+  // the headline. Without this the chart showed the single best-fitting component's path while the
+  // headline showed the weighted mean — two different quantities, differing by several kcal, on the
+  // same screen. The last point of this series now equals the headline by construction.
+  const len = Math.min(...components.map((c) => c.trend.length));
+  const trend = Array.from({ length: len }, (_, t) => {
+    const at = components.map((c) => ({ w: c.w, kcal: c.trend[t].e, sd: c.trend[t].sd }));
+    const mt = mixtureMoments(at.filter((a) => Number.isFinite(a.kcal) && a.sd >= 0));
+    const wsum = components.reduce((a, c) => a + c.w, 0);
+    const kg = components.reduce((a, c) => a + (c.w / wsum) * c.trend[t].kg, 0);
+    return { date: components[0].trend[t].date, kg, e: mt ? mt.kcal : null, sd: mt ? mt.sd : null };
+  });
+
   // The peak component is the closest thing to "what v4 would have said", kept for the trend series
   // and for the diagnostics — v4's per-day trend is still the right thing to draw as a line.
   return {
@@ -689,6 +704,7 @@ export function mixtureEstimateExpenditure(weightEntries = [], intakeEntries = [
     sd: m.sd,
     low: mixtureQuantile(components, 0.025),
     high: mixtureQuantile(components, 0.975),
+    trend,
     mixture: components.map((c) => ({ w: c.w, kcal: c.kcal, sd: c.sd, theta: c.theta })),
     // what the data actually preferred, so the UI can say so
     thetaBest: components.reduce((a, c) => (c.w > a.w ? c : a), components[0]).theta,
