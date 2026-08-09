@@ -494,37 +494,75 @@ export function classifyEntry(entry, { serial, model = "LR4", petMap = {}, robot
 // like a 30 lb reading; it happily passes 15 lb, which is a perfectly ordinary cat weight and a
 // wildly wrong one for a 9.8 lb cat. So compare against the animal's own recent history instead.
 //
-// Deliberately loose (±35% of the recent median): a real cat can gain or lose a lot over months,
-// and a kitten grows fast, so this must only catch readings that are impossible rather than merely
-// surprising — the estimator's own day-median gate and maxJumpKg handle ordinary noise.
+// Deliberately loose (±35%): a real cat can gain or lose a lot over months, so this must only catch
+// readings that are impossible rather than merely surprising — the estimator's own day-median gate
+// and maxJumpKg handle ordinary noise.
 //
-// The reference window is a TIME SPAN, not a count of readings. A count means completely different
-// things to different owners: 60 readings is about ten days on a Litter-Robot at 6/day, and over a
-// YEAR for someone weighing weekly. Anchoring today's reading to a median spanning fourteen months
-// would treat a cat's legitimate long-run change as implausible, which is the opposite of the job.
+// THE REFERENCE IS A PROJECTION, NOT A STATIC MEDIAN. A young kitten can double its weight in a
+// month; comparing against the middle of a 60-day window would reject nearly every genuine reading
+// it produces, and silently — the very animals whose growth most needs tracking. Disabling the
+// guard for kittens is the wrong answer too, since a kitten sharing a house with an adult is
+// exactly where a wrong-cat reading is most likely and most obvious.
 //
-// 60 days is chosen against the safe maximum weight-loss rate: at 2%/week a cat moves ~15% over the
-// window, comfortably inside the ±35% budget, so the reference can't drift into the gate on its own.
-// A weekly weigher still gets ~8 readings in that span, which is enough for a median. Someone
-// weighing monthly gets too few and the guard simply stands down — that's the right call, since it
-// exists to catch bad AUTOMATED imports, and a human typing a number would notice 15 lb themselves.
+// So: fit the cat's own recent trajectory and judge the reading against where that trajectory says
+// it should BE today. The fit is log-linear (growth is multiplicative — a constant % per week, not
+// a constant grams per week) and uses a Theil-Sen median-of-pairwise-slopes, so one bad reading
+// already in the history can't tilt the projection. A kitten growing 20%/week has that growth
+// predicted, and a reading three times the projection is still rejected. An adult's slope is ~0, so
+// the projection collapses to the median and behaves exactly as before.
+//
+// The window is a TIME SPAN, not a count of readings: a count means completely different things to
+// different owners — 60 readings is ten days on a Litter-Robot at 6/day and over a YEAR for someone
+// weighing weekly. 60 days is chosen against the safe maximum ADULT loss rate (2%/week ≈ 15% across
+// the window, inside the ±35% budget). A weekly weigher still gets ~8 readings; someone weighing
+// monthly gets too few and the guard stands down, which is right — it exists to catch bad AUTOMATED
+// imports, and a human typing a weight would notice 15 lb themselves.
 export const PLAUSIBLE_FRACTION = 0.35;
 export const PLAUSIBLE_WINDOW_DAYS = 60;
 export const MIN_HISTORY_FOR_PLAUSIBILITY = 5;
 
+// Readings inside the window, collapsed to one point per day (a day's spread is noise here, and it
+// keeps the pairwise-slope fit cheap). → [{ date, kg }] oldest first.
+function windowDays(history, end) {
+  const byDay = new Map();
+  for (const e of history || []) {
+    const v = Number(e?.kg);
+    if (!Number.isFinite(v) || v <= 0 || !e?.date) continue;
+    if (end) { const age = diffDays(e.date, end); if (age < 0 || age > PLAUSIBLE_WINDOW_DAYS) continue; }
+    if (!byDay.has(e.date)) byDay.set(e.date, []);
+    byDay.get(e.date).push(v);
+  }
+  return [...byDay.entries()].map(([date, vs]) => ({ date, kg: median(vs) })).sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+// Where the cat's own recent trend says it should be on `asOf`. Theil-Sen on log(kg) vs day —
+// robust to a bad point, and multiplicative so it fits growth rather than fighting it.
+export function projectedKg(days, asOf) {
+  if (days.length < 2) return days.length ? days[0].kg : null;
+  const slopes = [];
+  for (let i = 0; i < days.length; i++) {
+    for (let j = i + 1; j < days.length; j++) {
+      const dt = diffDays(days[i].date, days[j].date);
+      if (dt > 0) slopes.push((Math.log(days[j].kg) - Math.log(days[i].kg)) / dt);
+    }
+  }
+  if (!slopes.length) return median(days.map((d) => d.kg));
+  const slope = median(slopes);
+  // anchor on the median of the most recent few days, so the projection starts from a stable point
+  const tail = days.slice(-3);
+  const anchor = median(tail.map((d) => d.kg));
+  const anchorDate = tail[tail.length - 1].date;
+  const ahead = asOf ? diffDays(anchorDate, asOf) : 0;
+  return anchor * Math.exp(slope * Math.max(0, ahead));
+}
+
 // `history`: the cat's existing weigh-ins [{ date, kg }]. `asOf`: the day being judged (ISO).
 export function implausibleForCat(kg, history = [], asOf = null) {
   if (!Number.isFinite(kg) || kg <= 0) return false;
-  const end = asOf || history.reduce((a, e) => (e?.date > a ? e.date : a), "");
-  const past = (history || []).filter((e) => {
-    const v = Number(e?.kg);
-    if (!Number.isFinite(v) || v <= 0 || !e?.date) return false;
-    if (!end) return true;
-    const age = diffDays(e.date, end);
-    return age >= 0 && age <= PLAUSIBLE_WINDOW_DAYS;
-  }).map((e) => Number(e.kg));
-  if (past.length < MIN_HISTORY_FOR_PLAUSIBILITY) return false;
-  const ref = median(past);
+  const end = asOf || (history || []).reduce((a, e) => (e?.date > a ? e.date : a), "");
+  const days = windowDays(history, end);
+  if (days.length < MIN_HISTORY_FOR_PLAUSIBILITY) return false;
+  const ref = projectedKg(days, end);
   if (!(ref > 0)) return false;
   return Math.abs(kg - ref) / ref > PLAUSIBLE_FRACTION;
 }

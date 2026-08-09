@@ -812,6 +812,56 @@ describe("a reading has to be plausible FOR THIS CAT, not just for a cat", () =>
     expect(implausibleForCat(6.8, [...dense(), { date: day(29), kg: 9.9 }], day(30))).toBe(true);
   });
 
+  // A young kitten can DOUBLE its weight in a month. Judged against a static median of the window
+  // it would have almost every genuine reading rejected — silently, for the animals whose growth
+  // most needs tracking. The reference is a projection of the cat's own trajectory instead, so
+  // growth is predicted rather than fought.
+  describe("a growing kitten", () => {
+    // 0.4 kg doubling every 30 days, weighed 3x daily
+    const kitten = (days = 60, start = 0.4, doubleDays = 30) => {
+      const out = [];
+      for (let d = 0; d < days; d++) for (let r = 0; r < 3; r++) {
+        out.push({ date: day(d), kg: start * Math.pow(2, d / doubleDays) + (r - 1) * 0.005 });
+      }
+      return out;
+    };
+    const at = (d, start = 0.4, doubleDays = 30) => start * Math.pow(2, d / doubleDays);
+
+    it("accepts its real weight even though it has doubled twice in the window", () => {
+      expect(implausibleForCat(at(60), kitten(), day(60))).toBe(false);
+    });
+
+    it("accepts every day along the growth curve, not just the endpoint", () => {
+      for (const d of [20, 30, 40, 50, 60]) {
+        expect(implausibleForCat(at(d), kitten(d), day(d)), `day ${d}`).toBe(false);
+      }
+    });
+
+    it("still rejects an ADULT's reading landing on the kitten — the case that matters most", () => {
+      expect(implausibleForCat(4.45, kitten(), day(60))).toBe(true);
+    });
+
+    it("rejects a reading far off the growth curve in either direction", () => {
+      expect(implausibleForCat(at(60) * 2.5, kitten(), day(60))).toBe(true);
+      expect(implausibleForCat(at(60) * 0.4, kitten(), day(60))).toBe(true);
+    });
+
+    it("projects forward, so a gap in logging doesn't make the next reading implausible", () => {
+      // logged to day 40, next reading arrives on day 55 after two more weeks of growth
+      expect(implausibleForCat(at(55), kitten(40), day(55))).toBe(false);
+    });
+
+    it("copes with even faster growth (doubling every three weeks)", () => {
+      expect(implausibleForCat(at(60, 0.4, 21), kitten(60, 0.4, 21), day(60))).toBe(false);
+    });
+  });
+
+  it("a bad reading already in the history can't tilt the projection (Theil-Sen)", () => {
+    const h = [...dense(), { date: day(28), kg: 9.9 }, { date: day(29), kg: 9.9 }];
+    expect(implausibleForCat(6.8, h, day(30))).toBe(true);
+    expect(implausibleForCat(4.45, h, day(30))).toBe(false);
+  });
+
   it("ignores a nonsense candidate rather than throwing", () => {
     expect(implausibleForCat(NaN, dense(), day(30))).toBe(false);
     expect(implausibleForCat(0, dense(), day(30))).toBe(false);
