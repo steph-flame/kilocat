@@ -707,3 +707,45 @@ describe("autoMatchPetsByName", () => {
     expect(autoMatchPetsByName(pets, cats, { p1: "c2", p2: null })).toEqual({ p1: "c2", p2: null });
   });
 });
+
+describe("an unattributed LR5 visit must not be filed under a cat", () => {
+  // Reported: a weight the Litter-Robot itself did NOT attribute to Mithril appeared in her
+  // timeline. routeEntry fell back to robotMap[serial] for any entry without a petId — correct for
+  // an LR4, which has no pet detection, but wrong for an LR5, which tried to identify the visitor
+  // and couldn't. That reading may be another cat, or not a cat at all, and it entered the fit with
+  // the same weight as a real measurement.
+  const cfg = { serial: "LR5X", petMap: { p1: "mithril" }, robotMap: { LR5X: "mithril" } };
+
+  it("LR5: an attributed visit still routes by pet", () => {
+    expect(routeEntry({ petId: "p1" }, { ...cfg, model: "LR5" })).toBe("mithril");
+  });
+
+  it("LR5: an UNattributed visit is skipped, not given to the robot's cat", () => {
+    expect(routeEntry({ petId: null }, { ...cfg, model: "LR5" })).toBeNull();
+    expect(routeEntry({}, { ...cfg, model: "LR5" })).toBeNull();
+  });
+
+  it("LR4: an unattributed visit still routes by robot — it has no pet detection at all", () => {
+    expect(routeEntry({ petId: null }, { ...cfg, model: "LR4" })).toBe("mithril");
+    expect(routeEntry({}, { ...cfg, model: "LR4" })).toBe("mithril");
+  });
+
+  it("defaults to LR4 behaviour when the model is unknown, so old connections keep working", () => {
+    expect(routeEntry({ petId: null }, cfg)).toBe("mithril");
+  });
+
+  it("is case-insensitive about the model string", () => {
+    expect(routeEntry({ petId: null }, { ...cfg, model: "lr5" })).toBeNull();
+  });
+
+  it("a pet mapped to nothing is still skipped on either model", () => {
+    const unmapped = { ...cfg, petMap: { p1: null } };
+    expect(routeEntry({ petId: "p1" }, { ...unmapped, model: "LR5" })).toBeNull();
+    expect(routeEntry({ petId: "p1" }, { ...unmapped, model: "LR4" })).toBeNull();
+  });
+
+  it("an unknown pet id is skipped rather than falling back to the robot", () => {
+    expect(routeEntry({ petId: "stranger" }, { ...cfg, model: "LR5" })).toBeNull();
+    expect(routeEntry({ petId: "stranger" }, { ...cfg, model: "LR4" })).toBeNull();
+  });
+});

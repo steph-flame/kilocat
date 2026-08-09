@@ -456,11 +456,21 @@ export async function syncWeights({ refreshToken, serial, sinceMs, existingEntri
 // (robot serial → kilocat cat id, same). Routing rule (see report):
 //   - entry has a petId (LR5 only) AND petMap has a real cat for it  → that cat
 //   - entry has a petId but petMap has nothing (unmapped) or null    → skip
-//   - entry has no petId (LR4 always; LR5 when the source event's own petIds was
-//     absent/multiple) → robotMap[serial] if set, else skip
+//   - entry has a petId but petMap has nothing (unmapped) or null    → skip
+//   - entry has NO petId, from an LR4 → robotMap[serial] if set, else skip
+//   - entry has NO petId, from an LR5 → SKIP
+//
+// That last rule is the one that matters in a house with more than one animal. An LR4 has no pet
+// detection at all, so "no petId" carries no information and falling back to the robot's mapped cat
+// is the only thing that could be meant. An LR5 DOES attribute visits — so a visit it left
+// unattributed is one the robot itself could not identify. Routing that to the robot's cat writes a
+// reading into her timeline that may well be another cat, or not a cat at all, and it lands with the
+// same weight as a genuine measurement. Better to drop it and report it as skipped: a missing
+// reading costs a little precision, a wrong one biases the fit and the owner has no way to spot it.
 // Pure; returns a cat id, or null meaning "skip".
-export function routeEntry(entry, { serial, petMap = {}, robotMap = {} }) {
+export function routeEntry(entry, { serial, model = "LR4", petMap = {}, robotMap = {} }) {
   if (entry.petId != null) return petMap[entry.petId] || null;
+  if (String(model).toUpperCase() === "LR5") return null; // it could have attributed this and didn't
   return robotMap[serial] || null;
 }
 
@@ -497,7 +507,7 @@ export async function syncAllWeights({ refreshToken, robots = [], sinceMs, petMa
       parsed = parseWeightEvents(events);
     }
     for (const entry of parsed) {
-      const catId = routeEntry(entry, { serial, petMap, robotMap });
+      const catId = routeEntry(entry, { serial, model, petMap, robotMap });
       if (!catId) { skipped++; continue; }
       (byCatRaw[catId] ||= []).push(entry);
     }
