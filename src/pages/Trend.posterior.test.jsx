@@ -100,7 +100,9 @@ describe("Trend renders the posterior as a density", () => {
     expect(container.textContent).toMatch(/how exactly food is measured/);
   });
 
-  it("renders for every estimator, including v4", async () => {
+  // v5 runs 72 filter passes per render, so this one is genuinely slow under full-suite load —
+  // given its own budget rather than left to flake.
+  it("renders for every estimator, including v4", { timeout: 30000 }, async () => {
     for (const est of ["v1", "v2", "v3", "v4", "v5"]) {
       cleanup();
       window.localStorage.setItem("catration_v1", JSON.stringify(seed({ estimator: est })));

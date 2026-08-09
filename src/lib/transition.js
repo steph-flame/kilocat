@@ -132,6 +132,11 @@ export function dayMismatch({ oldRows, newRows, toNew, fedBySlot, keyOfName }) {
 //   "start"    — nothing usable logged recently, so treat today as day 1.
 // Ties go to the EARLIER day (strict <), erring toward advancing slowly — the safe direction for a
 // gut being transitioned.
+// How close yesterday has to be to the finished ration before the ramp is declared over, as a
+// fraction of the day's energy. 8% is roughly one ordinary logging slip — tight enough that a cat
+// genuinely mid-ramp isn't waved through, loose enough that "near enough" counts.
+export const AT_TARGET_TOL = 0.08;
+
 export function inferTransitionDay({ startItems, resolvedRationItems, target, days, priorEntries, gapDays = 1 }) {
   const n = clampDays(days);
   const { keyOfName } = makeSlotKeyer(startItems, resolvedRationItems);
@@ -151,6 +156,19 @@ export function inferTransitionDay({ startItems, resolvedRationItems, target, da
     const err = dayMismatch({ oldRows, newRows, toNew: d / n, fedBySlot: fed, keyOfName });
     if (err < bestErr) { bestErr = err; best = d; }
   }
+  // ALREADY THERE? Editing the ration mid-switch is the case that needs this. If the owner changes
+  // the target to something they're effectively already feeding, the ramp has nothing left to do —
+  // but a pure argmin can still land mid-ramp when several candidate days fit yesterday's numbers
+  // almost equally well, and then the plan asks them to walk BACK toward the old food. So check the
+  // finished ration explicitly: if yesterday already matches it within a logging slip, it's done,
+  // whatever the scoring prefers.
+  const doneErr = dayMismatch({ oldRows, newRows, toNew: 1, fedBySlot: fed, keyOfName });
+  const fedTotal = [...fed.values()].reduce((a, b) => a + num(b), 0);
+  const scale = Math.max(num(target), fedTotal, 1);
+  if (doneErr / scale <= AT_TARGET_TOL) {
+    return { day: n, basis: "attarget", matchedPrior: n };
+  }
+
   const step = Math.max(1, Math.round(num(gapDays)) || 1);
   return { day: Math.min(best + step, n), basis: "inferred", matchedPrior: best };
 }

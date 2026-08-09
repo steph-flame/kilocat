@@ -204,7 +204,11 @@ describe("a rotating slot is ONE slot, not a food being swapped", () => {
       startItems: startSnapshot, resolvedRationItems: rationWithRotation, target: TARGET, days: 14,
       priorEntries: [{ name: "Tiki Lamb", kcal: TARGET }], // a third flavor, in neither list by name
     });
-    expect(inf.basis).toBe("inferred"); // not treated as off-plan food
+    // The intent is that the logged flavor was RECOGNISED as belonging to the pack — not that any
+    // particular day came out. (Feeding the pack's full amount is in fact already at target, which
+    // is its own correct answer.) So assert what the test is actually about.
+    expect(inf.basis).not.toBe("start");
+    expect(inf.matchedPrior).toBeGreaterThan(0);
   });
 
   it("makeSlotKeyer maps every member and the active flavor to one key", () => {
@@ -260,5 +264,58 @@ describe("the schedule TABLE's columns use the same slot identity as the plan", 
     for (const d of [1, 7, 14]) {
       expect(columns(d).reduce((a, r) => a + r.kcal, 0)).toBeCloseTo(200, 5);
     }
+  });
+});
+
+// Reported: mid-switch from A to B, at day 7 of 14 (so already feeding ~50/50), the owner edited the
+// RATION to be 50/50 A+B — i.e. the thing they were already feeding. The plan should have recognised
+// the switch was over; instead it stayed mid-ramp and asked them to HALVE food B, walking back
+// toward the old food. A pure argmin can land mid-ramp when several candidate days fit yesterday
+// almost equally well, so the finished ration is now checked explicitly.
+describe("editing the ration to what you're already feeding ends the switch", () => {
+  const T = 200, DAYS = 14;
+  const dry = (id, name, pct) => ({ id, name, mode: "perKg", kcalPerKg: 4000, ...(pct != null ? { splitMode: "share", pct } : { splitMode: "remainder" }) });
+  const start = [dry("o1", "Instinct")];
+  const oldRation = [dry("n1", "Farmina")];
+  const newRation = [dry("n1", "Farmina", 50), dry("n2", "Instinct", 50)];
+  const fedOn = (day, ration) => transitionSteps({ startItems: start, resolvedRationItems: ration, target: T, day, days: DAYS })
+    .map((r) => ({ name: r.name, kcal: r.kcal }));
+  const infer = (priorEntries, ration = newRation) =>
+    inferTransitionDay({ startItems: start, resolvedRationItems: ration, target: T, days: DAYS, priorEntries });
+
+  it("declares the ramp finished rather than winding it back", () => {
+    const r = infer(fedOn(7, oldRation)); // yesterday, under the OLD target, at the halfway point
+    expect(r.basis).toBe("attarget");
+    expect(r.day).toBe(DAYS);
+  });
+
+  it("today's plan is then the new ration itself, not half of food B", () => {
+    const r = infer(fedOn(7, oldRation));
+    const plan = transitionSteps({ startItems: start, resolvedRationItems: newRation, target: T, day: r.day, days: DAYS });
+    const full = transitionSteps({ startItems: start, resolvedRationItems: newRation, target: T, day: DAYS, days: DAYS });
+    for (const row of plan) {
+      expect(row.kcal, row.name).toBeCloseTo(full.find((f) => f.name === row.name).kcal, 5);
+    }
+  });
+
+  it("tolerates ordinary sloppiness in what was actually fed", () => {
+    const sloppy = fedOn(7, oldRation).map((e) => ({ ...e, kcal: e.kcal * (e.name === "Farmina" ? 1.06 : 0.95) }));
+    expect(infer(sloppy).basis).toBe("attarget");
+  });
+
+  it("does NOT wave through a cat genuinely mid-ramp", () => {
+    const r = infer(fedOn(4, newRation));
+    expect(r.basis).toBe("inferred");
+    expect(r.day).toBe(5);
+  });
+
+  it("still ends the ramp when the target was reached the ordinary way", () => {
+    expect(infer(fedOn(DAYS, newRation)).day).toBe(DAYS);
+  });
+
+  it("a cat still on 100% old food is nowhere near target", () => {
+    const r = infer([{ name: "Instinct", kcal: T }]);
+    expect(r.basis).toBe("inferred");
+    expect(r.day).toBe(1);
   });
 });

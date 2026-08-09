@@ -202,8 +202,8 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
       const hits = intakeLog.items.filter((e) => e.date === d);
       if (hits.length) { prior = hits; gapDays = back; break; }
     }
-    const { day, basis } = inferTransitionDay({ startItems, resolvedRationItems: resolved, target, days: tr.days, priorEntries: prior, gapDays });
-    return { day, basis, days: clampDays(tr.days), resolved };
+    const { day, basis, matchedPrior } = inferTransitionDay({ startItems, resolvedRationItems: resolved, target, days: tr.days, priorEntries: prior, gapDays });
+    return { day, basis, matchedPrior, gapDays, days: clampDays(tr.days), resolved };
   }, [tr?.on, tr?.days, startItems, ration.items, target, viewedDate, fridge, fridgeDays, intakeLog.items]);
 
   const steps = useMemo(() => {
@@ -327,10 +327,14 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
                 switching · day {ramp.day} of {ramp.days}
               </span>
               <span style={{ fontSize: 11.5, color: A.muted }}>
-                {ramp.day >= ramp.days
+                {ramp.basis === "attarget"
+                  ? "What you fed yesterday already matches this ration, so the switch is done — you can turn it off on the ration page."
+                  : ramp.day >= ramp.days
                   ? "last day — this is the full new ration."
                   : `${r0(shareOfNew(ramp.day, ramp.days) * 100)}% new ration today.`}
                 {ramp.basis === "start" ? " Starting the ramp (nothing logged yesterday)." : ""}
+                {/* say WHERE the day came from: a wrong day is otherwise unfalsifiable from the UI */}
+                {ramp.basis === "inferred" && <span style={{ color: A.muted }}>{" "}Read from {ramp.gapDays === 1 ? "yesterday" : `${ramp.gapDays} days ago`}, which matched day {ramp.matchedPrior}.</span>}
               </span>
               <a href="#/ration" style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.good, textDecoration: "none" }}>schedule ›</a>
             </div>
