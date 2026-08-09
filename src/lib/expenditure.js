@@ -710,3 +710,31 @@ export function mixtureEstimateExpenditure(weightEntries = [], intakeEntries = [
     thetaBest: components.reduce((a, c) => (c.w > a.w ? c : a), components[0]).theta,
   };
 }
+
+/* ==================== how the food was measured ==================== */
+// The intake CV is a property of the OWNER's method, not the cat, and it is now the DOMINANT term
+// in the reported band for anyone past a few weeks — so a single hardcoded 5% is the wrong answer
+// for everyone. These are the methods the app can actually support.
+//
+// THE FLOOR NOBODY ESCAPES is the label. A pet food's kcal/kg is a calculated or measured estimate
+// with real tolerance, so even a perfectly weighed portion inherits a few percent. That's why the
+// two scale options below are so close together: at a ~50 g portion, 1 g rounding is under 1% and
+// disappears next to label error, while 0.1 g resolution buys essentially nothing further. Worth
+// saying plainly rather than implying a better scale tightens the estimate — it doesn't, much.
+//
+// What DOES separate the methods is the systematic part. Random slop averages away over weeks (the
+// filters already benefit); a consistent habit does not. Someone who always heaps the scoop is
+// wrong by the same margin every day forever, which is why volumetric methods sit several times
+// higher than weighing.
+//
+// Free-feeding / topping up the bowl is deliberately NOT offered: intake isn't measured at all, and
+// no CV honestly represents "unknown". The app needs logged meals to say anything.
+export const INTAKE_METHODS = {
+  scale01:  { label: "Kitchen scale, 0.1 g",  cv: 0.03, hint: "portion error negligible — this is the food label's own tolerance" },
+  scale1:   { label: "Kitchen scale, 1 g",    cv: 0.035, hint: "1 g rounding is under 1% of a meal; still label-dominated" },
+  feeder:   { label: "Automatic feeder",      cv: 0.08, hint: "dispenses by volume, so a calibration offset repeats every meal" },
+  cup:      { label: "Measuring cup / scoop", cv: 0.12, hint: "kibble density varies with settling, and a scooping habit is consistent" },
+};
+export const DEFAULT_INTAKE_METHOD = "scale1";
+export const intakeCvFor = (method) =>
+  (INTAKE_METHODS[method] || INTAKE_METHODS[DEFAULT_INTAKE_METHOD]).cv;

@@ -62,7 +62,7 @@
 //    grouping/order of merges converges on the same library. Doesn't run cleanFood/
 //    ensureBuiltins itself (those are AppState-level migration concerns) — callers that need
 //    that normalization apply it before/after, same as hydrate already does on load.
-//  - fridgeDays / skin / unit / estimator: one shared bundle, LWW by top-level `settingsModAt`
+//  - fridgeDays / intakeMethod / skin / unit / estimator: one shared bundle, LWW by `settingsModAt`
 //    — same rule/limitation shape as the per-cat bundle above (whole bundle moves together;
 //    a tie keeps local).
 //  - litterRobot: kept LOCAL, ALWAYS. Deliberately NOT LWW'd — it's a device-bound credential,
@@ -359,6 +359,7 @@ export function mergeV2(local, incoming, now = Date.now()) {
     cats: mergeCats(l.cats, inc.cats),
     library: mergeLibrary(l.library || [], inc.library || []),
     fridgeDays: settings.fridgeDays,
+    intakeMethod: settings.intakeMethod,
     skin: settings.skin,
     unit: settings.unit,
     estimator: settings.estimator,

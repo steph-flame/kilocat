@@ -106,6 +106,7 @@ function isLRConnection(v) {
 function validateSharedShape(d) {
   if (d.library !== undefined && !arrOf(d.library, isFoodEntry)) return false;
   if (d.fridgeDays !== undefined && typeof d.fridgeDays !== "number") return false;
+  if (d.intakeMethod !== undefined && typeof d.intakeMethod !== "string") return false;
   if (d.litterRobot !== undefined && !isLRConnection(d.litterRobot)) return false;
   if (d.settingsModAt !== undefined && typeof d.settingsModAt !== "number") return false;
   if (d.deletedCats !== undefined && !isTombstoneMap(d.deletedCats)) return false;

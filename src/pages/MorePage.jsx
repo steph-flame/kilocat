@@ -1,5 +1,6 @@
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
+import { INTAKE_METHODS } from "../lib/expenditure.js";
 import { isStandalone, platformInstallHint } from "../lib/pwa.js";
 import { validateImport } from "../lib/validate.js";
 import { LitterRobotCard } from "./Settings.jsx";
@@ -43,7 +44,7 @@ function RowHead({ title, right }) {
 export default function MorePage() {
   const {
     p, catsSummary, eraseAll, fridgeDays, setFridgeDays, exportData, importData,
-    unit, setUnit, estimator, setEstimator,
+    unit, setUnit, estimator, setEstimator, intakeMethod, setIntakeMethod,
     litterRobot, connectLitterRobotStart, connectLitterRobotFinish, disconnectLitterRobot, syncLitterRobotNow,
     setPetMapping, setRobotMapping,
   } = useApp();
@@ -111,6 +112,14 @@ export default function MorePage() {
             control={<Seg options={[["kg", "kg"], ["lb", "lb"]]} value={unit} onChange={setUnit} />} />
           <PrefRow title="Estimator" sub="How measured burn is computed · shared"
             control={<Seg options={[["v3", "v3 ✓"], ["v4", "v4 β"], ["v5", "v5 β"], ["v2", "v2"], ["v1", "v1"]]} value={estimator} onChange={setEstimator} />} />
+          {/* Now the DOMINANT term in the reported uncertainty for anyone past a few weeks, so it
+              earns a place here rather than a constant. The hint says what the choice actually costs. */}
+          <PrefRow title="How you measure food" sub={`${(INTAKE_METHODS[intakeMethod] || {}).hint || ""}`}
+            control={<select value={intakeMethod} onChange={(e) => setIntakeMethod(e.target.value)}
+              aria-label="How you measure food"
+              style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.ink, background: "transparent", border: `1px solid ${A.cardBorder}`, borderRadius: 8, padding: "4px 6px", maxWidth: 190 }}>
+              {Object.entries(INTAKE_METHODS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+            </select>} />
           <PrefRow title="Opened cans keep" sub="Drives fridge warnings"
             control={<span style={{ display: "inline-flex", alignItems: "baseline", gap: 4, borderBottom: `1px solid ${A.cardBorder}` }}>
               <input type="number" min="1" step="1" value={fridgeDays} onChange={(e) => setFridgeDays(Math.max(1, Number(e.target.value) || 1))}

@@ -6,7 +6,7 @@ import {
   makeLibrarySeed, toLibraryEntry, dedupeFoods, stripKind, canonicalFoodName,
   migrateLegacyFood, ensureBuiltins, backfillBuiltinMacros, migrateSplitMode, sumPct, blankFood, normalizePct, waterfall,
 } from "../lib/foods.js";
-import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, alloEstimateExpenditure, mixtureEstimateExpenditure, withIntakeUncertainty, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
+import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, alloEstimateExpenditure, mixtureEstimateExpenditure, withIntakeUncertainty, INTAKE_METHODS, DEFAULT_INTAKE_METHOD, intakeCvFor, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
 import { methodOffsets, alignToReference } from "../lib/methodBias.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "../lib/series.js";
 import { usePersistence, store, probeStorage } from "../lib/storage.js";
@@ -104,6 +104,9 @@ export function AppProvider({ children }) {
   const [catsState, setCatsState] = useState(makeInitialCatsState);
   const library = useFoodLibrary(makeLibrarySeed);
   const [fridgeDays, setFridgeDaysRaw] = useState(3);
+  // How the owner measures food. Shared across cats (like fridgeDays/skin/unit) because it's a
+  // property of the household, and it now sets the DOMINANT term in the reported uncertainty.
+  const [intakeMethod, setIntakeMethodRaw] = useState(DEFAULT_INTAKE_METHOD);
   const [storageOk] = useState(probeStorage);
   // Top-level LWW timestamp for the shared-settings bundle (fridgeDays/skin/unit/estimator —
   // see lib/mergeData.js's mergeV2). Stamped by every setter below that changes one of those
@@ -141,6 +144,7 @@ export function AppProvider({ children }) {
   // fridgeDays' public setter — stamps settingsModAt like the three above. eraseAll uses
   // setFridgeDaysRaw directly (see below) so a full reset doesn't stamp a bundle edit.
   const setFridgeDays = (n) => { setFridgeDaysRaw(n); setSettingsModAt(Date.now()); };
+  const setIntakeMethod = (m) => { if (INTAKE_METHODS[m]) { setIntakeMethodRaw(m); setSettingsModAt(Date.now()); } };
   // Litter-Robot connection: shared, top-level (like skin/unit/fridgeDays), not per-cat —
   // one Whisker account's refresh token, which robot serial it's reading, and which cat's
   // weightLog it feeds. Null = not connected. Never stores the password, only this token.
@@ -195,12 +199,13 @@ export function AppProvider({ children }) {
     const resolvedEstimator = resolveEstimator(d.estimator, activeCatId && cats[activeCatId]?.expSettings?.algo);
     if (resolvedEstimator) setEstimatorState(resolvedEstimator);
     setSettingsModAt(backfillSettingsModAt(d).settingsModAt || 0);
+    if (INTAKE_METHODS[d.intakeMethod]) setIntakeMethodRaw(d.intakeMethod);
     if (d.litterRobot !== undefined) setLitterRobotState(migrateConnection(d.litterRobot));
   };
 
   const persistData = {
     v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods,
-    fridgeDays, skin, unit, estimator, litterRobot,
+    fridgeDays, intakeMethod, skin, unit, estimator, litterRobot,
     deletedCats: catsState.deletedCats || {}, settingsModAt,
   };
   const loaded = usePersistence(persistData, hydrate);
@@ -435,7 +440,7 @@ export function AppProvider({ children }) {
     // Carry the PRIOR through with the result: v2-v4 are Bayesian, so the vet formula is a real
     // prior distribution, and showing it beside the posterior is what makes "the data moved us off
     // the formula" visible rather than asserted.
-    const withIntake = (r) => ({ ...withIntakeUncertainty(r, meanIntake), priorKcal: t.refs.maintain, priorSdKcal, meanIntake });
+    const withIntake = (r) => ({ ...withIntakeUncertainty(r, meanIntake, intakeCvFor(intakeMethod)), priorKcal: t.refs.maintain, priorSdKcal, meanIntake });
     if (estimator === "v1") return withIntake(estimateExpenditure(w, i, opts));
     if (estimator === "v2") return withIntake(kalmanEstimateExpenditure(w, i, opts));
     // v4 models E = k·W^0.75 instead of letting E random-walk, which removes v3's tracking lag
@@ -446,7 +451,7 @@ export function AppProvider({ children }) {
     // and the band adapts to how well this cat's data actually pins things down.
     if (estimator === "v5") return withIntake(mixtureEstimateExpenditure(w, i, opts));
     return withIntake(ucEstimateExpenditure(w, i, opts)); // v3 (default)
-  }, [weightLog.items, intakeLog.items, intakeDayStatus, estimator, t.refs.maintain, today]);
+  }, [weightLog.items, intakeLog.items, intakeDayStatus, estimator, intakeMethod, t.refs.maintain, today]);
 
   // The single resolved "current target" (redesign) — basis + signed rate → target/floor/rate,
   // on ρ=7800. One source of truth so Intent, Bowl, Today and Trend never disagree (see lib/intent.js).
