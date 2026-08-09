@@ -4,7 +4,17 @@ import { C, SKINS } from "../theme.js";
 import { useApp } from "../state/AppState.jsx";
 import { validateImport } from "../lib/validate.js";
 import { platformInstallHint, isStandalone } from "../lib/pwa.js";
-import { LR5_WEIGHT_SCALES } from "../lib/litterRobot.js";
+import { LR5_WEIGHT_SCALES, SKIP_REASONS } from "../lib/litterRobot.js";
+
+// "3 because the robot couldn't tell which cat it was, 1 too far from that cat's known weight" —
+// a bare count hides a mis-mapped pet or a routing bug behind a number nobody can act on.
+const describeSkips = (byReason) => {
+  const parts = Object.entries(byReason || {})
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${n} ${SKIP_REASONS[k] || k}`);
+  return parts.length ? `${parts.join(", ")}.` : "reason not recorded.";
+};
 import { Field, Note } from "../components/primitives.jsx";
 import CatMark from "../components/CatMark.jsx";
 
@@ -369,7 +379,9 @@ function LRConnected({ connection, catsSummary, disconnect, syncNow, initialResu
         </button>
       </div>
       {result && (result.ok
-        ? <Note>Imported {result.imported} weigh-in{result.imported === 1 ? "" : "s"}{result.skipped ? ` (${result.skipped} skipped — unmapped pets)` : ""}.</Note>
+        ? <Note>Imported {result.imported} weigh-in{result.imported === 1 ? "" : "s"}
+            {result.skipped ? <>. {result.skipped} skipped: {describeSkips(result.skippedByReason)}</> : "."}
+          </Note>
         : <Note tone="warn">Sync failed: {result.error?.message || "unknown error"}</Note>)}
     </div>
   );

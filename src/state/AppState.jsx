@@ -555,7 +555,7 @@ export function AppProvider({ children }) {
       Object.entries(visibleCats(catsState)).map(([id, cat]) => [id, cat.weightLog])
     );
     try {
-      const { byCat, imported, skipped, syncedAt, weightScale, pets } = await lrSyncAllWeights({
+      const { byCat, imported, skipped, skippedByReason, syncedAt, weightScale, pets } = await lrSyncAllWeights({
         refreshToken: conn.refreshToken, robots: conn.robots, sinceMs,
         petMap: conn.petMap, robotMap: conn.robotMap, existingEntriesByCat,
       });
@@ -566,7 +566,7 @@ export function AppProvider({ children }) {
       // already-determined scale). `pets` refreshes every sync per the design brief (connect +
       // sync now), so the Settings mapping UI always shows the current Whisker pet list.
       setLitterRobotState((s) => (s ? { ...s, lastSyncTs: syncedAt, weightScale: weightScale ?? s.weightScale, pets } : s));
-      return { ok: true, imported, skipped };
+      return { ok: true, imported, skipped, skippedByReason };
     } catch (error) {
       return { ok: false, error };
     }

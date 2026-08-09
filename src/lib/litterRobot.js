@@ -468,10 +468,44 @@ export async function syncWeights({ refreshToken, serial, sinceMs, existingEntri
 // same weight as a genuine measurement. Better to drop it and report it as skipped: a missing
 // reading costs a little precision, a wrong one biases the fit and the owner has no way to spot it.
 // Pure; returns a cat id, or null meaning "skip".
-export function routeEntry(entry, { serial, model = "LR4", petMap = {}, robotMap = {} }) {
-  if (entry.petId != null) return petMap[entry.petId] || null;
-  if (String(model).toUpperCase() === "LR5") return null; // it could have attributed this and didn't
-  return robotMap[serial] || null;
+export function routeEntry(entry, ctx) { return classifyEntry(entry, ctx).catId; }
+
+// Why a reading was declined — reported in the sync summary so a mis-mapped pet is visible as a
+// reason rather than a bare count, and so a routing bug is diagnosable without reading the code.
+export const SKIP_REASONS = {
+  unattributed: "the robot couldn't tell which cat it was",
+  unmappedPet: "from a pet that isn't linked to a cat",
+  noRobotMap: "from a robot that isn't linked to a cat",
+  implausible: "too far from that cat's known weight",
+};
+
+// routeEntry with its reasoning exposed: { catId, reason }. catId null means skipped.
+export function classifyEntry(entry, { serial, model = "LR4", petMap = {}, robotMap = {} }) {
+  if (entry.petId != null) {
+    const catId = petMap[entry.petId] || null;
+    return catId ? { catId, reason: null, routedBy: "pet" } : { catId: null, reason: "unmappedPet" };
+  }
+  if (String(model).toUpperCase() === "LR5") return { catId: null, reason: "unattributed" };
+  const catId = robotMap[serial] || null;
+  return catId ? { catId, reason: null, routedBy: "robot" } : { catId: null, reason: "noRobotMap" };
+}
+
+// Is this reading believable FOR THIS CAT? The absolute GARBAGE_MAX_LB cap only catches nonsense
+// like a 30 lb reading; it happily passes 15 lb, which is a perfectly ordinary cat weight and a
+// wildly wrong one for a 9.8 lb cat. So compare against the animal's own recent history instead.
+//
+// Deliberately loose (±35% of the trailing median): a real cat can gain or lose a lot over months,
+// and a kitten grows fast, so this must only catch readings that are impossible rather than merely
+// surprising — the estimator's own day-median gate and maxJumpKg handle ordinary noise. With no
+// history to compare against, everything passes: a first sync has nothing to be implausible against.
+export const PLAUSIBLE_FRACTION = 0.35;
+export const MIN_HISTORY_FOR_PLAUSIBILITY = 5;
+export function implausibleForCat(kg, historyKg = []) {
+  const past = historyKg.filter((v) => Number.isFinite(v) && v > 0);
+  if (past.length < MIN_HISTORY_FOR_PLAUSIBILITY) return false;
+  const ref = median(past);
+  if (!(ref > 0)) return false;
+  return Math.abs(kg - ref) / ref > PLAUSIBLE_FRACTION;
 }
 
 // Full multi-robot sync pass: one session refresh, then fetch + parse + route every robot on
@@ -492,6 +526,7 @@ export async function syncAllWeights({ refreshToken, robots = [], sinceMs, petMa
 
   const byCatRaw = {}; // catId -> raw (not-yet-deduped) entries
   let skipped = 0;
+  const skippedByReason = {};
   let weightScale;
   for (const robot of robots) {
     const { serial, model = "LR4" } = robot || {};
@@ -507,9 +542,16 @@ export async function syncAllWeights({ refreshToken, robots = [], sinceMs, petMa
       parsed = parseWeightEvents(events);
     }
     for (const entry of parsed) {
-      const catId = routeEntry(entry, { serial, model, petMap, robotMap });
-      if (!catId) { skipped++; continue; }
-      (byCatRaw[catId] ||= []).push(entry);
+      const { catId, reason, routedBy } = classifyEntry(entry, { serial, model, petMap, robotMap });
+      if (!catId) { skipped++; skippedByReason[reason] = (skippedByReason[reason] || 0) + 1; continue; }
+      // Only now do we know whose history to judge it against.
+      const hist = (existingEntriesByCat[catId] || []).slice(-60).map((e) => Number(e.kg));
+      if (implausibleForCat(entry.kg, hist)) {
+        skipped++; skippedByReason.implausible = (skippedByReason.implausible || 0) + 1; continue;
+      }
+      // Provenance: how this reading came to be filed under this cat. A later routing bug is then
+      // findable in the data instead of only by eye.
+      (byCatRaw[catId] ||= []).push({ ...entry, routedBy });
     }
   }
 
@@ -520,7 +562,7 @@ export async function syncAllWeights({ refreshToken, robots = [], sinceMs, petMa
     if (fresh.length) byCat[catId] = fresh;
     imported += fresh.length;
   }
-  return { byCat, imported, skipped, syncedAt: Date.now(), weightScale, pets };
+  return { byCat, imported, skipped, skippedByReason, syncedAt: Date.now(), weightScale, pets };
 }
 
 // Migrate a stored connection from the old one-robot-one-cat shape ({ refreshToken, serial,

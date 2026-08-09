@@ -8,7 +8,7 @@ import {
   listRobotsLR5, fetchWeightActivityLR5, parseWeightEventsLR5, listAllRobots,
   listPets, routeEntry, syncAllWeights, migrateConnection, autoMatchPetsByName,
   LR5_BASE, LR5_WEIGHT_SCALES, PET_PROFILE_ENDPOINT,
-  COGNITO_CLIENT_ID, GRAPHQL_ENDPOINT, LitterRobotError,
+  COGNITO_CLIENT_ID, GRAPHQL_ENDPOINT, LitterRobotError, classifyEntry, implausibleForCat, SKIP_REASONS,
 } from "./litterRobot.js";
 
 // NOTE: no live credentials here — this file mocks fetch and only exercises pure logic and
@@ -747,5 +747,66 @@ describe("an unattributed LR5 visit must not be filed under a cat", () => {
   it("an unknown pet id is skipped rather than falling back to the robot", () => {
     expect(routeEntry({ petId: "stranger" }, { ...cfg, model: "LR5" })).toBeNull();
     expect(routeEntry({ petId: "stranger" }, { ...cfg, model: "LR4" })).toBeNull();
+  });
+});
+
+describe("a reading has to be plausible FOR THIS CAT, not just for a cat", () => {
+  // Reported: a 15 lb (6.8 kg) reading landed on a ~9.8 lb (4.45 kg) cat. GARBAGE_MAX_LB only
+  // rejects above 25 lb, because 15 lb is a perfectly ordinary weight — for a different cat. The
+  // absolute cap can't catch this; only a comparison with the animal's own history can.
+  const hist = (n = 20, kg = 4.45) => Array.from({ length: n }, (_, i) => kg + (i % 3) * 0.01);
+
+  it("rejects the reported reading", () => {
+    expect(implausibleForCat(6.8, hist())).toBe(true);
+  });
+
+  it("accepts ordinary day-to-day variation", () => {
+    for (const kg of [4.35, 4.45, 4.55, 4.7, 4.2]) expect(implausibleForCat(kg, hist())).toBe(false);
+  });
+
+  // Must not fight legitimate long-run change — the estimator's own gates handle ordinary noise,
+  // this only catches the impossible.
+  it("allows a big genuine loss or gain over months", () => {
+    expect(implausibleForCat(4.45 * 1.3, hist())).toBe(false); // +30%
+    expect(implausibleForCat(4.45 * 0.7, hist())).toBe(false); // -30%
+  });
+
+  it("passes everything when there's too little history to judge against", () => {
+    expect(implausibleForCat(6.8, [])).toBe(false);
+    expect(implausibleForCat(6.8, [4.4, 4.5])).toBe(false); // a first sync has no reference
+  });
+
+  it("is robust to junk in the history", () => {
+    expect(implausibleForCat(6.8, [...hist(), NaN, 0, -1, null])).toBe(true);
+  });
+
+  it("uses the median, so one earlier bad reading can't widen the gate", () => {
+    expect(implausibleForCat(6.8, [...hist(), 9.9])).toBe(true);
+  });
+});
+
+describe("skip reasons are reported, not just counted", () => {
+  const cfg = { serial: "LR5X", petMap: { p1: "mithril", p2: null }, robotMap: { LR5X: "mithril" } };
+
+  it("names why each kind of reading was declined", () => {
+    expect(classifyEntry({ petId: null }, { ...cfg, model: "LR5" }).reason).toBe("unattributed");
+    expect(classifyEntry({ petId: "p2" }, { ...cfg, model: "LR5" }).reason).toBe("unmappedPet");
+    expect(classifyEntry({ petId: null }, { serial: "X", model: "LR4", robotMap: {} }).reason).toBe("noRobotMap");
+  });
+
+  it("every reason has copy an owner can act on", () => {
+    for (const [, text] of Object.entries(SKIP_REASONS)) {
+      expect(text.length).toBeGreaterThan(15);
+    }
+  });
+
+  it("records HOW an accepted reading was routed", () => {
+    expect(classifyEntry({ petId: "p1" }, { ...cfg, model: "LR5" }).routedBy).toBe("pet");
+    expect(classifyEntry({ petId: null }, { ...cfg, model: "LR4" }).routedBy).toBe("robot");
+  });
+
+  it("routeEntry still behaves as before for callers that only want the cat", () => {
+    expect(routeEntry({ petId: "p1" }, { ...cfg, model: "LR5" })).toBe("mithril");
+    expect(routeEntry({ petId: null }, { ...cfg, model: "LR5" })).toBeNull();
   });
 });
