@@ -31,7 +31,7 @@
 
 import { LB_PER_KG } from "./units.js";
 import { WEIGH_SOURCES } from "./expenditure.js";
-import { median, localDateOf } from "./series.js";
+import { median, localDateOf, diffDays } from "./series.js";
 
 export const COGNITO_REGION = "us-east-1";
 export const COGNITO_USER_POOL_ID = "us-east-1_rjhNnZVAm";
@@ -494,14 +494,35 @@ export function classifyEntry(entry, { serial, model = "LR4", petMap = {}, robot
 // like a 30 lb reading; it happily passes 15 lb, which is a perfectly ordinary cat weight and a
 // wildly wrong one for a 9.8 lb cat. So compare against the animal's own recent history instead.
 //
-// Deliberately loose (±35% of the trailing median): a real cat can gain or lose a lot over months,
+// Deliberately loose (±35% of the recent median): a real cat can gain or lose a lot over months,
 // and a kitten grows fast, so this must only catch readings that are impossible rather than merely
-// surprising — the estimator's own day-median gate and maxJumpKg handle ordinary noise. With no
-// history to compare against, everything passes: a first sync has nothing to be implausible against.
+// surprising — the estimator's own day-median gate and maxJumpKg handle ordinary noise.
+//
+// The reference window is a TIME SPAN, not a count of readings. A count means completely different
+// things to different owners: 60 readings is about ten days on a Litter-Robot at 6/day, and over a
+// YEAR for someone weighing weekly. Anchoring today's reading to a median spanning fourteen months
+// would treat a cat's legitimate long-run change as implausible, which is the opposite of the job.
+//
+// 60 days is chosen against the safe maximum weight-loss rate: at 2%/week a cat moves ~15% over the
+// window, comfortably inside the ±35% budget, so the reference can't drift into the gate on its own.
+// A weekly weigher still gets ~8 readings in that span, which is enough for a median. Someone
+// weighing monthly gets too few and the guard simply stands down — that's the right call, since it
+// exists to catch bad AUTOMATED imports, and a human typing a number would notice 15 lb themselves.
 export const PLAUSIBLE_FRACTION = 0.35;
+export const PLAUSIBLE_WINDOW_DAYS = 60;
 export const MIN_HISTORY_FOR_PLAUSIBILITY = 5;
-export function implausibleForCat(kg, historyKg = []) {
-  const past = historyKg.filter((v) => Number.isFinite(v) && v > 0);
+
+// `history`: the cat's existing weigh-ins [{ date, kg }]. `asOf`: the day being judged (ISO).
+export function implausibleForCat(kg, history = [], asOf = null) {
+  if (!Number.isFinite(kg) || kg <= 0) return false;
+  const end = asOf || history.reduce((a, e) => (e?.date > a ? e.date : a), "");
+  const past = (history || []).filter((e) => {
+    const v = Number(e?.kg);
+    if (!Number.isFinite(v) || v <= 0 || !e?.date) return false;
+    if (!end) return true;
+    const age = diffDays(e.date, end);
+    return age >= 0 && age <= PLAUSIBLE_WINDOW_DAYS;
+  }).map((e) => Number(e.kg));
   if (past.length < MIN_HISTORY_FOR_PLAUSIBILITY) return false;
   const ref = median(past);
   if (!(ref > 0)) return false;
@@ -545,8 +566,7 @@ export async function syncAllWeights({ refreshToken, robots = [], sinceMs, petMa
       const { catId, reason, routedBy } = classifyEntry(entry, { serial, model, petMap, robotMap });
       if (!catId) { skipped++; skippedByReason[reason] = (skippedByReason[reason] || 0) + 1; continue; }
       // Only now do we know whose history to judge it against.
-      const hist = (existingEntriesByCat[catId] || []).slice(-60).map((e) => Number(e.kg));
-      if (implausibleForCat(entry.kg, hist)) {
+      if (implausibleForCat(entry.kg, existingEntriesByCat[catId] || [], entry.date)) {
         skipped++; skippedByReason.implausible = (skippedByReason.implausible || 0) + 1; continue;
       }
       // Provenance: how this reading came to be filed under this cat. A later routing bug is then

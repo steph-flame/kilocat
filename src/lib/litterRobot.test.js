@@ -752,36 +752,69 @@ describe("an unattributed LR5 visit must not be filed under a cat", () => {
 
 describe("a reading has to be plausible FOR THIS CAT, not just for a cat", () => {
   // Reported: a 15 lb (6.8 kg) reading landed on a ~9.8 lb (4.45 kg) cat. GARBAGE_MAX_LB only
-  // rejects above 25 lb, because 15 lb is a perfectly ordinary weight — for a different cat. The
-  // absolute cap can't catch this; only a comparison with the animal's own history can.
-  const hist = (n = 20, kg = 4.45) => Array.from({ length: n }, (_, i) => kg + (i % 3) * 0.01);
+  // rejects above 25 lb, because 15 lb is a perfectly ordinary weight — for a different cat. Only a
+  // comparison against the animal's own history can catch it.
+  const day = (n) => { const d = new Date(Date.UTC(2026, 6, 1) + n * 86400000); return d.toISOString().slice(0, 10); };
+  // a Litter-Robot cat: several readings a day
+  const dense = (days = 30, kg = 4.45) => {
+    const out = [];
+    for (let d = 0; d < days; d++) for (let r = 0; r < 6; r++) out.push({ date: day(d), kg: kg + (r % 3) * 0.01 });
+    return out;
+  };
+  // someone weighing weekly for two years — 60 READINGS here would span over a year
+  const weekly = (weeks = 104, from = 6.0, to = 4.45) =>
+    Array.from({ length: weeks }, (_, i) => ({ date: day(i * 7), kg: from + ((to - from) * i) / (weeks - 1) }));
 
   it("rejects the reported reading", () => {
-    expect(implausibleForCat(6.8, hist())).toBe(true);
+    expect(implausibleForCat(6.8, dense(), day(30))).toBe(true);
   });
 
   it("accepts ordinary day-to-day variation", () => {
-    for (const kg of [4.35, 4.45, 4.55, 4.7, 4.2]) expect(implausibleForCat(kg, hist())).toBe(false);
+    for (const kg of [4.35, 4.45, 4.55, 4.7, 4.2]) expect(implausibleForCat(kg, dense(), day(30))).toBe(false);
   });
 
-  // Must not fight legitimate long-run change — the estimator's own gates handle ordinary noise,
-  // this only catches the impossible.
-  it("allows a big genuine loss or gain over months", () => {
-    expect(implausibleForCat(4.45 * 1.3, hist())).toBe(false); // +30%
-    expect(implausibleForCat(4.45 * 0.7, hist())).toBe(false); // -30%
+  it("allows a big genuine loss or gain", () => {
+    expect(implausibleForCat(4.45 * 1.3, dense(), day(30))).toBe(false);
+    expect(implausibleForCat(4.45 * 0.7, dense(), day(30))).toBe(false);
   });
 
-  it("passes everything when there's too little history to judge against", () => {
-    expect(implausibleForCat(6.8, [])).toBe(false);
-    expect(implausibleForCat(6.8, [4.4, 4.5])).toBe(false); // a first sync has no reference
+  // The point of using a time span rather than a count: this cat really did go 6.0 -> 4.45 over two
+  // years. Judged against the last 60 READINGS (14 months of weekly weighing) its current weight
+  // would be compared with a long-obsolete median; judged against the last 60 DAYS it is not.
+  it("a weekly weigher's long-run change doesn't make their current weight implausible", () => {
+    const h = weekly();
+    const nowKg = h[h.length - 1].kg, asOf = h[h.length - 1].date;
+    expect(implausibleForCat(nowKg, h, asOf)).toBe(false);
+    // and the guard still works for them — a 15 lb reading is still rejected
+    expect(implausibleForCat(6.8, h, asOf)).toBe(true);
+  });
+
+  it("only looks at the window, ignoring readings older than it", () => {
+    const stale = Array.from({ length: 30 }, (_, i) => ({ date: day(i), kg: 9.0 })); // a year+ ago
+    const recent = Array.from({ length: 10 }, (_, i) => ({ date: day(400 + i), kg: 4.45 }));
+    // judged as of the recent block, the old 9 kg readings must not widen the gate
+    expect(implausibleForCat(6.8, [...stale, ...recent], day(409))).toBe(true);
+  });
+
+  it("stands down when the window holds too little to judge against", () => {
+    expect(implausibleForCat(6.8, [], day(10))).toBe(false);
+    expect(implausibleForCat(6.8, [{ date: day(0), kg: 4.4 }, { date: day(3), kg: 4.5 }], day(3))).toBe(false);
+    // monthly weigher: only ~2 readings land in 60 days, so the guard doesn't fire
+    const monthly = Array.from({ length: 24 }, (_, i) => ({ date: day(i * 30), kg: 4.45 }));
+    expect(implausibleForCat(6.8, monthly, day(690))).toBe(false);
   });
 
   it("is robust to junk in the history", () => {
-    expect(implausibleForCat(6.8, [...hist(), NaN, 0, -1, null])).toBe(true);
+    expect(implausibleForCat(6.8, [...dense(), { date: day(29), kg: NaN }, { date: day(29), kg: 0 }, {}], day(30))).toBe(true);
   });
 
   it("uses the median, so one earlier bad reading can't widen the gate", () => {
-    expect(implausibleForCat(6.8, [...hist(), 9.9])).toBe(true);
+    expect(implausibleForCat(6.8, [...dense(), { date: day(29), kg: 9.9 }], day(30))).toBe(true);
+  });
+
+  it("ignores a nonsense candidate rather than throwing", () => {
+    expect(implausibleForCat(NaN, dense(), day(30))).toBe(false);
+    expect(implausibleForCat(0, dense(), day(30))).toBe(false);
   });
 });
 
