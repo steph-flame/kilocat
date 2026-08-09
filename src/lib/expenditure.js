@@ -729,11 +729,28 @@ export function mixtureEstimateExpenditure(weightEntries = [], intakeEntries = [
 //
 // Free-feeding / topping up the bowl is deliberately NOT offered: intake isn't measured at all, and
 // no CV honestly represents "unknown". The app needs logged meals to say anything.
+// ORDERING NOTE. An automatic feeder sits WORST here, not best, which is the opposite of the
+// intuition that a machine beats a human. Its per-dispense randomness does average away over the
+// several dispenses in a day — but the CV represents the SYSTEMATIC part, and a feeder's systematic
+// error is unusually bad: auger throughput depends on kibble shape (so the manufacturer's
+// grams-per-portion is wrong for almost any specific food) and on hopper level (so it DRIFTS as the
+// hopper empties — a weekly cycle rather than a constant offset, which means it doesn't cancel out
+// of the rate either). A measuring cup is at least observable and a careful person is consistent.
+//
+// But the variable that actually matters is neither container: it's whether the volumetric method
+// was ever CHECKED against a scale. Dispense ten portions, weigh them, divide — that converts a
+// guess into a number and moves you two categories up. So the options are split on that, and the
+// hints say how to graduate.
+//
+// HONESTY ABOUT THESE NUMBERS: the scale figures are anchored on label tolerance, which is real.
+// The volumetric ones are my estimates — I know of no measurements of pet-feeder repeatability, and
+// they should be replaced with real ones if anybody measures their own.
 export const INTAKE_METHODS = {
-  scale01:  { label: "Kitchen scale, 0.1 g",  cv: 0.03, hint: "portion error negligible — this is the food label's own tolerance" },
-  scale1:   { label: "Kitchen scale, 1 g",    cv: 0.035, hint: "1 g rounding is under 1% of a meal; still label-dominated" },
-  feeder:   { label: "Automatic feeder",      cv: 0.08, hint: "dispenses by volume, so a calibration offset repeats every meal" },
-  cup:      { label: "Measuring cup / scoop", cv: 0.12, hint: "kibble density varies with settling, and a scooping habit is consistent" },
+  scale01:  { label: "Kitchen scale, 0.1 g",   cv: 0.03,  hint: "portion error negligible — what's left is the food label's own tolerance" },
+  scale1:   { label: "Kitchen scale, 1 g",     cv: 0.035, hint: "1 g rounding is under 1% of a meal; still label-dominated" },
+  volChecked: { label: "Cup or feeder, weighed once", cv: 0.07, hint: "you've weighed what it actually delivers, so only drift remains" },
+  cup:      { label: "Measuring cup / scoop",  cv: 0.11,  hint: "density varies with settling, and a scooping habit is consistent — weigh one scoop to move up" },
+  feeder:   { label: "Automatic feeder",       cv: 0.15,  hint: "auger output depends on kibble shape and hopper level, so it drifts — weigh ten dispenses to move up" },
 };
 export const DEFAULT_INTAKE_METHOD = "scale1";
 export const intakeCvFor = (method) =>

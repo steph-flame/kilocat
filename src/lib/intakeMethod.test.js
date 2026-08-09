@@ -3,16 +3,31 @@ import { INTAKE_METHODS, DEFAULT_INTAKE_METHOD, intakeCvFor, withIntakeUncertain
 
 describe("food-measurement method sets the dominant uncertainty term", () => {
   it("offers only methods the app can actually work from", () => {
-    expect(Object.keys(INTAKE_METHODS).sort()).toEqual(["cup", "feeder", "scale01", "scale1"]);
+    expect(Object.keys(INTAKE_METHODS).sort()).toEqual(["cup", "feeder", "scale01", "scale1", "volChecked"]);
     // free-feeding is deliberately absent: intake isn't measured, so no CV represents it honestly
     expect(INTAKE_METHODS.freeFeed).toBeUndefined();
   });
 
   it("orders them by how much systematic error each really carries", () => {
-    const { scale01, scale1, feeder, cup } = INTAKE_METHODS;
+    const { scale01, scale1, volChecked, cup, feeder } = INTAKE_METHODS;
     expect(scale01.cv).toBeLessThan(scale1.cv);
-    expect(scale1.cv).toBeLessThan(feeder.cv);
-    expect(feeder.cv).toBeLessThan(cup.cv);
+    expect(scale1.cv).toBeLessThan(volChecked.cv);
+    expect(volChecked.cv).toBeLessThan(cup.cv);
+    expect(cup.cv).toBeLessThan(feeder.cv);
+  });
+
+  // Counter-intuitive but deliberate: a machine is WORSE than a careful human here. Per-dispense
+  // randomness averages away; auger throughput drifting with kibble shape and hopper level does not.
+  it("an unchecked feeder is worse than a measuring cup, not better", () => {
+    expect(INTAKE_METHODS.feeder.cv).toBeGreaterThan(INTAKE_METHODS.cup.cv);
+  });
+
+  // The variable that actually matters is calibration, not container: a feeder user gains twice as
+  // much by weighing what it delivers as by abandoning it for a scoop.
+  it("checking a feeder beats swapping it for a cup", () => {
+    const byChecking = INTAKE_METHODS.feeder.cv - INTAKE_METHODS.volChecked.cv;
+    const bySwitching = INTAKE_METHODS.feeder.cv - INTAKE_METHODS.cup.cv;
+    expect(byChecking).toBeGreaterThan(bySwitching);
   });
 
   // The honest part: better scale resolution buys almost nothing, because the label is the floor.
@@ -37,10 +52,10 @@ describe("food-measurement method sets the dominant uncertainty term", () => {
 
   it("changing the method actually moves the reported band", () => {
     const r = { kcal: 200, sd: 10, enoughData: true };
-    const widths = ["scale01", "scale1", "feeder", "cup"]
+    const widths = ["scale01", "scale1", "volChecked", "cup", "feeder"]
       .map((m) => withIntakeUncertainty(r, 215, intakeCvFor(m)).sd);
     expect(widths).toEqual([...widths].sort((a, b) => a - b)); // monotone
-    expect(widths[3]).toBeGreaterThan(widths[0] * 1.5);        // and materially different
+    expect(widths[4]).toBeGreaterThan(widths[0] * 1.5);        // and materially different
   });
 
   it("every method has copy explaining what it costs", () => {
