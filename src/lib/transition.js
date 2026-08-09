@@ -62,18 +62,40 @@ export function makeSlotKeyer(...itemLists) {
 // doesn't know about cans. Rows carry their source food through so callers keep kcalPerG, type,
 // rotation state, etc. A dropped food's `food` comes from the old side, which is all it needs to
 // be fed and logged on its way out.
+// Collapse a side's rows to ONE per slot, summing energy and grams. Without this, two entries that
+// resolve to the same slot — the same food listed twice in a ration, or two names belonging to one
+// rotation family — each became their own row and ramped separately, so a single food appeared
+// twice in the plan with one copy rising and the other flat. Identity comes from the first row so
+// the slot keeps its id, split mode and rotation.
+function collapseBySlot(rows, keyOfName) {
+  const at = new Map();
+  const out = [];
+  for (const r of rows || []) {
+    if (!key(r.name)) continue;
+    const k = keyOfName(r.name);
+    if (at.has(k)) {
+      const prev = out[at.get(k)];
+      prev.kcal = num(prev.kcal) + num(r.kcal);
+      if (prev.grams != null || r.grams != null) prev.grams = num(prev.grams) + num(r.grams);
+    } else {
+      at.set(k, out.length);
+      out.push({ ...r });
+    }
+  }
+  return { rows: out, at };
+}
+
 export function blendRows(oldRows, newRows, toNew, keyOfName = (n) => key(n)) {
   const t = Math.max(0, Math.min(1, num(toNew)));
   const out = [];
   const at = new Map();
-  for (const r of newRows || []) {
-    if (!key(r.name)) continue;
-    const k = keyOfName(r.name);
-    at.set(k, out.length);
+  const nu_ = collapseBySlot(newRows, keyOfName);
+  const old_ = collapseBySlot(oldRows, keyOfName);
+  for (const r of nu_.rows) {
+    at.set(keyOfName(r.name), out.length);
     out.push({ nu: r, old: null });
   }
-  for (const r of oldRows || []) {
-    if (!key(r.name)) continue;
+  for (const r of old_.rows) {
     const k = keyOfName(r.name);
     if (at.has(k)) out[at.get(k)].old = r;
     else { at.set(k, out.length); out.push({ nu: null, old: r }); }

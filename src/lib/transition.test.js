@@ -319,3 +319,55 @@ describe("editing the ration to what you're already feeding ends the switch", ()
     expect(r.day).toBe(1);
   });
 });
+
+// Reported: "it's somehow splitting the same food B into two separate logs." Two entries that
+// resolve to the same SLOT — the same food listed twice in a ration, or two names belonging to one
+// rotation family — each became its own row and ramped independently, so one food appeared twice
+// with one copy rising and the other flat.
+describe("one slot is always one row, even if the ration lists it twice", () => {
+  const rows = (arr) => arr.map(([name, kcal, grams]) => ({ name, kcal, grams }));
+
+  it("sums duplicate entries on the NEW side into a single row", () => {
+    const out = blendRows(rows([["Instinct", 200, 50]]), rows([["Farmina", 60, 15], ["Farmina", 40, 10]]), 0.5);
+    expect(out).toHaveLength(2);
+    const f = out.find((r) => r.name === "Farmina");
+    expect(f.kcal).toBeCloseTo(50, 5);   // half of the combined 100, not two rows of 30 and 20
+    expect(f.grams).toBeCloseTo(12.5, 5);
+  });
+
+  it("sums duplicates on the OLD side too", () => {
+    const out = blendRows(rows([["Instinct", 120, 30], ["Instinct", 80, 20]]), rows([["Farmina", 200, 50]]), 0.5);
+    expect(out).toHaveLength(2);
+    expect(out.find((r) => r.name === "Instinct").kcal).toBeCloseTo(100, 5);
+  });
+
+  it("a duplicated food present on BOTH sides is still one row, and phases correctly", () => {
+    const out = blendRows(rows([["Chow", 100, 25], ["Chow", 100, 25]]), rows([["Chow", 60, 15], ["Chow", 60, 15]]), 0.5);
+    expect(out).toHaveLength(1);
+    expect(out[0].phase).toBe("both");
+    expect(out[0].kcal).toBeCloseTo(0.5 * 200 + 0.5 * 120, 5);
+  });
+
+  it("names that share a rotation family collapse together", () => {
+    const pack = [{ name: "Tiki Beef" }, { name: "Tiki Lamb" }];
+    const { keyOfName } = makeSlotKeyer([{ name: "Tiki Beef", rotation: pack }]);
+    const out = blendRows([], rows([["Tiki Beef", 40, 10], ["Tiki Lamb", 60, 15]]), 1, keyOfName);
+    expect(out).toHaveLength(1);
+    expect(out[0].kcal).toBeCloseTo(100, 5);
+  });
+
+  it("total energy is preserved by the collapse — nothing is dropped or double-counted", () => {
+    const out = blendRows(rows([["A", 200, 50]]), rows([["B", 60, 15], ["B", 40, 10], ["C", 100, 25]]), 1);
+    expect(out.reduce((a, r) => a + r.kcal, 0)).toBeCloseTo(200, 5);
+  });
+
+  it("the surviving row keeps the first entry's identity, so ids and split modes are stable", () => {
+    const out = blendRows([], [
+      { id: "keep", name: "Farmina", kcal: 60, grams: 15, splitMode: "share" },
+      { id: "other", name: "Farmina", kcal: 40, grams: 10, splitMode: "remainder" },
+    ], 1);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe("keep");
+    expect(out[0].splitMode).toBe("share");
+  });
+});
