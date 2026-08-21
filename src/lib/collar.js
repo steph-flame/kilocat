@@ -26,16 +26,19 @@ import { num } from "./util.js";
 // defaultOn: whether the cat normally wears it at weigh-in time. Owners are in one of two regimes
 // (it lives on the cat, or it goes on for outings), and the per-entry checkbox handles the
 // exceptions either way.
-export const defaultCollar = () => ({ grams: "", defaultOn: true });
+// since: the day the cat STARTED wearing it (YYYY-MM-DD). Weigh-ins before that day were taken off
+// a bare cat and are left alone — see collarWorn.
+export const defaultCollar = () => ({ grams: "", defaultOn: true, since: "" });
 
 // Whatever a profile carries — including nothing at all, on every cat saved before this feature
-// and on any imported blob — as { grams: number, defaultOn: boolean }.
+// and on any imported blob — as { grams: number, defaultOn: boolean, since: string }.
 export function collarOf(profile) {
   const c = profile?.collar || {};
   const grams = num(c.grams);
   return {
     grams: Number.isFinite(grams) && grams > 0 ? grams : 0,
     defaultOn: c.defaultOn !== false, // absent means yes, since entering a weight implies wearing it
+    since: typeof c.since === "string" ? c.since : "",
   };
 }
 
@@ -46,9 +49,23 @@ export const hasCollar = (collar) => num(collar?.grams) > 0;
 // `collarOn` is deliberately tri-state in storage — true / false / absent — so "I didn't say"
 // keeps following the default if the default is later corrected, while an explicit answer never
 // moves underneath the owner.
+//
+// A COLLAR HAS A START DATE, and the default only reaches forward from it. Cats acquire collars;
+// the usual reason to set this up at all is that one is going on TODAY. Without a start date,
+// entering a weight would reinterpret the entire back history as collared and quietly restate every
+// past weigh-in 40 g lighter than the scale said — the one thing this module exists to prevent,
+// pointed at the past instead of the present. Dates are YYYY-MM-DD, so a string compare IS a date
+// compare; a blank `since` means "as long as we've been logging" (nothing the UI produces, but an
+// imported or hand-edited profile can say it).
+//
+// The mirror case — the collar comes off for good — isn't modelled yet. Clearing the weight would
+// un-correct the whole period it WAS worn, so that day wants either an `until` here or a one-time
+// stamp of explicit collarOn onto the entries in the worn period. Deliberately not built on spec.
 export function collarWorn(entry, collar) {
   if (!hasCollar(collar)) return false;
-  return entry?.collarOn == null ? !!collar.defaultOn : !!entry.collarOn;
+  if (entry?.collarOn != null) return !!entry.collarOn; // the owner answered for this reading
+  if (!collar.defaultOn) return false;
+  return !collar.since || !entry?.date || entry.date >= collar.since;
 }
 
 // The kg this reading is heavy by (0 when the collar was off, or there isn't one).

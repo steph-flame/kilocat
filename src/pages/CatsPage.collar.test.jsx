@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import { AppProvider } from "../state/AppState.jsx";
 import CatsPage from "./CatsPage.jsx";
+import { localDateOf } from "../lib/series.js";
 
 const seed = (unit = "kg", collar) => ({
   v: 2,
@@ -92,6 +93,30 @@ describe("Cats page — collar setting", () => {
     await flushSave();
     const saved = JSON.parse(window.localStorage.getItem("catration_v1"));
     expect(saved.cats.c1.profile.collar.grams).toBeCloseTo(42.5, 0);
+  });
+
+  // A cat acquires a collar; it doesn't retroactively always have had one. Entering a weight has to
+  // stamp a start date by itself, because the owner who doesn't notice this field is exactly the
+  // one whose whole back history would otherwise be restated 40 g light.
+  it("stamps today as the start date the moment a weight is entered", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    await mount();
+    openProfile();
+    await act(async () => { fireEvent.change(screen.getByLabelText(/collar weight in g/i), { target: { value: "40" } }); });
+    await flushSave();
+    const saved = JSON.parse(window.localStorage.getItem("catration_v1"));
+    expect(saved.cats.c1.profile.collar.since).toBe(localDateOf(Date.now()));
+    // and it's shown, editable, for the owner setting this up a week late
+    expect(screen.getByLabelText(/started wearing the collar/i).value).toBe(localDateOf(Date.now()));
+  });
+
+  it("doesn't overwrite a start date the owner already set", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed("kg", { grams: 40, defaultOn: true, since: "2026-07-01" })));
+    await mount();
+    openProfile();
+    await act(async () => { fireEvent.change(screen.getByLabelText(/collar weight in g/i), { target: { value: "45" } }); });
+    await flushSave();
+    expect(JSON.parse(window.localStorage.getItem("catration_v1")).cats.c1.profile.collar.since).toBe("2026-07-01");
   });
 
   it("shows an existing collar back in the household's own unit", async () => {

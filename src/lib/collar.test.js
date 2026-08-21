@@ -26,6 +26,12 @@ describe("reading a collar off a profile", () => {
     expect(collarOf({ collar: { grams: "42" } }).grams).toBe(42);
   });
 
+  it("normalizes a missing or non-string start date to blank", () => {
+    expect(collarOf({ collar: { grams: 40 } }).since).toBe("");
+    expect(collarOf({ collar: { grams: 40, since: 20260821 } }).since).toBe("");
+    expect(collarOf({ collar: { grams: 40, since: "2026-08-21" } }).since).toBe("2026-08-21");
+  });
+
   it("treats an absent defaultOn as worn — entering a collar's weight implies the cat wears it", () => {
     expect(collarOf({ collar: { grams: 40 } }).defaultOn).toBe(true);
     expect(collarOf({ collar: { grams: 40, defaultOn: false } }).defaultOn).toBe(false);
@@ -54,6 +60,26 @@ describe("whether the collar was on for a given reading", () => {
     const off = { grams: 40, defaultOn: false };
     expect(collarWorn(unanswered, off)).toBe(false);
     expect(collarWorn(explicitNo, off)).toBe(false);
+  });
+
+  // THE CASE THIS WAS ADDED FOR: a cat that is ABOUT to start wearing a collar. Setting one up must
+  // not restate every weigh-in she ever had as 40 g lighter than the scale said.
+  it("leaves everything before the start date alone", () => {
+    const c = { grams: 40, defaultOn: true, since: "2026-08-21" };
+    expect(collarWorn({ date: "2026-08-20" }, c)).toBe(false); // the day before: bare cat
+    expect(collarWorn({ date: "2026-08-21" }, c)).toBe(true);  // the day itself counts
+    expect(collarWorn({ date: "2026-08-22" }, c)).toBe(true);
+  });
+
+  it("still lets a single early weigh-in say the collar was on", () => {
+    const c = { grams: 40, defaultOn: true, since: "2026-08-21" };
+    expect(collarWorn({ date: "2026-08-10", collarOn: true }, c)).toBe(true);
+  });
+
+  it("with no start date recorded, the default reaches all the way back", () => {
+    // nothing the UI produces — it stamps a date whenever a weight is first entered — but an
+    // imported or hand-edited profile can say this, and it shouldn't crash or silently do nothing
+    expect(collarWorn({ date: "2020-01-01" }, { grams: 40, defaultOn: true, since: "" })).toBe(true);
   });
 
   it("never subtracts when there's no collar, whatever the entry claims", () => {
@@ -92,6 +118,34 @@ describe("stripCollar", () => {
   it("tolerates an empty or missing log", () => {
     expect(stripCollar([], c40)).toEqual([]);
     expect(stripCollar(undefined, c40)).toEqual([]);
+  });
+});
+
+// The real-life setup: a cat with a month of history who starts wearing a collar TODAY. Nothing
+// already logged may move, and nothing logged from here on may look like sudden weight gain.
+describe("putting a collar on a cat that already has history", () => {
+  const SINCE = "2026-08-21";
+  const c = { grams: 40, defaultOn: true, since: SINCE };
+  const before = ["2026-08-18", "2026-08-19", "2026-08-20"].map((date) => ({ date, kg: 4.5 }));
+  const after = ["2026-08-21", "2026-08-22", "2026-08-23"].map((date) => ({ date, kg: 4.54 }));
+
+  it("the back history reads exactly as it was logged", () => {
+    const out = stripCollar(before, c);
+    expect(out.map((e) => e.kg)).toEqual([4.5, 4.5, 4.5]);
+    expect(out.every((e) => e.collarOn === false)).toBe(true);
+  });
+
+  it("and the series doesn't step on the day the collar goes on", () => {
+    const all = stripCollar([...before, ...after], c);
+    expect(all.every((e) => Math.abs(e.kg - 4.5) < 1e-9)).toBe(true);
+  });
+
+  // Without the start date this is what the owner would get: a truthful-looking history that has
+  // quietly been restated 40 g light, every point of it, for a collar the cat wasn't wearing.
+  it("without one, every past weigh-in is silently rewritten", () => {
+    const noDate = stripCollar(before, { grams: 40, defaultOn: true, since: "" });
+    expect(noDate.every((e) => e.kg < 4.5)).toBe(true);
+    expect(noDate[0].rawKg).toBe(4.5); // the reading itself survives — only the reading OF it moved
   });
 });
 

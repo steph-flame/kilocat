@@ -197,6 +197,33 @@ describe("Log → Weight tab with a collared cat", () => {
     expect(c.textContent).toMatch(/4\.54/);
   });
 
+  // The collar has a start date, and the checkbox has to know it: stepping back to a day before the
+  // cat owned a collar and logging a forgotten weigh-in must not tag it as collared.
+  it("defaults the checkbox to the day on screen, not just to the cat's usual answer", async () => {
+    const s = collared();
+    s.cats.c1.profile.collar = { grams: 40, defaultOn: true, since: today };
+    s.cats.c1.weightLog = [{ id: "w1", date: day(3), kg: 4.5, method: "litterRobot", source: "litter-robot" }];
+    seedWith(s);
+    await mount();
+    openWeightTab();
+    expect(screen.getByRole("checkbox", { name: /collar on/i }).checked).toBe(true); // today: worn
+    // step back to before she had it
+    fireEvent.click(screen.getByRole("button", { name: /previous day/i }));
+    expect(screen.getByRole("checkbox", { name: /collar on/i }).checked).toBe(false);
+  });
+
+  it("leaves weigh-ins from before the collar exactly as they were logged", async () => {
+    const s = collared();
+    s.cats.c1.profile.collar = { grams: 40, defaultOn: true, since: today };
+    s.cats.c1.weightLog = [{ id: "w1", date: day(1), kg: 4.5, method: "litterRobot", source: "litter-robot" }];
+    seedWith(s);
+    const { container: c } = await mount();
+    openWeightTab();
+    fireEvent.click(screen.getByRole("button", { name: /previous day/i }));
+    expect(c.textContent).toMatch(/4\.5/);
+    expect(c.textContent).toMatch(/collar off/); // and it says so, rather than silently correcting
+  });
+
   it("stays out of the way entirely for a cat with no collar", async () => {
     await mount(); // the ordinary seed, no collar
     openWeightTab();

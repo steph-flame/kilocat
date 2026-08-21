@@ -11,7 +11,7 @@ import { isRotating } from "../lib/rotation.js";
 import { transitionSteps, inferTransitionDay, clampDays, shareOfNew } from "../lib/transition.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
 import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight, smallLabel, toDisplaySmall } from "../lib/units.js";
-import { hasCollar } from "../lib/collar.js";
+import { hasCollar, collarWorn } from "../lib/collar.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import FoodSearch from "../components/FoodSearch.jsx";
 import { DistributionBody, Toggle } from "../components/FoodDistribution.jsx";
@@ -659,11 +659,14 @@ function WeightHistoryChart({ items, days, selected, onSelect, unit, disp }) {
 function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, collar, expSettings, setExpSettings, selectDay }) {
   const [val, setVal] = useState("");
   const [method, setMethod] = useState(expSettings.lastMethod || DEFAULT_METHOD);
-  // Whether the collar was on for the weigh-in being entered. Starts at the cat's usual answer, so
-  // the common case is one number and a "+"; the checkbox is only ever touched for the exception.
+  // Whether the collar was on for the weigh-in being entered. Starts at the cat's usual answer FOR
+  // THE DAY ON SCREEN — backfilling a day from before she had a collar defaults to unchecked, same
+  // as the readings already logged then. So the common case is one number and a "+"; the checkbox
+  // is only ever touched for the exception.
   const wearsCollar = hasCollar(collar);
-  const [collarOn, setCollarOn] = useState(!!collar.defaultOn);
-  useEffect(() => { setCollarOn(!!collar.defaultOn); }, [collar.defaultOn, viewedDate]);
+  const usualForDay = collarWorn({ date: viewedDate }, collar);
+  const [collarOn, setCollarOn] = useState(usualForDay);
+  useEffect(() => { setCollarOn(usualForDay); }, [usualForDay]);
   const dayItems = weightLog.items.filter((e) => e.date === viewedDate);
   // Every kg here is already the CAT, not the scale — the collar came off in AppState's weightLog
   // view (see lib/collar.js). `rawKg` is what the scale read, kept for the rows to show.

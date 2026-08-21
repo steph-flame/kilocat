@@ -62,7 +62,7 @@ export default function CatsPage() {
                       <span style={{ fontSize: 13, color: A.ink }}>Spayed / neutered</span>
                       <Toggle value={c.neutered} onChange={(v) => updateCatProfile(c.id, { neutered: v })} label={`${catLabel(c)} is spayed or neutered`} />
                     </div>
-                    <CollarFields cat={c} unit={unit} onChange={(collar) => updateCatProfile(c.id, { collar })} />
+                    <CollarFields cat={c} unit={unit} today={today} onChange={(collar) => updateCatProfile(c.id, { collar })} />
                     <div style={{ borderTop: `1px solid ${A.hairline}`, paddingTop: 12, display: "flex", gap: 8 }}>
                       <button onClick={() => clearHistory(c)} style={{ border: `1px solid ${A.caution.border}`, color: A.caution.text, background: "transparent", borderRadius: 8, padding: "5px 10px", fontFamily: TYPE.mono, fontSize: 11, cursor: "pointer" }}>clear history…</button>
                       <button onClick={() => removeCat(c)} style={{ background: A.danger.bg, color: A.danger.text, border: "none", borderRadius: 8, padding: "5px 10px", fontFamily: TYPE.mono, fontSize: 11, cursor: "pointer" }}>delete cat…</button>
@@ -107,19 +107,27 @@ function Toggle({ value, onChange, label: aria }) {
 // There's no "does this cat wear a collar" checkbox on purpose: a weight of nothing IS no collar,
 // and two controls that can disagree about the same fact is one control too many. Blank leaves the
 // per-weigh-in checkbox out of the Log page entirely.
-function CollarFields({ cat, unit, onChange }) {
-  const stored = cat.collar || { grams: 0, defaultOn: true };
+function CollarFields({ cat, unit, today, onChange }) {
+  const stored = cat.collar || { grams: 0, defaultOn: true, since: "" };
   const asDisplay = (g) => (num(g) > 0 ? String(Number(toDisplaySmall(g, unit).toFixed(1))) : "");
   const [value, setValue] = useState(asDisplay(stored.grams));
   useEffect(() => { setValue(asDisplay(stored.grams)); }, [cat.id, unit]); // eslint-disable-line react-hooks/exhaustive-deps
   const on = num(stored.grams) > 0;
+  // Setting up a collar almost always means one is going ON, now — so the start date defaults to
+  // today the moment a weight first appears. The alternative default (no date) would silently
+  // restate every weigh-in the cat ever had as collared, which is the opposite of what anyone
+  // typing a number here is asking for. It stays editable for the owner who sets this up late.
+  const setGrams = (raw) => {
+    const grams = raw === "" ? "" : fromDisplaySmall(num(raw), unit);
+    onChange({ ...stored, grams, since: num(grams) > 0 && !stored.since ? today : stored.since });
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <span style={{ fontSize: 13, color: A.ink }}>Collar weight<span style={{ color: A.muted, fontSize: 11.5 }}> · with tracker, if any</span></span>
         <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4, flex: "none" }}>
           <input type="number" inputMode="decimal" min="0" step="1" value={value} placeholder="—"
-            onChange={(e) => { setValue(e.target.value); onChange({ ...stored, grams: e.target.value === "" ? "" : fromDisplaySmall(num(e.target.value), unit) }); }}
+            onChange={(e) => { setValue(e.target.value); setGrams(e.target.value); }}
             aria-label={`${catLabel(cat)}'s collar weight in ${smallLabel(unit)}`}
             style={{ width: 58, textAlign: "right", fontFamily: TYPE.mono, fontSize: 14, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, padding: "3px 0" }} />
           <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{smallLabel(unit)}</span>
@@ -132,10 +140,19 @@ function CollarFields({ cat, unit, onChange }) {
             label={`${catLabel(cat)} usually wears the collar at weigh-ins`} />
         </div>
       )}
+      {on && stored.defaultOn && (
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ fontSize: 13, color: A.ink }}>Wearing it since</span>
+          <input type="date" value={stored.since || ""} max={today}
+            onChange={(e) => onChange({ ...stored, since: e.target.value })}
+            aria-label={`the day ${catLabel(cat)} started wearing the collar`}
+            style={{ fontFamily: TYPE.mono, fontSize: 13, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, padding: "3px 0" }} />
+        </label>
+      )}
       {on && (
         <p style={{ fontSize: 11.5, color: A.muted, margin: 0, lineHeight: 1.45 }}>
-          Taken off every weigh-in where the collar was on, so the weight shown is the cat.
-          Each weigh-in can say otherwise in the log.
+          Taken off weigh-ins from that day on, so the weight shown is the cat.
+          Earlier weigh-ins are left exactly as they were logged, and any single weigh-in can say otherwise in the log.
         </p>
       )}
     </div>
