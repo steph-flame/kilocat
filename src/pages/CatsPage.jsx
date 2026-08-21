@@ -6,6 +6,7 @@ import { smallLabel, toDisplaySmall, fromDisplaySmall } from "../lib/units.js";
 
 const catLabel = (c) => c.name || "unnamed cat";
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
+const dateBox = { fontFamily: TYPE.mono, fontSize: 13, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, padding: "3px 0" };
 
 function Card({ children, style }) {
   return <div style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "12px 14px", margin: "0 18px 14px", ...style }}>{children}</div>;
@@ -108,7 +109,7 @@ function Toggle({ value, onChange, label: aria }) {
 // and two controls that can disagree about the same fact is one control too many. Blank leaves the
 // per-weigh-in checkbox out of the Log page entirely.
 function CollarFields({ cat, unit, today, onChange }) {
-  const stored = cat.collar || { grams: 0, defaultOn: true, since: "" };
+  const stored = cat.collar || { grams: 0, defaultOn: true, since: "", until: "" };
   const asDisplay = (g) => (num(g) > 0 ? String(Number(toDisplaySmall(g, unit).toFixed(1))) : "");
   const [value, setValue] = useState(asDisplay(stored.grams));
   useEffect(() => { setValue(asDisplay(stored.grams)); }, [cat.id, unit]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -135,24 +136,37 @@ function CollarFields({ cat, unit, today, onChange }) {
       </label>
       {on && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <span style={{ fontSize: 13, color: A.ink }}>Usually worn at weigh-ins</span>
-          <Toggle value={stored.defaultOn} onChange={(v) => onChange({ ...stored, defaultOn: v })}
-            label={`${catLabel(cat)} usually wears the collar at weigh-ins`} />
+          <span style={{ fontSize: 13, color: A.ink }}>Still wearing it</span>
+          {/* Turning this off is how a collar comes OFF, which is why it stamps an end date rather
+              than just switching the correction away: the months she DID wear it have to stay
+              corrected. Turning it back on reopens the period. */}
+          <Toggle value={stored.defaultOn} onChange={(v) => onChange({ ...stored, defaultOn: v, until: v ? "" : (stored.until || today) })}
+            label={`${catLabel(cat)} is still wearing the collar`} />
         </div>
       )}
-      {on && stored.defaultOn && (
+      {on && (
         <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <span style={{ fontSize: 13, color: A.ink }}>Wearing it since</span>
           <input type="date" value={stored.since || ""} max={today}
             onChange={(e) => onChange({ ...stored, since: e.target.value })}
             aria-label={`the day ${catLabel(cat)} started wearing the collar`}
-            style={{ fontFamily: TYPE.mono, fontSize: 13, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, padding: "3px 0" }} />
+            style={dateBox} />
+        </label>
+      )}
+      {on && !stored.defaultOn && (
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ fontSize: 13, color: A.ink }}>Last worn</span>
+          <input type="date" value={stored.until || ""} min={stored.since || undefined} max={today}
+            onChange={(e) => onChange({ ...stored, until: e.target.value })}
+            aria-label={`the last day ${catLabel(cat)} wore the collar`}
+            style={dateBox} />
         </label>
       )}
       {on && (
         <p style={{ fontSize: 11.5, color: A.muted, margin: 0, lineHeight: 1.45 }}>
-          Taken off weigh-ins from that day on, so the weight shown is the cat.
-          Earlier weigh-ins are left exactly as they were logged, and any single weigh-in can say otherwise in the log.
+          {stored.defaultOn
+            ? "Taken off weigh-ins from that day on, so the weight shown is the cat. Earlier weigh-ins are left exactly as they were logged, and any single weigh-in can say otherwise in the log."
+            : "Weigh-ins between those two days stay corrected; ones before and after are left exactly as they were logged."}
         </p>
       )}
     </div>

@@ -76,6 +76,28 @@ describe("whether the collar was on for a given reading", () => {
     expect(collarWorn({ date: "2026-08-10", collarOn: true }, c)).toBe(true);
   });
 
+  // THE OTHER END. A collar that comes off must not un-correct the months it was on — the owner
+  // needs a move that's truthful about both halves at once, or the model has trapped them.
+  it("stops correcting after the last day it was worn", () => {
+    const c = { grams: 40, defaultOn: false, since: "2026-03-01", until: "2026-08-21" };
+    expect(collarWorn({ date: "2026-02-28" }, c)).toBe(false); // before she had it
+    expect(collarWorn({ date: "2026-03-01" }, c)).toBe(true);
+    expect(collarWorn({ date: "2026-06-15" }, c)).toBe(true);  // the middle stays corrected
+    expect(collarWorn({ date: "2026-08-21" }, c)).toBe(true);  // the last day counts
+    expect(collarWorn({ date: "2026-08-22" }, c)).toBe(false); // bare again
+  });
+
+  it("an open-ended period runs to the present", () => {
+    const c = { grams: 40, defaultOn: true, since: "2026-03-01", until: "" };
+    expect(collarWorn({ date: "2030-01-01" }, c)).toBe(true);
+  });
+
+  // The regime a period can't express, and what every profile saved before `until` existed means.
+  it("switched off with no period recorded corrects nothing", () => {
+    expect(collarWorn({ date: "2026-06-15" }, { grams: 40, defaultOn: false, since: "", until: "" })).toBe(false);
+    expect(collarWorn({ date: "2026-06-15" }, { grams: 40, defaultOn: false, since: "2026-03-01", until: "" })).toBe(false);
+  });
+
   it("with no start date recorded, the default reaches all the way back", () => {
     // nothing the UI produces — it stamps a date whenever a weight is first entered — but an
     // imported or hand-edited profile can say this, and it shouldn't crash or silently do nothing
@@ -146,6 +168,33 @@ describe("putting a collar on a cat that already has history", () => {
     const noDate = stripCollar(before, { grams: 40, defaultOn: true, since: "" });
     expect(noDate.every((e) => e.kg < 4.5)).toBe(true);
     expect(noDate[0].rawKg).toBe(4.5); // the reading itself survives — only the reading OF it moved
+  });
+});
+
+// The collar era ending, which is the same problem as it starting, pointed the other way. Whatever
+// the owner does on that day, the record of the months she wore it must not move.
+describe("taking the collar off for good", () => {
+  const worn = ["2026-08-19", "2026-08-20", "2026-08-21"].map((date) => ({ date, kg: 4.54 }));
+  const bare = ["2026-08-22", "2026-08-23"].map((date) => ({ date, kg: 4.5 }));
+  const ended = { grams: 40, defaultOn: false, since: "2026-08-19", until: "2026-08-21" };
+
+  it("keeps the worn stretch corrected and leaves the bare days alone", () => {
+    const all = stripCollar([...worn, ...bare], ended);
+    expect(all.every((e) => Math.abs(e.kg - 4.5) < 1e-9)).toBe(true); // one continuous flat cat
+    expect(all.slice(0, 3).every((e) => e.collarOn === true)).toBe(true);
+    expect(all.slice(3).every((e) => e.collarOn === false)).toBe(true);
+  });
+
+  it("the raw readings are untouched throughout, as always", () => {
+    expect(stripCollar([...worn, ...bare], ended).map((e) => e.rawKg)).toEqual([4.54, 4.54, 4.54, 4.5, 4.5]);
+  });
+
+  // What the owner would have been left with if ending the period weren't expressible: the only
+  // available move — clearing the collar's weight — silently restates every day she DID wear it.
+  it("simply deleting the collar instead would rewrite the worn stretch", () => {
+    const deleted = stripCollar([...worn, ...bare], { grams: 0, defaultOn: true, since: "", until: "" });
+    expect(deleted.slice(0, 3).every((e) => e.kg === 4.54)).toBe(true); // 40 g of collar, read as cat
+    expect(new Set(deleted.map((e) => e.kg)).size).toBe(2);             // a step that never happened
   });
 });
 

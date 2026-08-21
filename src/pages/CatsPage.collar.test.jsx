@@ -67,10 +67,10 @@ describe("Cats page — collar setting", () => {
     window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
     await mount();
     openProfile();
-    expect(screen.queryByRole("switch", { name: /usually wears the collar/i })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /still wearing the collar/i })).toBeNull();
 
     await act(async () => { fireEvent.change(screen.getByLabelText(/collar weight in g/i), { target: { value: "40" } }); });
-    expect(screen.getByRole("switch", { name: /usually wears the collar/i })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: /still wearing the collar/i })).toBeTruthy();
   });
 
   it("persists what was typed, in grams", async () => {
@@ -117,6 +117,30 @@ describe("Cats page — collar setting", () => {
     await act(async () => { fireEvent.change(screen.getByLabelText(/collar weight in g/i), { target: { value: "45" } }); });
     await flushSave();
     expect(JSON.parse(window.localStorage.getItem("catration_v1")).cats.c1.profile.collar.since).toBe("2026-07-01");
+  });
+
+  // The collar coming off is a date, not a switch: the months she wore it have to stay corrected.
+  it("stamps an end date when the collar comes off, rather than just switching the correction away", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed("kg", { grams: 40, defaultOn: true, since: "2026-07-01", until: "" })));
+    await mount();
+    openProfile();
+    expect(screen.queryByLabelText(/last day .* wore the collar/i)).toBeNull(); // not while she's wearing it
+    await act(async () => { fireEvent.click(screen.getByRole("switch", { name: /still wearing the collar/i })); });
+    await flushSave();
+    const saved = JSON.parse(window.localStorage.getItem("catration_v1")).cats.c1.profile.collar;
+    expect(saved.until).toBe(localDateOf(Date.now()));
+    expect(saved.since).toBe("2026-07-01");  // the period kept both ends
+    expect(saved.grams).toBe(40);            // and the weight, or the worn stretch would un-correct
+    expect(screen.getByLabelText(/last day .* wore the collar/i).value).toBe(localDateOf(Date.now()));
+  });
+
+  it("putting it back on reopens the period", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed("kg", { grams: 40, defaultOn: false, since: "2026-07-01", until: "2026-08-01" })));
+    await mount();
+    openProfile();
+    await act(async () => { fireEvent.click(screen.getByRole("switch", { name: /still wearing the collar/i })); });
+    await flushSave();
+    expect(JSON.parse(window.localStorage.getItem("catration_v1")).cats.c1.profile.collar.until).toBe("");
   });
 
   it("shows an existing collar back in the household's own unit", async () => {

@@ -21,24 +21,33 @@
 
 import { num } from "./util.js";
 
+// A collar is worn over a PERIOD, and the model has to say so at both ends. Storing only a start
+// date leaves the owner whose cat stops wearing it with no truthful move available: clear the
+// weight and every reading from the months it WAS on jumps back up by it, keep the weight and every
+// bare reading from here on gets it taken off. Both silently wrong, in the exact way this module
+// exists to prevent — so the period is a period.
+//
 // grams: the collar + tracker as weighed, "" until the owner enters one. No collar is simply 0 —
 // there's no separate "has a collar" flag to fall out of step with the weight itself.
-// defaultOn: whether the cat normally wears it at weigh-in time. Owners are in one of two regimes
-// (it lives on the cat, or it goes on for outings), and the per-entry checkbox handles the
-// exceptions either way.
-// since: the day the cat STARTED wearing it (YYYY-MM-DD). Weigh-ins before that day were taken off
-// a bare cat and are left alone — see collarWorn.
-export const defaultCollar = () => ({ grams: "", defaultOn: true, since: "" });
+// since: the day the cat STARTED wearing it (YYYY-MM-DD). Earlier weigh-ins came off a bare cat.
+// until: the last day it was worn, "" while the cat is still wearing it. Later weigh-ins are bare
+// again, and everything in between stays corrected forever.
+// defaultOn: whether the collar is in service at all. False with no `until` is the one regime a
+// period can't express — "there's a collar, but it isn't the default at weigh-in time" — and it's
+// what older saved profiles mean, so it survives as a plain off switch.
+export const defaultCollar = () => ({ grams: "", defaultOn: true, since: "", until: "" });
 
 // Whatever a profile carries — including nothing at all, on every cat saved before this feature
-// and on any imported blob — as { grams: number, defaultOn: boolean, since: string }.
+// and on any imported blob — as { grams, defaultOn, since, until }.
 export function collarOf(profile) {
   const c = profile?.collar || {};
   const grams = num(c.grams);
+  const date = (v) => (typeof v === "string" ? v : "");
   return {
     grams: Number.isFinite(grams) && grams > 0 ? grams : 0,
     defaultOn: c.defaultOn !== false, // absent means yes, since entering a weight implies wearing it
-    since: typeof c.since === "string" ? c.since : "",
+    since: date(c.since),
+    until: date(c.until),
   };
 }
 
@@ -50,22 +59,28 @@ export const hasCollar = (collar) => num(collar?.grams) > 0;
 // keeps following the default if the default is later corrected, while an explicit answer never
 // moves underneath the owner.
 //
-// A COLLAR HAS A START DATE, and the default only reaches forward from it. Cats acquire collars;
-// the usual reason to set this up at all is that one is going on TODAY. Without a start date,
-// entering a weight would reinterpret the entire back history as collared and quietly restate every
-// past weigh-in 40 g lighter than the scale said — the one thing this module exists to prevent,
-// pointed at the past instead of the present. Dates are YYYY-MM-DD, so a string compare IS a date
-// compare; a blank `since` means "as long as we've been logging" (nothing the UI produces, but an
-// imported or hand-edited profile can say it).
+// A COLLAR IS WORN OVER A PERIOD, and the default reaches over that period only. Cats acquire
+// collars and cats lose them; the usual reason to set this up at all is that one is going on TODAY.
+// Without a start date, entering a weight would reinterpret the entire back history as collared and
+// restate every past weigh-in 40 g lighter than the scale said. Without an end date, the day the
+// collar comes off there is no honest thing the owner can do — see the banner above. Dates are
+// YYYY-MM-DD, so a string compare IS a date compare; an open end is blank, and blank at BOTH ends
+// means "for as long as we've been logging" (nothing the UI produces, but an imported or
+// hand-edited profile can say it).
 //
-// The mirror case — the collar comes off for good — isn't modelled yet. Clearing the weight would
-// un-correct the whole period it WAS worn, so that day wants either an `until` here or a one-time
-// stamp of explicit collarOn onto the entries in the worn period. Deliberately not built on spec.
+// Deliberately ONE period, not a list: a collar that comes off and goes back on is what the
+// per-entry checkbox is for, and a schedule of collar eras is more machinery than the fact deserves.
 export function collarWorn(entry, collar) {
   if (!hasCollar(collar)) return false;
   if (entry?.collarOn != null) return !!entry.collarOn; // the owner answered for this reading
-  if (!collar.defaultOn) return false;
-  return !collar.since || !entry?.date || entry.date >= collar.since;
+  const { since, until, defaultOn } = collar;
+  // Off with no end date recorded is the plain "not by default" switch — there's no period to
+  // honour, so nothing is corrected. Off WITH one means the period simply ended.
+  if (!defaultOn && !until) return false;
+  if (!entry?.date) return !!defaultOn; // undated entry: only the live default can speak for it
+  if (since && entry.date < since) return false;
+  if (until && entry.date > until) return false;
+  return true;
 }
 
 // The kg this reading is heavy by (0 when the collar was off, or there isn't one).
