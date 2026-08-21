@@ -1,0 +1,103 @@
+// @vitest-environment jsdom
+//
+// The Cats page is where a collar's weight gets entered, so this mounts THAT page and drives the
+// control the owner actually touches. Same discipline as LogPage.weight.test.jsx: install a real
+// localStorage, flush the async hydrate, and assert the seeded cat loaded before asserting anything
+// else — a test that silently renders the demo cat proves nothing.
+
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
+import { AppProvider } from "../state/AppState.jsx";
+import CatsPage from "./CatsPage.jsx";
+
+const seed = (unit = "kg", collar) => ({
+  v: 2,
+  activeCatId: "c1",
+  cats: {
+    c1: {
+      profile: { name: "Mithril", dob: "2021-05-01", neutered: true, bcMode: "bcs", bcs: 6, goal: "loss",
+        factors: { neutered: 1.2, intact: 1.4, kittenPeak: 2.5, moderation: 1, loss: 1, gain: 1.6 },
+        ...(collar ? { collar } : {}) },
+      ration: [], start: [], fridge: [], weightLog: [], intakeLog: [], intakeDayStatus: {},
+    },
+  },
+  library: [], fridgeDays: 3, skin: "original", unit, estimator: "v3", settingsModAt: 1,
+});
+
+function installStorage() {
+  const map = new Map();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (k) => (map.has(k) ? map.get(k) : null),
+      setItem: (k, v) => map.set(k, String(v)),
+      removeItem: (k) => map.delete(k),
+      clear: () => map.clear(),
+      key: (i) => [...map.keys()][i] ?? null,
+      get length() { return map.size; },
+    },
+  });
+}
+
+const mount = async () => {
+  const r = render(<AppProvider><CatsPage /></AppProvider>);
+  await act(async () => { await Promise.resolve(); });
+  // Mithril is the seeded cat; the demo cat is Biscuit. If this fails the fixture didn't load.
+  expect(screen.getByDisplayValue("Mithril")).toBeTruthy();
+  return r;
+};
+const openProfile = () => fireEvent.click(screen.getByRole("button", { name: /profile/i }));
+// Saves are debounced 400 ms (lib/storage.js), so reading localStorage straight after a keystroke
+// reads the PREVIOUS blob — which is how a broken write would look like a passing test.
+const flushSave = () => act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+
+beforeEach(() => { installStorage(); });
+afterEach(() => { cleanup(); window.localStorage.clear(); });
+
+describe("Cats page — collar setting", () => {
+  it("offers a collar weight in the profile panel", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    await mount();
+    openProfile();
+    expect(screen.getByLabelText(/collar weight in g/i)).toBeTruthy();
+  });
+
+  it("hides the 'usually worn' switch until there IS a collar", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    await mount();
+    openProfile();
+    expect(screen.queryByRole("switch", { name: /usually wears the collar/i })).toBeNull();
+
+    await act(async () => { fireEvent.change(screen.getByLabelText(/collar weight in g/i), { target: { value: "40" } }); });
+    expect(screen.getByRole("switch", { name: /usually wears the collar/i })).toBeTruthy();
+  });
+
+  it("persists what was typed, in grams", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    await mount();
+    openProfile();
+    await act(async () => { fireEvent.change(screen.getByLabelText(/collar weight in g/i), { target: { value: "40" } }); });
+    await flushSave();
+    const saved = JSON.parse(window.localStorage.getItem("catration_v1"));
+    expect(saved.cats.c1.profile.collar.grams).toBe(40);
+  });
+
+  // Stored in grams either way — an imperial household enters ounces and the model never sees them.
+  it("takes ounces from an lb household and still stores grams", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed("lb")));
+    await mount();
+    openProfile();
+    const field = screen.getByLabelText(/collar weight in oz/i);
+    await act(async () => { fireEvent.change(field, { target: { value: "1.5" } }); });
+    await flushSave();
+    const saved = JSON.parse(window.localStorage.getItem("catration_v1"));
+    expect(saved.cats.c1.profile.collar.grams).toBeCloseTo(42.5, 0);
+  });
+
+  it("shows an existing collar back in the household's own unit", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed("lb", { grams: 42.5, defaultOn: true })));
+    await mount();
+    openProfile();
+    expect(screen.getByLabelText(/collar weight in oz/i).value).toBe("1.5");
+  });
+});

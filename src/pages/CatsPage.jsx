@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
+import { num } from "../lib/util.js";
+import { smallLabel, toDisplaySmall, fromDisplaySmall } from "../lib/units.js";
 
 const catLabel = (c) => c.name || "unnamed cat";
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
@@ -10,7 +12,7 @@ function Card({ children, style }) {
 }
 
 export default function CatsPage() {
-  const { today, fridgeDays, catsSummary, activeCatId, switchCat, addCat, updateCatProfile, deleteCat, clearCatHistory } = useApp();
+  const { today, fridgeDays, unit, catsSummary, activeCatId, switchCat, addCat, updateCatProfile, deleteCat, clearCatHistory } = useApp();
   const [expandedId, setExpandedId] = useState(null);
   const realCats = catsSummary.filter((c) => !c.demo);
   const demoRow = catsSummary.find((c) => c.demo);
@@ -58,8 +60,9 @@ export default function CatsPage() {
                     </label>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <span style={{ fontSize: 13, color: A.ink }}>Spayed / neutered</span>
-                      <NeuterToggle value={c.neutered} onChange={(v) => updateCatProfile(c.id, { neutered: v })} />
+                      <Toggle value={c.neutered} onChange={(v) => updateCatProfile(c.id, { neutered: v })} label={`${catLabel(c)} is spayed or neutered`} />
                     </div>
+                    <CollarFields cat={c} unit={unit} onChange={(collar) => updateCatProfile(c.id, { collar })} />
                     <div style={{ borderTop: `1px solid ${A.hairline}`, paddingTop: 12, display: "flex", gap: 8 }}>
                       <button onClick={() => clearHistory(c)} style={{ border: `1px solid ${A.caution.border}`, color: A.caution.text, background: "transparent", borderRadius: 8, padding: "5px 10px", fontFamily: TYPE.mono, fontSize: 11, cursor: "pointer" }}>clear history…</button>
                       <button onClick={() => removeCat(c)} style={{ background: A.danger.bg, color: A.danger.text, border: "none", borderRadius: 8, padding: "5px 10px", fontFamily: TYPE.mono, fontSize: 11, cursor: "pointer" }}>delete cat…</button>
@@ -89,12 +92,53 @@ export default function CatsPage() {
   );
 }
 
-function NeuterToggle({ value, onChange }) {
+function Toggle({ value, onChange, label: aria }) {
   return (
-    <button onClick={() => onChange(!value)} aria-pressed={value} role="switch"
+    <button onClick={() => onChange(!value)} aria-checked={value} aria-label={aria} role="switch"
       style={{ width: 44, height: 26, borderRadius: 999, border: "none", cursor: "pointer", background: value ? A.good : A.track, position: "relative", flex: "none" }}>
       <span style={{ position: "absolute", top: 3, left: value ? 21 : 3, width: 20, height: 20, borderRadius: 999, background: A.card, transition: "left .12s" }} />
     </button>
+  );
+}
+
+// What to take off a weigh-in when the collar was on. Entered in the unit system's small
+// denomination (g / oz) but stored in grams, like every other mass here — see lib/units.js.
+//
+// There's no "does this cat wear a collar" checkbox on purpose: a weight of nothing IS no collar,
+// and two controls that can disagree about the same fact is one control too many. Blank leaves the
+// per-weigh-in checkbox out of the Log page entirely.
+function CollarFields({ cat, unit, onChange }) {
+  const stored = cat.collar || { grams: 0, defaultOn: true };
+  const asDisplay = (g) => (num(g) > 0 ? String(Number(toDisplaySmall(g, unit).toFixed(1))) : "");
+  const [value, setValue] = useState(asDisplay(stored.grams));
+  useEffect(() => { setValue(asDisplay(stored.grams)); }, [cat.id, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+  const on = num(stored.grams) > 0;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <span style={{ fontSize: 13, color: A.ink }}>Collar weight<span style={{ color: A.muted, fontSize: 11.5 }}> · with tracker, if any</span></span>
+        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4, flex: "none" }}>
+          <input type="number" inputMode="decimal" min="0" step="1" value={value} placeholder="—"
+            onChange={(e) => { setValue(e.target.value); onChange({ ...stored, grams: e.target.value === "" ? "" : fromDisplaySmall(num(e.target.value), unit) }); }}
+            aria-label={`${catLabel(cat)}'s collar weight in ${smallLabel(unit)}`}
+            style={{ width: 58, textAlign: "right", fontFamily: TYPE.mono, fontSize: 14, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, padding: "3px 0" }} />
+          <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{smallLabel(unit)}</span>
+        </span>
+      </label>
+      {on && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ fontSize: 13, color: A.ink }}>Usually worn at weigh-ins</span>
+          <Toggle value={stored.defaultOn} onChange={(v) => onChange({ ...stored, defaultOn: v })}
+            label={`${catLabel(cat)} usually wears the collar at weigh-ins`} />
+        </div>
+      )}
+      {on && (
+        <p style={{ fontSize: 11.5, color: A.muted, margin: 0, lineHeight: 1.45 }}>
+          Taken off every weigh-in where the collar was on, so the weight shown is the cat.
+          Each weigh-in can say otherwise in the log.
+        </p>
+      )}
+    </div>
   );
 }
 

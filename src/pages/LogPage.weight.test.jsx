@@ -153,6 +153,58 @@ describe("Log → Weight tab renders with real weigh-ins", () => {
   });
 });
 
+// The collar comes off in AppState's weightLog view, so this is the test that the seam is actually
+// wired to the page the owner uses — not just that lib/collar.js does arithmetic (collar.test.js).
+describe("Log → Weight tab with a collared cat", () => {
+  // 40 g collar, worn by default. The scale read 4.54; the cat is 4.50.
+  const collared = () => {
+    const s = seed();
+    s.cats.c1.profile.collar = { grams: 40, defaultOn: true };
+    s.cats.c1.weightLog = [
+      { id: "w1", date: today, kg: 4.54, method: "litterRobot", source: "litter-robot" },
+      { id: "w2", date: today, kg: 4.50, method: "petScale", source: "manual", collarOn: false }, // weighed bare
+    ];
+    return s;
+  };
+  const seedWith = (blob) => window.localStorage.setItem("catration_v1", JSON.stringify(blob));
+
+  it("shows the cat, not the scale — both readings agree once the collar is off", async () => {
+    seedWith(collared());
+    const { container: c } = await mount();
+    openWeightTab();
+    expect(c.textContent).toMatch(/Litter-Robot/); // the seed loaded (this fixture has no 4.31)
+    // 4.54 collared and 4.50 bare are the SAME cat, so the raw number must not appear as a weight
+    expect(screen.getAllByText(/4\.5\b/).length).toBeGreaterThan(0);
+    expect(c.textContent).not.toMatch(/4\.54\s*kg/);
+  });
+
+  it("offers the collar checkbox, defaulted to the cat's usual answer", async () => {
+    seedWith(collared());
+    await mount();
+    openWeightTab();
+    const box = screen.getByRole("checkbox", { name: /collar on/i });
+    expect(box.checked).toBe(true);
+  });
+
+  it("lets a logged reading be corrected after the fact, and the weight follows", async () => {
+    seedWith(collared());
+    const { container: c } = await mount();
+    openWeightTab();
+    const chips = screen.getAllByRole("button", { name: /collar (on|off)/i });
+    expect(chips.map((b) => b.textContent.trim())).toEqual(["collar on", "collar off"]);
+    // "actually, the Litter-Robot reading was taken with the collar off" → it becomes 4.54
+    await act(async () => { fireEvent.click(chips[0]); });
+    expect(c.textContent).toMatch(/4\.54/);
+  });
+
+  it("stays out of the way entirely for a cat with no collar", async () => {
+    await mount(); // the ordinary seed, no collar
+    openWeightTab();
+    expect(screen.queryByRole("checkbox", { name: /collar/i })).toBeNull();
+    expect(screen.queryAllByRole("button", { name: /collar/i })).toEqual([]);
+  });
+});
+
 describe("Log → Food tab still renders (the other half of the page)", () => {
   it("mounts without throwing", async () => {
     await expect(mount()).resolves.toBeTruthy();

@@ -10,7 +10,8 @@ import { isCanned, resolveRotationsWithFridge, availableCansOf, planSlotDraw, em
 import { isRotating } from "../lib/rotation.js";
 import { transitionSteps, inferTransitionDay, clampDays, shareOfNew } from "../lib/transition.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
-import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
+import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight, smallLabel, toDisplaySmall } from "../lib/units.js";
+import { hasCollar } from "../lib/collar.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import FoodSearch from "../components/FoodSearch.jsx";
 import { DistributionBody, Toggle } from "../components/FoodDistribution.jsx";
@@ -44,7 +45,7 @@ function useEditableLog(log, isDemo, activeCatId) {
 }
 
 export default function LogPage() {
-  const { p, intent, ration, tr, start, intakeLog: liveIntake, weightLog: liveWeight, library, unit, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan, setCanRemaining } = useApp();
+  const { p, intent, ration, tr, start, intakeLog: liveIntake, weightLog: liveWeight, library, unit, collar, intakeDayStatus, setIntakeDayFlag, activeCatId, expSettings, setExpSettings, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan, setCanRemaining } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const intakeLog = useEditableLog(liveIntake, isDemo, activeCatId);
   const weightLog = useEditableLog(liveWeight, isDemo, activeCatId);
@@ -98,7 +99,7 @@ export default function LogPage() {
 
         {tab === "food"
           ? <FoodTab {...{ intakeLog, ration, tr, startItems: start.items, library, viewedDate, todayStr, target, isDemo, isToday, intakeDayStatus, setIntakeDayFlag, selectDay, fridge, fridgeDays, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan, setCanRemaining }} />
-          : <WeightTab {...{ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings, selectDay }} />}
+          : <WeightTab {...{ weightLog, viewedDate, isDemo, isToday, unit, collar, expSettings, setExpSettings, selectDay }} />}
       </div>
     </div>
   );
@@ -655,14 +656,26 @@ function WeightHistoryChart({ items, days, selected, onSelect, unit, disp }) {
 }
 
 /* ---------- weight tab ---------- */
-function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, setExpSettings, selectDay }) {
+function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, collar, expSettings, setExpSettings, selectDay }) {
   const [val, setVal] = useState("");
   const [method, setMethod] = useState(expSettings.lastMethod || DEFAULT_METHOD);
+  // Whether the collar was on for the weigh-in being entered. Starts at the cat's usual answer, so
+  // the common case is one number and a "+"; the checkbox is only ever touched for the exception.
+  const wearsCollar = hasCollar(collar);
+  const [collarOn, setCollarOn] = useState(!!collar.defaultOn);
+  useEffect(() => { setCollarOn(!!collar.defaultOn); }, [collar.defaultOn, viewedDate]);
   const dayItems = weightLog.items.filter((e) => e.date === viewedDate);
+  // Every kg here is already the CAT, not the scale — the collar came off in AppState's weightLog
+  // view (see lib/collar.js). `rawKg` is what the scale read, kept for the rows to show.
   const dayKg = dayItems.length ? median(dayItems.map((e) => num(e.kg))) : null;
   const add = () => {
     if (num(val) > 0) {
-      weightLog.add({ ...manualWeighInStamp(viewedDate), kg: fromDisplayWeight(num(val), unit), method, source: WEIGH_SOURCES.manual });
+      weightLog.add({
+        ...manualWeighInStamp(viewedDate), kg: fromDisplayWeight(num(val), unit), method, source: WEIGH_SOURCES.manual,
+        // Stored only when there IS a collar, and always explicitly: the owner has just answered
+        // for this reading, so it shouldn't drift later if the cat's default changes.
+        ...(wearsCollar ? { collarOn } : {}),
+      });
       setExpSettings({ lastMethod: method }); setVal("");
     }
   };
@@ -691,6 +704,13 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
             <NumBox label="Weight" suf={weightLabel(unit)} value={val} onChange={setVal} step="0.01" />
             <button onClick={add} style={{ background: A.good, color: A.card, border: "none", borderRadius: 12, padding: "10px 16px", fontSize: 18, cursor: "pointer" }}>+</button>
           </div>
+          {/* Enter what the scale said; this says whether the collar was in that number. */}
+          {wearsCollar && (
+            <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 10, fontFamily: TYPE.mono, fontSize: 11.5, color: A.muted, cursor: "pointer" }}>
+              <input type="checkbox" checked={collarOn} onChange={(e) => setCollarOn(e.target.checked)} style={{ accentColor: A.good, width: 15, height: 15 }} />
+              Collar on ({Number(toDisplaySmall(collar.grams, unit).toFixed(1))} {smallLabel(unit)} comes off)
+            </label>
+          )}
         </Card>
       )}
       <Card className="span-all">
@@ -704,6 +724,17 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, expSettings, 
           <div key={en.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontFamily: TYPE.mono, fontSize: 12 }}>
             <span style={{ color: A.muted }}>{(WEIGH_METHODS[en.method] || WEIGH_METHODS[DEFAULT_METHOD]).label}{en.source === WEIGH_SOURCES.litterRobot ? " · auto" : ""}{en.ts != null ? ` · ${new Date(en.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+              {/* Correcting a reading after the fact: the chip writes an EXPLICIT collarOn, so this
+                  entry stops following the cat's default from here on. The stored reading never
+                  changes — only what we believe was on the cat when the scale took it. */}
+              {wearsCollar && (
+                <button onClick={() => weightLog.edit(en.id, { collarOn: !en.collarOn })}
+                  aria-pressed={en.collarOn} title={en.collarOn ? `scale read ${fmtWeight(num(en.rawKg), unit)} ${weightLabel(unit)} with the collar on` : "collar was off"}
+                  style={{ fontFamily: TYPE.mono, fontSize: 9.5, letterSpacing: ".06em", textTransform: "uppercase", borderRadius: 999, padding: "2px 7px", cursor: "pointer",
+                    border: en.collarOn ? "none" : `1px solid ${A.cardBorder}`, background: en.collarOn ? A.track : "transparent", color: A.muted }}>
+                  collar {en.collarOn ? "on" : "off"}
+                </button>
+              )}
               <span style={{ color: A.body }}>{fmtWeight(num(en.kg), unit)} {weightLabel(unit)}</span>
               {<button onClick={() => weightLog.remove(en.id)} aria-label="Remove" style={{ background: "none", border: "none", color: A.muted, cursor: "pointer" }}>×</button>}
             </span>

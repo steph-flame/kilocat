@@ -5,6 +5,7 @@
 import { uid } from "./util.js";
 import { defaultFactors } from "./nutrition.js";
 import { blankFood } from "./foods.js";
+import { defaultCollar } from "./collar.js";
 import { weightKey, intakeKey, isCatVisible } from "./mergeData.js";
 
 // Biscuit, the virtual demo cat (see lib/demoCat.js) — never a key in `cats`, never
@@ -51,6 +52,7 @@ export const freshProfile = () => ({
   name: "", dob: "", weightKg: "", ageUnit: "months",
   neutered: false, bcMode: "pct", bcs: 5, pctOver: 0, bcAsOf: null, goal: "maintain",
   customTarget: "", gentleBasis: "current", factors: { ...defaultFactors },
+  collar: defaultCollar(), // what to take off a weigh-in when it was worn — see lib/collar.js
 });
 
 // A brand-new cat's full per-cat state: one blank ration row and one blank "currently

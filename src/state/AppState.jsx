@@ -8,6 +8,7 @@ import {
 } from "../lib/foods.js";
 import { estimateExpenditure, kalmanEstimateExpenditure, ucEstimateExpenditure, alloEstimateExpenditure, mixtureEstimateExpenditure, withIntakeUncertainty, INTAKE_METHODS, DEFAULT_INTAKE_METHOD, intakeCvFor, WEIGH_SOURCES, DEFAULT_METHOD } from "../lib/expenditure.js";
 import { methodOffsets, alignToReference } from "../lib/methodBias.js";
+import { collarOf, stripCollar } from "../lib/collar.js";
 import { groupByDay, median, localDateOf, manualWeighInStamp, patchEntry, repairWeighInDate } from "../lib/series.js";
 import { usePersistence, store, probeStorage } from "../lib/storage.js";
 import { useFoodLibrary } from "../hooks/useFoodLibrary.js";
@@ -298,8 +299,13 @@ export function AppProvider({ children }) {
   // `remove` DOES record a deletedEntries tombstone (mergeData's own weightKey/intakeKey — the
   // same identity the merge union dedupes by) so the deletion propagates on the next merge
   // instead of a stale copy of the deleted entry reappearing from another device.
-  const makeLogView = (field) => {
-    const items = activeCat[field];
+  //
+  // `viewItems` lets a log SHOW something derived from what it stores. Only the weight log uses
+  // it, to hand every reader the cat's weight rather than the scale's reading (see collar below);
+  // add/edit/remove still write raw entries, addressed by id, so the stored reading is never the
+  // corrected one.
+  const makeLogView = (field, viewItems) => {
+    const items = viewItems || activeCat[field];
     const keyFn = field === "weightLog" ? weightKey : intakeKey;
     const setItems = (updater) => updateActiveCat((cat) => ({ ...cat, [field]: typeof updater === "function" ? updater(cat[field]) : updater }));
     return {
@@ -314,7 +320,23 @@ export function AppProvider({ children }) {
       }),
     };
   };
-  const weightLog = makeLogView("weightLog");
+  // THE ONE PLACE THE COLLAR COMES OFF. A collar with a tracker on it is 25-60 g — more than a
+  // Litter-Robot reading's own noise — and it's only sometimes on, so the app would otherwise read
+  // "collar came off for the vet" as genuine weight loss. Every derived value and every page reads
+  // weigh-ins through this one view (currentWeight, weighOffsets, expenditure here; Trend, Log and
+  // Today via context), so correcting it here corrects all of them at once, and there's no second
+  // read path to keep in step. See lib/collar.js for why the subtraction lives here and not at
+  // entry time.
+  //
+  // Both memos are load-bearing, not tidiness: makeLogView runs every render, so an inline map
+  // would hand back a new array identity each time and re-run the (expensive) expenditure memo
+  // below — which depends on weightLog.items — on every single render.
+  //
+  // Deliberately NOT applied to the raw `catsState` reads elsewhere in this file: the exporter, the
+  // merge, and the Litter-Robot importer all work in the scale's frame and must keep doing so.
+  const collar = useMemo(() => collarOf(p), [p]);
+  const netWeighIns = useMemo(() => stripCollar(activeCat.weightLog, collar), [activeCat.weightLog, collar]);
+  const weightLog = makeLogView("weightLog", netWeighIns);
   const intakeLog = makeLogView("intakeLog");
 
   // Per-day "incomplete" flags on the intake log: a day the owner marks as partially-logged
@@ -395,9 +417,17 @@ export function AppProvider({ children }) {
   // always gets a real `ts`; manualWeighInStamp derives `date` from it directly via
   // localDateOf rather than reusing `today` above, so a weigh-in's day is never one render
   // stale relative to the exact moment it was logged. See lib/series.js.
-  const logWeight = ({ kg, method }) => {
+  // `kg` is the SCALE's number, collar and all — the correction is applied on the way out, not on
+  // the way in (lib/collar.js). `collarOn` is stored only when the caller actually says; left
+  // undefined it follows the cat's default, so correcting that default later moves the readings
+  // nobody answered for and leaves the ones they did.
+  const logWeight = ({ kg, method, collarOn }) => {
     const ts = Date.now();
-    weightLog.add({ ...manualWeighInStamp(localDateOf(ts), ts), kg, method: method || expSettings.lastMethod || DEFAULT_METHOD, source: WEIGH_SOURCES.manual });
+    weightLog.add({
+      ...manualWeighInStamp(localDateOf(ts), ts), kg,
+      method: method || expSettings.lastMethod || DEFAULT_METHOD, source: WEIGH_SOURCES.manual,
+      ...(collarOn == null ? {} : { collarOn: !!collarOn }),
+    });
   };
 
   const t = useMemo(() => computeTargets({ ...p, ageMonths: effAgeMonths, weightKg: currentWeight.kg }), [p, effAgeMonths, currentWeight.kg]);
@@ -483,6 +513,7 @@ export function AppProvider({ children }) {
       name: (cat.profile?.name || "").trim(),
       dob: cat.profile?.dob || "",
       neutered: !!cat.profile?.neutered,
+      collar: collarOf(cat.profile), // normalized here so the Cats page never has to know the raw shape
       ageDisplay: months == null ? null : unit === "years" ? `${r1(months / 12)} yr` : `${r1(months)} mo`,
       weighIns: (cat.weightLog || []).length,
       meals: (cat.intakeLog || []).length,
@@ -643,7 +674,7 @@ export function AppProvider({ children }) {
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
     fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
-    t, expenditure, intent, weighOffsets,
+    t, expenditure, intent, weighOffsets, collar,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,
     // Never serialise persistData directly — it carries the Litter-Robot refreshToken. See
     // lib/portableExport.js; the assertion turns a future regression into a loud failure here
