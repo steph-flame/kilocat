@@ -364,17 +364,20 @@ export function AppProvider({ children }) {
   const setFridge = (updater) => updateActiveCat((cat) => ({ ...cat, fridge: typeof updater === "function" ? updater(cat.fridge || []) : updater, stateModAt: Date.now() }));
   // Higher-level ops so pages don't need the fridge lib or uid: open a fresh can, toss one, set the
   // grams left by hand, or consume grams of a food (used when logging a wet meal — draws oldest-
-  // first, opens new cans as needed). `today`/`fridgeDays` are closed over from state.
+  // first, and opens a can only when none of that food is open). `today`/`fridgeDays` are closed
+  // over from state.
   const openFridgeCan = (food) => setFridge((fr) => [...fr, openCan(food, today, uid)]);
   const tossCan = (id) => setFridge((fr) => fr.filter((c) => c.id !== id));
   const setCanRemaining = (id, grams) => setFridge((fr) => fr.map((c) => (c.id === id ? { ...c, remainingGrams: Math.max(0, Number(grams) || 0) } : c)));
   const consumeFridge = (food, grams) => setFridge((fr) => consumeFromFridge(fr, food, grams, today, fridgeDays, uid));
-  // Logging a variety-pack portion just draws its CURRENT flavor's open can down (no auto-open, no
-  // cursor change — those are the explicit Open/Finish buttons below).
+  // Logging a variety-pack portion draws its CURRENT flavor's open can down; if nothing of that
+  // flavor is open, feeding it means one was opened, so the fridge records that (consumeFromFridge
+  // only ever does this off an empty shelf). The cursor doesn't move — advancing the pack is still
+  // the explicit Finish button below.
   const consumeRotationSlot = (slotId, grams) => setFridge((fr) => {
     const item = (activeCat.ration || []).find((x) => x.id === slotId);
     const flavor = item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays) : item;
-    return flavor ? consumeFromFridge(fr, flavor, grams, today, fridgeDays) : fr;
+    return flavor ? consumeFromFridge(fr, flavor, grams, today, fridgeDays, uid) : fr;
   });
   // Explicit "Open can" for a ration slot: opens the current flavor's can (the cursor flavor for a
   // pack). Explicit "Finish can": removes the slot's open can — and for a pack, advances to the next
@@ -398,7 +401,7 @@ export function AppProvider({ children }) {
   // step with edits, symmetric so an up-then-down edit nets out.
   const reconcileFridge = (food, deltaGrams) => setFridge((fr) => (deltaGrams > 0
     ? consumeFromFridge(fr, food, deltaGrams, today, fridgeDays, uid)
-    : returnToFridge(fr, food, -deltaGrams, today, uid)));
+    : returnToFridge(fr, food, -deltaGrams, today)));
 
   // Permanent vs. logged state. Age derives from date of birth (so it never goes stale);
   // with no dob to derive it from, the cat is treated as an adult (never a fabricated

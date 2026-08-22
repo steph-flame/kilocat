@@ -68,21 +68,46 @@ describe("fridge", () => {
     expect(plan.segs[0].kind).toBe("new");
   });
 
-  it("draws down the open can and NEVER opens a new one (finishing/opening are explicit)", () => {
+  it("draws down the open can and never opens a SECOND one off it (that was the phantom-can bug)", () => {
     const fridge = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 30 }];
     // feed 40 from a 30g can: the can reads empty, the 10g excess is untracked, no new can.
     // The can is KEPT at zero rather than deleted — a "80 g" can varies both ways, so tracked-zero
     // is a prompt to confirm, not proof the can is empty (see isEmptied / the UI's "still has N g").
-    const out = consumeFromFridge(fridge, wet, 40, "2026-02-02", 3);
+    const out = consumeFromFridge(fridge, wet, 40, "2026-02-02", 3, mkId);
     expect(out).toHaveLength(1);
     expect(out[0].remainingGrams).toBe(0);
     expect(isEmptied(out[0])).toBe(true);
     expect(availableCansOf(out, wet.name, "2026-02-02", 3)).toHaveLength(0); // never fed from
     // feed 20 from a 30g can: 10 left, still just the one can
-    const out2 = consumeFromFridge([{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 30 }], wet, 20, "2026-02-02", 3);
+    const out2 = consumeFromFridge([{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 30 }], wet, 20, "2026-02-02", 3, mkId);
     expect(out2).toHaveLength(1);
     expect(out2[0].remainingGrams).toBe(10);
-    // nothing open → logging does nothing (no phantom can)
+  });
+
+  // The other half of that rule, and the one that was wrong: an EMPTY SHELF has no drift to be
+  // wrong about. The food was fed, so a can was opened — silently dropping that left the fridge
+  // claiming nothing had been opened, and the owner with no record of a can they'd just started.
+  it("opens a can when nothing of that food is open at all", () => {
+    const out = consumeFromFridge([], wet, 40, "2026-02-02", 3, mkId);
+    expect(out).toHaveLength(1);
+    expect(out[0].openedDate).toBe("2026-02-02");
+    expect(out[0].remainingGrams).toBe(40); // an 80 g can with tonight's 40 g gone
+    expect(availableCansOf(out, wet.name, "2026-02-02", 3)).toHaveLength(1);
+  });
+
+  it("but NOT when a can of it is sitting at zero waiting to be confirmed", () => {
+    // that can is probably still the one being fed from — opening another is the phantom bug
+    const emptied = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 0 }];
+    expect(consumeFromFridge(emptied, wet, 40, "2026-02-02", 3, mkId)).toHaveLength(1);
+  });
+
+  it("opens as many cans as the meal actually needed", () => {
+    const out = consumeFromFridge([], wet, 200, "2026-02-02", 3, mkId); // 80 g cans
+    expect(out).toHaveLength(3);
+    expect(out.reduce((s, c) => s + c.remainingGrams, 0)).toBeCloseTo(40, 5); // 240 opened, 200 fed
+  });
+
+  it("opens nothing without an id factory, rather than producing a can with no id", () => {
     expect(consumeFromFridge([], wet, 40, "2026-02-02", 3)).toEqual([]);
   });
 
@@ -97,27 +122,43 @@ describe("fridge", () => {
     expect(consumeFromFridge(fridge, dry, 40, "2026-02-02", 3)).toEqual([]);
   });
 
-  it("returnToFridge refills the newest can up to a full can, then re-opens one for the rest", () => {
+  it("returnToFridge refills the newest can up to full, and drops what won't fit", () => {
     const fridge = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 50 }]; // canGrams 80, room 30
-    const out = returnToFridge(fridge, wet, 45, "2026-02-03", mkId);
-    // 30 tops the existing can to 80; the remaining 15 re-opens a fresh can
-    expect(out).toHaveLength(2);
-    const topped = out.find((c) => c.openedDate === "2026-02-01");
-    const fresh = out.find((c) => c.openedDate === "2026-02-03");
-    expect(topped.remainingGrams).toBe(80);
-    expect(fresh.remainingGrams).toBe(15);
+    const out = returnToFridge(fridge, wet, 45, "2026-02-03");
+    // 30 tops the existing can up; the other 15 has no can to go back into and is dropped rather
+    // than conjuring one — food only goes back where food came from
+    expect(out).toHaveLength(1);
+    expect(out[0].remainingGrams).toBe(80);
+  });
+
+  // Her bug, in the two steps that produced it: log a wet meal with an empty fridge, then delete it.
+  // The fridge used to do nothing on the way in and invent an open can on the way out.
+  it("logging then deleting a meal on an empty shelf leaves the fridge as it started", () => {
+    const opened = consumeFromFridge([], wet, 40, "2026-02-02", 3, mkId);
+    expect(opened).toHaveLength(1);          // the can she opened is recorded...
+    expect(opened[0].remainingGrams).toBe(40);
+    const undone = returnToFridge(opened, wet, 40, "2026-02-02");
+    expect(undone).toHaveLength(1);          // ...and undoing the meal fills it back up
+    expect(undone[0].remainingGrams).toBe(80);
+  });
+
+  it("never invents a can out of nothing, however the return arrives", () => {
+    expect(returnToFridge([], wet, 40, "2026-02-02")).toEqual([]);
+    // the can it came from was finished in between: the grams are simply gone, not re-materialised
+    const finished = finishOpenCan(consumeFromFridge([], wet, 40, "2026-02-02", 3, mkId), wet, "2026-02-02", 3);
+    expect(returnToFridge(finished, wet, 40, "2026-02-02")).toEqual([]);
   });
 
   it("consume then return the same grams nets out (an edit up-then-down leaves stock unchanged)", () => {
     const start = [{ ...openCan(wet, "2026-02-01", mkId), remainingGrams: 60 }];
     const afterDraw = consumeFromFridge(start, wet, 25, "2026-02-01", 3, mkId); // 60 → 35
-    const restored = returnToFridge(afterDraw, wet, 25, "2026-02-01", mkId);     // 35 → 60
+    const restored = returnToFridge(afterDraw, wet, 25, "2026-02-01");           // 35 → 60
     const total = (fr) => fr.reduce((s, c) => s + c.remainingGrams, 0);
     expect(total(restored)).toBeCloseTo(total(start), 5);
   });
 
   it("returnToFridge is a no-op for non-canned foods", () => {
-    expect(returnToFridge([], dry, 40, "2026-02-01", mkId)).toEqual([]);
+    expect(returnToFridge([], dry, 40, "2026-02-01")).toEqual([]);
   });
 
   it("cansOf filters by name, case-insensitively", () => {

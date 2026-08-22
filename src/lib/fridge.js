@@ -145,11 +145,18 @@ export function planSlotDraw(food, kcal, date, fridge, fridgeDays, maxSegs = 12)
 }
 
 // Put `grams` of `food` back into the fridge — the reverse of consume, used when a logged wet meal
-// is edited DOWN (you fed less than first recorded). Refills matching open cans newest-first up to a
-// full can each; any remainder re-opens a can holding it. No provenance is tracked, so this restores
-// stock rather than the exact physical can, which is the best that's possible — and symmetric with
-// consume so an edit up-then-back-down nets out. No-op for non-canned foods.
-export function returnToFridge(fridge, food, grams, today, makeId) {
+// is edited DOWN or deleted. Refills matching open cans newest-first, up to a full can each. No
+// provenance is tracked, so this restores stock rather than the exact physical can, which is the
+// best that's possible. No-op for non-canned foods.
+//
+// IT NEVER CREATES A CAN, and that's the whole point of this note. It used to: any remainder that
+// didn't fit re-opened a can to hold it, from a comment claiming symmetry with consume that stopped
+// being true the day consume was changed to never open one. So deleting a logged meal that the
+// fridge had no record of — because nothing was open when it was logged — conjured an open can
+// holding exactly the deleted amount, out of nothing. Now it can only put food back where food
+// came from; a return with nowhere to go is dropped, which is the honest answer when the can it
+// came from has since been finished or tossed.
+export function returnToFridge(fridge, food, grams, today) {
   let give = num(grams);
   if (!(give > 0) || !isCanned(food)) return fridge || [];
   const canGrams = num(food.gramsPerUnit);
@@ -162,13 +169,7 @@ export function returnToFridge(fridge, food, grams, today, makeId) {
     c.remainingGrams = round2(num(c.remainingGrams) + put);
     give -= put;
   }
-  let guard = 0;
-  while (give > 0.01 && canGrams > 0 && guard++ < 50) {
-    const put = Math.min(give, canGrams);
-    out.push({ id: makeId(), ...foodFieldsOf(food), openedDate: today, canGrams, remainingGrams: round2(put) });
-    give -= put;
-  }
-  return out;
+  return out; // anything with nowhere to go is dropped — see the banner
 }
 
 // A variety pack is fed IN ORDER: you feed the open can until it's finished, then open the next
@@ -216,9 +217,11 @@ export function resolveRotationsWithFridge(items, date, fridge, fridgeDays) {
 }
 
 // Draw `grams` of `food` DOWN from its open can(s) when a meal is logged — oldest good can first,
-// floored at zero. It NEVER opens a new can and never removes one: opening and finishing cans are
-// explicit user actions (see the Open / Finish buttons), because gram math drifts from the real can
-// and auto-opening spawned phantom second cans.
+// floored at zero. It never REMOVES a can, and it opens one only when there was nothing of that
+// food open to draw from at all (see below): finishing a can stays an explicit user action, because
+// gram math drifts from the real can and auto-opening off a drained can spawned phantom second
+// cans. Opening off NOTHING has no drift to be wrong about — the food was fed, so a can was
+// opened — and leaving it out meant a wet meal logged with an empty fridge vanished silently.
 //
 // A can that reaches zero is KEPT, at zero, rather than deleted. A "80 g" can isn't 80 g — fill
 // varies both ways, so tracked-zero means "this should be about empty", not "this is empty". Delete
@@ -228,7 +231,7 @@ export function resolveRotationsWithFridge(items, date, fridge, fridgeDays) {
 // offers "finish it" or "actually, there's N g left" (setCanRemaining). availableCansOf still
 // excludes it, so nothing is planned or drawn from a can that reads empty.
 // No-op for non-canned foods or when nothing's open.
-export function consumeFromFridge(fridge, food, grams, today, fridgeDays) {
+export function consumeFromFridge(fridge, food, grams, today, fridgeDays, makeId) {
   let need = num(grams);
   if (!(need > 0) || !isCanned(food)) return fridge || [];
   const out = (fridge || []).map((c) => ({ ...c }));
@@ -239,6 +242,19 @@ export function consumeFromFridge(fridge, food, grams, today, fridgeDays) {
     if (need <= 0.01) break;
     const take = Math.min(need, num(c.remainingGrams));
     c.remainingGrams = round2(num(c.remainingGrams) - take);
+    need -= take;
+  }
+  // NOTHING of this food was open, so a can got opened in the kitchen to feed this meal — the
+  // fridge should say so. This is the one case the old blanket "never open" rule got wrong, and
+  // it's also the one case that can't be ambiguous: with no can to draw from and none sitting at
+  // zero awaiting confirmation, there is no can whose real contents this could be coming out of.
+  // The guard is what keeps the phantom-second-can bug dead — see the note above.
+  const nothingWasOpen = good.length === 0 && emptiedCansOf(out, food.name).length === 0;
+  const canGrams = num(food.gramsPerUnit);
+  let guard = 0;
+  while (need > 0.01 && nothingWasOpen && makeId && canGrams > 0 && guard++ < 50) {
+    const take = Math.min(need, canGrams);
+    out.push({ id: makeId(), ...foodFieldsOf(food), openedDate: today, canGrams, remainingGrams: round2(canGrams - take) });
     need -= take;
   }
   return out; // emptied cans stay, at zero, for the owner to confirm — see the note above

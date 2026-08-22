@@ -298,9 +298,10 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
         ? { treatCount: num(treats), kcalPerTreat: num(picked.kcalPerUnit), gramsPerTreat: num(picked.gramsPerUnit), unitLabel: unitWord }
         : {};
       intakeLog.add({ ...manualEntryStamp(viewedDate), kcal: r1(num(kcal)), grams: num(grams) || null, name: name || null, kcalPerG: kcalG > 0 ? kcalG : null, ...treatFields });
-      // Hybrid fridge: logging a wet meal today draws its can(s) down (opening a new one if needed),
-      // the same as "Log tonight's bowl" does. Match the typed/picked name to a saved food for the
-      // can size; deduct grams (derived from kcal when only kcal was entered). No-op for dry/unknown.
+      // Hybrid fridge: logging a wet meal today draws its open can down, and opens one if none of
+      // that food is open — the same as "Log tonight's bowl" does. Match the typed/picked name to a
+      // saved food for the can size; deduct grams (derived from kcal when only kcal was entered).
+      // No-op for dry/unknown.
       if (isToday) {
         const food = library.foods.find((f) => (f.name || "").trim().toLowerCase() === (name || "").trim().toLowerCase());
         const g = num(grams) > 0 ? num(grams) : (kcalG > 0 ? num(kcal) / kcalG : 0);
