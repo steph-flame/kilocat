@@ -10,7 +10,7 @@ import { isCanned, resolveRotationsWithFridge, availableCansOf, planSlotDraw, em
 import { isRotating } from "../lib/rotation.js";
 import { transitionSteps, inferTransitionDay, clampDays, shareOfNew } from "../lib/transition.js";
 import { WEIGH_METHODS, DEFAULT_METHOD, WEIGH_SOURCES } from "../lib/expenditure.js";
-import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight, smallLabel, toDisplaySmall } from "../lib/units.js";
+import { toDisplayWeight, fromDisplayWeight, weightLabel, fmtWeight } from "../lib/units.js";
 import { hasCollar, collarWorn } from "../lib/collar.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import FoodSearch from "../components/FoodSearch.jsx";
@@ -712,7 +712,7 @@ function WeightTab({ weightLog, viewedDate, isDemo, isToday, unit, collar, expSe
           {wearsCollar && (
             <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 10, fontFamily: TYPE.mono, fontSize: 11.5, color: A.muted, cursor: "pointer" }}>
               <input type="checkbox" checked={collarOn} onChange={(e) => setCollarOn(e.target.checked)} style={{ accentColor: A.good, width: 15, height: 15 }} />
-              Collar on ({Number(toDisplaySmall(collar.grams, unit).toFixed(1))} {smallLabel(unit)} comes off)
+              Collar on ({Number(num(collar.grams).toFixed(1))} g comes off)
             </label>
           )}
         </Card>

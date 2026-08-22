@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { num } from "../lib/util.js";
-import { smallLabel, toDisplaySmall, fromDisplaySmall } from "../lib/units.js";
 
 const catLabel = (c) => c.name || "unnamed cat";
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
@@ -13,7 +12,7 @@ function Card({ children, style }) {
 }
 
 export default function CatsPage() {
-  const { today, fridgeDays, unit, catsSummary, activeCatId, switchCat, addCat, updateCatProfile, deleteCat, clearCatHistory } = useApp();
+  const { today, fridgeDays, catsSummary, activeCatId, switchCat, addCat, updateCatProfile, deleteCat, clearCatHistory } = useApp();
   const [expandedId, setExpandedId] = useState(null);
   const realCats = catsSummary.filter((c) => !c.demo);
   const demoRow = catsSummary.find((c) => c.demo);
@@ -63,7 +62,7 @@ export default function CatsPage() {
                       <span style={{ fontSize: 13, color: A.ink }}>Spayed / neutered</span>
                       <Toggle value={c.neutered} onChange={(v) => updateCatProfile(c.id, { neutered: v })} label={`${catLabel(c)} is spayed or neutered`} />
                     </div>
-                    <CollarFields cat={c} unit={unit} today={today} onChange={(collar) => updateCatProfile(c.id, { collar })} />
+                    <CollarFields cat={c} today={today} onChange={(collar) => updateCatProfile(c.id, { collar })} />
                     <div style={{ borderTop: `1px solid ${A.hairline}`, paddingTop: 12, display: "flex", gap: 8 }}>
                       <button onClick={() => clearHistory(c)} style={{ border: `1px solid ${A.caution.border}`, color: A.caution.text, background: "transparent", borderRadius: 8, padding: "5px 10px", fontFamily: TYPE.mono, fontSize: 11, cursor: "pointer" }}>clear history…</button>
                       <button onClick={() => removeCat(c)} style={{ background: A.danger.bg, color: A.danger.text, border: "none", borderRadius: 8, padding: "5px 10px", fontFamily: TYPE.mono, fontSize: 11, cursor: "pointer" }}>delete cat…</button>
@@ -102,24 +101,25 @@ function Toggle({ value, onChange, label: aria }) {
   );
 }
 
-// What to take off a weigh-in when the collar was on. Entered in the unit system's small
-// denomination (g / oz) but stored in grams, like every other mass here — see lib/units.js.
+// What to take off a weigh-in when the collar was on. ALWAYS GRAMS, whatever the household weighs
+// the cat in: small masses in this app are food, and food is logged in grams for everyone. The
+// weight unit is about the cat, and a collar is not the cat.
 //
 // There's no "does this cat wear a collar" checkbox on purpose: a weight of nothing IS no collar,
 // and two controls that can disagree about the same fact is one control too many. Blank leaves the
 // per-weigh-in checkbox out of the Log page entirely.
-function CollarFields({ cat, unit, today, onChange }) {
+function CollarFields({ cat, today, onChange }) {
   const stored = cat.collar || { grams: 0, defaultOn: true, since: "", until: "" };
-  const asDisplay = (g) => (num(g) > 0 ? String(Number(toDisplaySmall(g, unit).toFixed(1))) : "");
+  const asDisplay = (g) => (num(g) > 0 ? String(Number(num(g).toFixed(1))) : "");
   const [value, setValue] = useState(asDisplay(stored.grams));
-  useEffect(() => { setValue(asDisplay(stored.grams)); }, [cat.id, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setValue(asDisplay(stored.grams)); }, [cat.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const on = num(stored.grams) > 0;
   // Setting up a collar almost always means one is going ON, now — so the start date defaults to
   // today the moment a weight first appears. The alternative default (no date) would silently
   // restate every weigh-in the cat ever had as collared, which is the opposite of what anyone
   // typing a number here is asking for. It stays editable for the owner who sets this up late.
   const setGrams = (raw) => {
-    const grams = raw === "" ? "" : fromDisplaySmall(num(raw), unit);
+    const grams = raw === "" ? "" : num(raw);
     onChange({ ...stored, grams, since: num(grams) > 0 && !stored.since ? today : stored.since });
   };
   return (
@@ -129,9 +129,9 @@ function CollarFields({ cat, unit, today, onChange }) {
         <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4, flex: "none" }}>
           <input type="number" inputMode="decimal" min="0" step="1" value={value} placeholder="—"
             onChange={(e) => { setValue(e.target.value); setGrams(e.target.value); }}
-            aria-label={`${catLabel(cat)}'s collar weight in ${smallLabel(unit)}`}
+            aria-label={`${catLabel(cat)}'s collar weight in grams`}
             style={{ width: 58, textAlign: "right", fontFamily: TYPE.mono, fontSize: 14, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, padding: "3px 0" }} />
-          <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{smallLabel(unit)}</span>
+          <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>g</span>
         </span>
       </label>
       {on && (

@@ -83,16 +83,19 @@ describe("Cats page — collar setting", () => {
     expect(saved.cats.c1.profile.collar.grams).toBe(40);
   });
 
-  // Stored in grams either way — an imperial household enters ounces and the model never sees them.
-  it("takes ounces from an lb household and still stores grams", async () => {
+  // GRAMS, even for a household that weighs the cat in pounds. Small masses in this app are food,
+  // and food is logged in grams for everyone — the weight unit is about the cat, and a collar
+  // isn't the cat. Entering one in ounces meant doing arithmetic to reconcile it with every other
+  // gram figure on screen.
+  it("is in grams for an lb household too", async () => {
     window.localStorage.setItem("catration_v1", JSON.stringify(seed("lb")));
     await mount();
     openProfile();
-    const field = screen.getByLabelText(/collar weight in oz/i);
-    await act(async () => { fireEvent.change(field, { target: { value: "1.5" } }); });
+    expect(screen.queryByLabelText(/collar weight in oz/i)).toBeNull();
+    const field = screen.getByLabelText(/collar weight in grams/i);
+    await act(async () => { fireEvent.change(field, { target: { value: "40" } }); });
     await flushSave();
-    const saved = JSON.parse(window.localStorage.getItem("catration_v1"));
-    expect(saved.cats.c1.profile.collar.grams).toBeCloseTo(42.5, 0);
+    expect(JSON.parse(window.localStorage.getItem("catration_v1")).cats.c1.profile.collar.grams).toBe(40);
   });
 
   // A cat acquires a collar; it doesn't retroactively always have had one. Entering a weight has to
@@ -143,10 +146,10 @@ describe("Cats page — collar setting", () => {
     expect(JSON.parse(window.localStorage.getItem("catration_v1")).cats.c1.profile.collar.until).toBe("");
   });
 
-  it("shows an existing collar back in the household's own unit", async () => {
+  it("shows a stored collar back as the grams it was stored as", async () => {
     window.localStorage.setItem("catration_v1", JSON.stringify(seed("lb", { grams: 42.5, defaultOn: true })));
     await mount();
     openProfile();
-    expect(screen.getByLabelText(/collar weight in oz/i).value).toBe("1.5");
+    expect(screen.getByLabelText(/collar weight in grams/i).value).toBe("42.5");
   });
 });
