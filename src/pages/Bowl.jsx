@@ -335,6 +335,10 @@ function AmountRow({ left, grams }) {
 function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFood, saved }) {
   const { today, fridge, fridgeDays } = useApp();
   const [showDetails, setShowDetails] = useState(false);
+  // The flavor list is an EDITOR, not a readout — a 6-flavor pack pushed the rest of the ration off
+  // the screen for the sake of a list that's right for weeks at a time. Collapsed by default; the
+  // row's own header still names today's flavor and the count, and "next up" stays visible below.
+  const [showFlavors, setShowFlavors] = useState(false);
   const [dragIdx, setDragIdx] = useState(null); // flavor being dragged to reorder
   const [gEdit, setGEdit] = useState(null); // grams being typed for a fixed food (kcal follows)
   const splitMode = f.splitMode || "share";
@@ -367,7 +371,9 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
     if (!next || next.length <= 1) { const { rotation, rotateOff, ...rest } = x; return { ...rest, ...(next && next[0] ? foodFieldsOf(next[0]) : {}) }; }
     return { ...x, rotation: next };
   }));
-  const startRotation = () => setMembers([foodFieldsOf(f), foodFieldsOf(blankFood())]); // seed with the current food + one empty slot
+  // Seed with the current food + one empty slot, and OPEN the editor: the new slot is blank and
+  // needs filling in, so collapsing here would make ↻ look like it did nothing.
+  const startRotation = () => { setMembers([foodFieldsOf(f), foodFieldsOf(blankFood())]); setShowFlavors(true); };
   const togglePause = () => patch({ rotateOff: !f.rotateOff }); // non-destructive: keeps every flavor
   const addFlavor = () => setMembers((cur) => [...cur, foodFieldsOf(blankFood())]);
   const removeFlavor = (idx) => setMembers((cur) => cur.filter((_, i) => i !== idx));
@@ -421,9 +427,14 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
                 border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? c.bg : "transparent", color: on ? c.text : A.muted, cursor: "pointer" }}>{lbl}</button>
           );
         })}
-        {!isRot && (
+        {!isRot ? (
           <button onClick={() => setShowDetails((s) => !s)} style={{ marginLeft: "auto", fontFamily: TYPE.mono, fontSize: 10, color: showDetails ? A.ink : A.muted, background: "none", border: "none", cursor: "pointer" }}>
             {showDetails ? "details ▾" : "details ▸"}
+          </button>
+        ) : (
+          <button onClick={() => setShowFlavors((s) => !s)} aria-expanded={showFlavors} aria-label="Show or hide the flavor list"
+            style={{ marginLeft: "auto", fontFamily: TYPE.mono, fontSize: 10, color: showFlavors ? A.ink : A.muted, background: "none", border: "none", cursor: "pointer" }}>
+            {showFlavors ? "flavors ▾" : `flavors (${f.rotation.length}) ▸`}
           </button>
         )}
       </div>
@@ -467,10 +478,12 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
         <AmountRow left={`absorbs what's left · ${r0(row.pct)}% · ${r0(row.kcal)} kcal`} grams={row.grams} />
       )}
 
-      {isRot && (
+      {/* Collapsed, this keeps just the one line worth glancing at — what's coming — and drops the
+          editor. A paused pack with the editor shut has nothing to say, so the panel goes entirely. */}
+      {isRot && (showFlavors || rotating) && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${A.cardBorder}` }}>
-          <div style={label({ fontSize: 9, marginBottom: 4 })}>Flavors · fed in this order</div>
-          {f.rotation.map((m, idx) => (
+          {showFlavors && <div style={label({ fontSize: 9, marginBottom: 4 })}>Flavors · fed in this order</div>}
+          {showFlavors && f.rotation.map((m, idx) => (
             <div key={idx}
               onDragOver={(e) => { if (dragIdx != null) e.preventDefault(); }}
               onDrop={(e) => { e.preventDefault(); if (dragIdx != null) moveFlavor(dragIdx, idx); setDragIdx(null); }}
@@ -489,15 +502,19 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
               <button onClick={() => removeFlavor(idx)} aria-label="Remove flavor" style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 14 }}>×</button>
             </div>
           ))}
-          <button onClick={addFlavor} style={{ marginTop: 4, fontFamily: TYPE.mono, fontSize: 11, color: A.good, background: "none", border: "none", cursor: "pointer" }}>+ add flavor</button>
+          {showFlavors && (
+            <button onClick={addFlavor} style={{ marginTop: 4, fontFamily: TYPE.mono, fontSize: 11, color: A.good, background: "none", border: "none", cursor: "pointer" }}>+ add flavor</button>
+          )}
           {rotating && (
-            <p style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.body, marginTop: 8, lineHeight: 1.5 }}>
+            <p style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.body, marginTop: showFlavors ? 8 : 0, lineHeight: 1.5 }}>
               Next up: <b style={{ color: A.ink }}>{upcomingFlavors(f, activeIdx < 0 ? 0 : activeIdx, 3).join(" → ")}</b>{f.rotation.length > 3 ? " → …" : ""}
             </p>
           )}
-          <p style={{ fontSize: 10.5, color: A.muted, marginTop: 6, lineHeight: 1.45 }}>
-            Each flavor pulls its energy &amp; analysis from your saved foods — pick from the list; drag the ⠿ handle to reorder. The bowl works through the pack <b>in order, by the can</b>: it feeds the open can until it's empty, then opens the next flavor — so a day may finish one can and open the next. <b>Tonight's bowl on the Log</b> shows exactly which can(s) to use. Drop to one flavor to stop rotating; the ↻ button pauses without losing the list.
-          </p>
+          {showFlavors && (
+            <p style={{ fontSize: 10.5, color: A.muted, marginTop: 6, lineHeight: 1.45 }}>
+              Each flavor pulls its energy &amp; analysis from your saved foods — pick from the list; drag the ⠿ handle to reorder. The bowl works through the pack <b>in order, by the can</b>: it feeds the open can until it's empty, then opens the next flavor — so a day may finish one can and open the next. <b>Tonight's bowl on the Log</b> shows exactly which can(s) to use. Drop to one flavor to stop rotating; the ↻ button pauses without losing the list.
+            </p>
+          )}
         </div>
       )}
 
