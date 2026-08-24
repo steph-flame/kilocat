@@ -21,7 +21,7 @@ const OWNER = {
   fridge: "fridge",
   cans: "fridge",
   trend: "trend", expenditure: "trend", "expenditure-classic": "trend",
-  settings: "more", cats: "more",
+  settings: "more", cats: "more", foods: "more",
 };
 
 // Shared with the desktop Sidebar so both nav surfaces highlight consistently.

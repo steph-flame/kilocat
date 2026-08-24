@@ -49,7 +49,7 @@ function rationCanOptions(items) {
 
 export default function FridgePage() {
   const { p, ration, library, fridge, fridgeDays, openFridgeCan, tossCan, setCanRemaining, today,
-    cupboard, setStockOf, bumpStock, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase } = useApp();
+    cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase } = useApp();
   const name = p?.name || "your cat";
   const [pick, setPick] = useState("");
 
@@ -68,7 +68,7 @@ export default function FridgePage() {
           <p style={{ ...cap, margin: 0 }}>What {name} has left unopened, and what's open and ticking. Counting the cupboard is optional — but it's what lets a variety pack open the flavour you have most of, so a case finishes evenly instead of ending on four of the same.</p>
         </div>
 
-        <CupboardCard {...{ options, cupboard, setStockOf, bumpStock, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase, ration, library, openFridgeCan }} />
+        <CupboardCard {...{ options, cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase, ration, library, openFridgeCan }} />
 
         {/* open a can */}
         <Card className="span-all">
@@ -129,15 +129,19 @@ export default function FridgePage() {
 // The unopened half. One row per wet flavour the ration knows about, with its count — plus any
 // flavour that has stock but has since left the ration, so cans can't go invisible just because
 // the plan changed.
-function CupboardCard({ options, cupboard, setStockOf, bumpStock, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase, ration, library, openFridgeCan }) {
+function CupboardCard({ options, cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase, ration, library, openFridgeCan }) {
   const [editing, setEditing] = useState(null); // case id whose mix is open for editing
   const [pick, setPick] = useState("");         // a flavour being added that isn't on the list yet
   // Every flavour worth showing: the ration's, then anything stocked that isn't in it any more.
-  const rows = [...options];
+  // `usable` = the app knows enough about this to feed it — either it's a flavour of the ration
+  // (which carries its own energy and can size) or it's in the saved foods. A cupboard row that is
+  // neither is just a name with a number beside it: countable, but not feedable.
+  const inLibrary = new Set((library.foods || []).map((f) => (f.name || "").trim().toLowerCase()));
+  const rows = [...options].map((f) => ({ ...f, usable: true }));
   const known = new Set(options.map((f) => (f.name || "").trim().toLowerCase()));
   for (const r of cupboard) {
     const k = (r.name || "").trim().toLowerCase();
-    if (k && !known.has(k)) { known.add(k); rows.push({ name: r.name, type: "wet", orphan: true }); }
+    if (k && !known.has(k)) { known.add(k); rows.push({ name: r.name, type: "wet", orphan: true, usable: inLibrary.has(k) }); }
   }
   const total = rows.reduce((n, f) => n + (stockOf(cupboard, f.name) || 0), 0);
   // Which flavour the rotation will reach for next — the tallest pile. Shown so the rule is
@@ -171,6 +175,14 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, cases, addCase
                       {n === 0 ? "none left" : "opens next"}
                     </div>
                   )}
+                  {/* A name typed in here is only a name. It counts fine, but nothing can be fed or
+                      rationed until it's a real food with an energy on it — so say so, and hand the
+                      name to the page that does that rather than making it be retyped. */}
+                  {!f.usable && (
+                    <a href={`#/foods?new=${encodeURIComponent(f.name)}`} style={{ fontFamily: TYPE.mono, fontSize: 9.5, color: A.caution.text, textDecoration: "none" }}>
+                      not in your foods · add it ›
+                    </a>
+                  )}
                 </div>
                 <button onClick={() => bumpStock(f.name, -1)} disabled={!n} aria-label={`One fewer ${f.name}`}
                   style={{ ...stepBtn, color: n ? A.muted : A.cardBorder, cursor: n ? "pointer" : "default" }}>−</button>
@@ -179,6 +191,10 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, cases, addCase
                   aria-label={`cans of ${f.name} in the cupboard`}
                   style={{ width: 40, fontFamily: TYPE.mono, fontSize: 15, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "center", padding: "1px 2px", flex: "none" }} />
                 <button onClick={() => bumpStock(f.name, 1)} aria-label={`One more ${f.name}`} style={{ ...stepBtn, color: A.muted }}>+</button>
+                {/* A count of 0 is a real answer — "I'm out, keep watching this" — so it can't
+                    double as "forget it". Removing the row needs its own control. */}
+                <button onClick={() => forgetFlavor(f.name)} aria-label={`Stop tracking ${f.name}`} title="Remove from the cupboard"
+                  style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 15, flex: "none", padding: "0 0 0 2px" }}>×</button>
               </div>
             );
           })}

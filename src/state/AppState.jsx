@@ -23,7 +23,7 @@ import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../
 import { toPortableExport, toPortableImport, findCredentialFields } from "../lib/portableExport.js";
 import { openCan, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, nextPackIndex } from "../lib/fridge.js";
 import { hasRotation } from "../lib/rotation.js";
-import { normalizeCupboard, normalizeCases, setStock, addStock, addItems, takeOne, blankCase } from "../lib/cupboard.js";
+import { normalizeCupboard, normalizeCases, setStock, addStock, addItems, takeOne, forgetStock, blankCase } from "../lib/cupboard.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -388,6 +388,7 @@ export function AppProvider({ children }) {
   const setCupboard = (updater) => updateActiveCat((cat) => ({ ...cat, cupboard: typeof updater === "function" ? updater(cat.cupboard || []) : updater, stateModAt: Date.now() }));
   const setStockOf = (name, count) => setCupboard((c) => setStock(c, name, count));
   const bumpStock = (name, delta) => setCupboard((c) => addStock(c, name, delta));
+  const forgetFlavor = (name) => setCupboard((c) => forgetStock(c, name));
   const setCases = (updater) => updateActiveCat((cat) => ({ ...cat, cases: typeof updater === "function" ? updater(cat.cases || []) : updater, stateModAt: Date.now() }));
   const addCase = (label, items = []) => { const c = { ...blankCase(label), items }; setCases((cs) => [...cs, c]); return c.id; };
   const removeCase = (id) => setCases((cs) => cs.filter((c) => c.id !== id));
@@ -710,7 +711,7 @@ export function AppProvider({ children }) {
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
     fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan,
-    cupboard, setStockOf, bumpStock, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase,
+    cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure, intent, weighOffsets, collar,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,

@@ -112,6 +112,42 @@ describe("Cans page — cupboard", () => {
     expect(screen.getByLabelText(/Add a can of this flavour/i).disabled).toBe(true);
   });
 
+  // A count of 0 is a real answer — "I'm out, keep watching this" — so it can't double as
+  // "forget it". Without its own control a row typed by mistake was permanent.
+  it("removes a flavour outright, which zero deliberately doesn't do", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Typo Flavour", count: 2 }])));
+    await mount();
+    expect(countBox("Typo Flavour").value).toBe("2");
+    await act(async () => { fireEvent.change(countBox("Typo Flavour"), { target: { value: "0" } }); });
+    expect(countBox("Typo Flavour").value).toBe("0"); // still listed, still watched
+    await act(async () => { fireEvent.click(screen.getByLabelText(/stop tracking Typo Flavour/i)); });
+    expect(screen.queryByLabelText(/cans of Typo Flavour in the cupboard/i)).toBeNull();
+  });
+
+  it("won't let a ration flavour be lost by removing it", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Duck", count: 3 }])));
+    await mount();
+    await act(async () => { fireEvent.click(screen.getByLabelText(/stop tracking Duck/i)); });
+    // the count is gone, but the flavour is still in the pack, so it stays on the list to re-count
+    expect(countBox("Duck").value).toBe("");
+  });
+
+  // A name typed into the cupboard is only a name — nothing can be fed or rationed until it's a
+  // real food. Say so, and hand the name over rather than making it be retyped.
+  it("points an unsaved flavour at the Foods page, carrying its name", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Fancy Rabbit", count: 1 }])));
+    const { container } = await mount();
+    const link = [...container.querySelectorAll("a")].find((a) => /add it/.test(a.textContent));
+    expect(link).toBeTruthy();
+    expect(link.getAttribute("href")).toBe("#/foods?new=Fancy%20Rabbit");
+  });
+
+  it("says nothing of the sort about a flavour that IS a saved food", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Duck", count: 3 }])));
+    const { container } = await mount();
+    expect(container.textContent).not.toMatch(/not in your foods/);
+  });
+
   it("keeps showing a flavour that has stock but has left the ration", async () => {
     window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Discontinued Rabbit", count: 3 }])));
     const { container } = await mount();

@@ -43,7 +43,7 @@ function RowHead({ title, right }) {
 
 export default function MorePage() {
   const {
-    p, catsSummary, eraseAll, fridgeDays, setFridgeDays, exportData, importData,
+    p, catsSummary, eraseAll, fridgeDays, setFridgeDays, exportData, importData, library,
     unit, setUnit, estimator, setEstimator, intakeMethod, setIntakeMethod,
     litterRobot, connectLitterRobotStart, connectLitterRobotFinish, disconnectLitterRobot, syncLitterRobotNow,
     setPetMapping, setRobotMapping,
@@ -95,6 +95,12 @@ export default function MorePage() {
               </div>
             ))}
           </div>
+        </Card>
+
+        {/* foods — the shared library, now a place rather than a side effect of planning */}
+        <Card>
+          <RowHead title="Foods" right={<a href="#/foods" style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.good, textDecoration: "none" }}>manage ›</a>} />
+          <p style={{ fontSize: 12, color: A.muted, margin: "6px 0 0" }}>{library.foods.length} saved — what's offered when you build a ration or stock the cupboard. Shared by every cat.</p>
         </Card>
 
         {/* litter-robot (reused classic flow) */}

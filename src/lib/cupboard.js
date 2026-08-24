@@ -75,6 +75,14 @@ export function takeOne(cupboard, name) {
   return have == null ? normalizeCupboard(cupboard) : setStock(cupboard, name, Math.max(0, have - 1));
 }
 
+// Forget a flavor completely — not "I have none of it" (that's a count of 0, a real answer that
+// keeps it on the list and in the rotation), but "stop tracking this at all". A row typed by
+// mistake, or a food that's out of the rotation for good, otherwise had no way out.
+export function forgetStock(cupboard, name) {
+  const k = keyOf(name);
+  return normalizeCupboard(cupboard).filter((r) => keyOf(r.name) !== k);
+}
+
 // WHICH FLAVOR TO OPEN NEXT: the index of the member with the most cans left, ties going to list
 // order so a fully-even cupboard behaves exactly like the old plain rotation. Returns -1 when the
 // cupboard can't answer — no member tracked, or every tracked member at zero — and the caller falls
