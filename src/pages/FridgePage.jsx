@@ -84,7 +84,7 @@ export default function FridgePage() {
             </div>
           )}
           <div style={{ border: `1px solid ${A.cardBorder}`, borderRadius: 12, padding: 8 }}>
-            <FoodSearch value={pick} search={library.search}
+            <FoodSearch value={pick} search={library.search} ariaLabel="Open a can of this food"
               onChangeName={setPick}
               onPick={(food) => { if (isCanned(food)) { openFridgeCan(food); setPick(""); } }} />
           </div>
@@ -131,6 +131,7 @@ export default function FridgePage() {
 // the plan changed.
 function CupboardCard({ options, cupboard, setStockOf, bumpStock, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase, ration, library, openFridgeCan }) {
   const [editing, setEditing] = useState(null); // case id whose mix is open for editing
+  const [pick, setPick] = useState("");         // a flavour being added that isn't on the list yet
   // Every flavour worth showing: the ration's, then anything stocked that isn't in it any more.
   const rows = [...options];
   const known = new Set(options.map((f) => (f.name || "").trim().toLowerCase()));
@@ -184,6 +185,24 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, cases, addCase
         </div>
       )}
 
+      {/* A can of something that has never been in the ration and has never been stocked can't
+          appear on the list above, because the list is built FROM those two things. Buying one
+          single can of a new flavour is completely ordinary, so it needs its own way in — the same
+          way "Open a can" below takes any wet food. A typed name that isn't in your saved foods
+          still works: the cupboard stores a name and a count, and needs nothing else. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+        <div style={{ flex: 1, minWidth: 0, border: `1px solid ${A.cardBorder}`, borderRadius: 10, padding: "4px 8px" }}>
+          <FoodSearch value={pick} search={library.search} ariaLabel="Add a flavour to the cupboard"
+            onChangeName={setPick}
+            onPick={(food) => { bumpStock(food.name, 1); setPick(""); }} />
+        </div>
+        <button onClick={() => { if (pick.trim()) { bumpStock(pick.trim(), 1); setPick(""); } }} disabled={!pick.trim()}
+          aria-label="Add a can of this flavour"
+          style={{ fontFamily: TYPE.mono, fontSize: 11, borderRadius: 8, padding: "6px 10px", border: "none", flex: "none",
+            background: pick.trim() ? A.good : A.track, color: pick.trim() ? A.card : A.muted, cursor: pick.trim() ? "pointer" : "default" }}>+ can</button>
+      </div>
+      <p style={{ fontSize: 11, color: A.muted, margin: "4px 0 0" }}>Bought a single can of something new? Add it here — it doesn't have to be in the ration yet.</p>
+
       {/* cases: a mix you buy by the box, added to the pool above */}
       <div style={{ borderTop: `1px dashed ${A.cardBorder}`, marginTop: 12, paddingTop: 10 }}>
         <div style={label({ fontSize: 9, marginBottom: 6 })}>cases · buy by the box</div>
@@ -209,8 +228,10 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, cases, addCase
             </div>
             {editing === c.id && (
               <div style={{ marginTop: 8, borderTop: `1px solid ${A.hairline}`, paddingTop: 8 }}>
-                {options.length === 0 && <p style={{ fontSize: 11.5, color: A.muted, margin: 0 }}>Add the flavours to the ration first.</p>}
-                {options.map((f) => (
+                {/* `rows`, not `options`: a case can perfectly well contain a flavour that isn't in
+                    the ration, and anything stocked already belongs on this list too. */}
+                {rows.length === 0 && <p style={{ fontSize: 11.5, color: A.muted, margin: 0 }}>Add a flavour above first, then say how many come in the box.</p>}
+                {rows.map((f) => (
                   <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
                     <span style={{ width: 7, height: 7, borderRadius: 999, background: dotColor(f), flex: "none" }} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: A.body, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>

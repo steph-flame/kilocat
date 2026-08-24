@@ -19,7 +19,10 @@ function highlight(name, query) {
   );
 }
 
-export default function FoodSearch({ value, onChangeName, onPick, search }) {
+// `ariaLabel` names THIS picker. It defaults to the generic "Food name", but a screen with more
+// than one — the Cans page has two, one stocking the cupboard and one opening a can — needs them
+// told apart, by a person listening as much as by a test.
+export default function FoodSearch({ value, onChangeName, onPick, search, ariaLabel = "Food name" }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const blurTimer = useRef(null);
@@ -57,7 +60,7 @@ export default function FoodSearch({ value, onChangeName, onPick, search }) {
           autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
           placeholder="Food name — type to search saved foods"
           className="flex-1 text-sm font-medium bg-transparent outline-none w-full"
-          aria-label="Food name" aria-autocomplete="list" aria-expanded={show}
+          aria-label={ariaLabel} aria-autocomplete="list" aria-expanded={show}
         />
       </div>
       {show && (

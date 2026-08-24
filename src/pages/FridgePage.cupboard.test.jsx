@@ -85,6 +85,33 @@ describe("Cans page — cupboard", () => {
     expect(rows.some((d) => /Duck/.test(d.parentElement?.parentElement?.textContent || ""))).toBe(true);
   });
 
+  // A single can of something that has never been in the ration and has never been stocked can't
+  // be on the list, because the list is built from those two things — so it needs its own way in.
+  it("adds a can of a flavour that isn't in the ration at all", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    const { container } = await mount();
+    expect(container.textContent).not.toMatch(/Fancy Rabbit/);
+    const field = screen.getByLabelText(/add a flavour to the cupboard/i);
+    await act(async () => { fireEvent.change(field, { target: { value: "Fancy Rabbit" } }); });
+    await act(async () => { fireEvent.click(screen.getByLabelText(/Add a can of this flavour/i)); });
+    expect(countBox("Fancy Rabbit").value).toBe("1");
+    expect(field.value).toBe(""); // cleared, ready for the next one
+  });
+
+  it("adds a second can of it the same way, rather than starting over at one", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Fancy Rabbit", count: 1 }])));
+    await mount();
+    await act(async () => { fireEvent.change(screen.getByLabelText(/add a flavour to the cupboard/i), { target: { value: "Fancy Rabbit" } }); });
+    await act(async () => { fireEvent.click(screen.getByLabelText(/Add a can of this flavour/i)); });
+    expect(countBox("Fancy Rabbit").value).toBe("2");
+  });
+
+  it("won't add a blank", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    await mount();
+    expect(screen.getByLabelText(/Add a can of this flavour/i).disabled).toBe(true);
+  });
+
   it("keeps showing a flavour that has stock but has left the ration", async () => {
     window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Discontinued Rabbit", count: 3 }])));
     const { container } = await mount();
@@ -98,7 +125,7 @@ describe("Cans page — cases", () => {
     const { container } = await mount();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save a case mix/i })); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /edit the mix/i })); });
-    await act(async () => { fireEvent.change(screen.getByLabelText(/Chicken per case/i), { target: { value: "4" } }); });
+    await act(async () => { fireEvent.change(screen.getByLabelText(/^Chicken per case/i), { target: { value: "4" } }); });
     await act(async () => { fireEvent.change(screen.getByLabelText(/Duck per case/i), { target: { value: "2" } }); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /\+ 1 case/i })); });
     expect(countBox("Chicken").value).toBe("4");
