@@ -65,7 +65,9 @@ export const freshCatState = () => ({
   profile: freshProfile(),
   ration: [{ ...blankFood(), pct: 100 }],
   start: [{ ...blankFood(), pct: 100 }],
-  fridge: [],
+  fridge: [],      // open cans, perishing (lib/fridge.js)
+  cupboard: [],    // unopened cans, as counts per flavor (lib/cupboard.js)
+  cases: [],       // named mixes you can add by the box — "Tiki variety, 4/2/2/4"
   weightLog: [],
   intakeLog: [],
   intakeDayStatus: {},

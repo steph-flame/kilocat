@@ -8,7 +8,7 @@ const TABS = [
   { key: "today", label: "Today", href: "#/today" },
   { key: "log", label: "Log", href: "#/log" },
   { key: "ration", label: "Ration", href: "#/ration" },
-  { key: "fridge", label: "Fridge", href: "#/fridge" },
+  { key: "fridge", label: "Cans", href: "#/fridge" },
   { key: "trend", label: "Trend", href: "#/trend" },
   { key: "more", label: "More", href: "#/settings" },
 ];
@@ -19,6 +19,7 @@ const OWNER = {
   log: "log",
   ration: "ration", bowl: "ration", calories: "ration", intent: "ration", "ration-classic": "ration",
   fridge: "fridge",
+  cans: "fridge",
   trend: "trend", expenditure: "trend", "expenditure-classic": "trend",
   settings: "more", cats: "more",
 };

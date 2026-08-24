@@ -79,6 +79,76 @@ describe("logging a wet meal keeps the fridge honest", () => {
   });
 });
 
+// A can that appears in the fridge left the cupboard. There are five routes that open one and the
+// decrement lives in exactly one place (setFridge), so these check the routes, not the arithmetic.
+describe("opening a can takes it off the shelf", () => {
+  const stocked = (apiRef, n) => act(() => apiRef.current.setStockOf(WET.name, n));
+  const left = (apiRef) => apiRef.current.cupboard.find((r) => r.name === WET.name)?.count;
+
+  it("by hand, from the Cans page", async () => {
+    const { apiRef } = await renderApp();
+    stocked(apiRef, 6);
+    act(() => apiRef.current.openFridgeCan(WET));
+    expect(left(apiRef)).toBe(5);
+  });
+
+  // The one a caller could never have remembered to do: this open happens inside pure fridge code
+  // that knows nothing about stock. Diffing the fridge in setFridge is what covers it.
+  it("and when logging a meal opens one on its own", async () => {
+    const { apiRef } = await renderApp();
+    stocked(apiRef, 6);
+    act(() => apiRef.current.consumeFridge(WET, 40));
+    expect(apiRef.current.fridge).toHaveLength(1);
+    expect(left(apiRef)).toBe(5);
+  });
+
+  it("but drawing down a can already open takes nothing more", async () => {
+    const { apiRef } = await renderApp();
+    stocked(apiRef, 6);
+    act(() => apiRef.current.openFridgeCan(WET));
+    act(() => apiRef.current.consumeFridge(WET, 20));
+    act(() => apiRef.current.consumeFridge(WET, 20));
+    expect(left(apiRef)).toBe(5); // one can opened, one can gone
+  });
+
+  it("never goes below zero, and opening an untracked food starts nothing", async () => {
+    const { apiRef } = await renderApp();
+    stocked(apiRef, 1);
+    act(() => apiRef.current.openFridgeCan(WET));
+    act(() => apiRef.current.openFridgeCan(WET)); // one more than she had
+    expect(left(apiRef)).toBe(0);
+    act(() => apiRef.current.openFridgeCan({ ...WET, name: "Something Else" }));
+    expect(apiRef.current.cupboard.find((r) => r.name === "Something Else")).toBeUndefined();
+  });
+});
+
+describe("cases", () => {
+  it("pour their mix into the cupboard, and can be bought again", async () => {
+    const { apiRef } = await renderApp();
+    let id;
+    act(() => { id = apiRef.current.addCase("Tiki variety"); });
+    act(() => apiRef.current.setCaseItem(id, "Chicken", 4));
+    act(() => apiRef.current.setCaseItem(id, "Duck", 2));
+    act(() => apiRef.current.stockCase(id));
+    expect(apiRef.current.cupboard).toEqual([{ name: "Chicken", count: 4 }, { name: "Duck", count: 2 }]);
+    act(() => apiRef.current.stockCase(id));
+    expect(apiRef.current.cupboard.find((r) => r.name === "Chicken").count).toBe(8);
+    // the case is a shopping list, not a container — buying it doesn't use it up
+    expect(apiRef.current.cases[0].items).toHaveLength(2);
+  });
+
+  it("can be removed without touching what's already on the shelf", async () => {
+    const { apiRef } = await renderApp();
+    let id;
+    act(() => { id = apiRef.current.addCase("Old case"); });
+    act(() => apiRef.current.setCaseItem(id, "Chicken", 4));
+    act(() => apiRef.current.stockCase(id));
+    act(() => apiRef.current.removeCase(id));
+    expect(apiRef.current.cases).toHaveLength(0);
+    expect(apiRef.current.cupboard.find((r) => r.name === "Chicken").count).toBe(4);
+  });
+});
+
 describe("a variety pack slot", () => {
   const PACK = {
     id: "slot1", name: "Tiki Variety", splitMode: "remainder", pct: 100,
@@ -99,5 +169,23 @@ describe("a variety pack slot", () => {
     expect(cans(apiRef)[0].name).toBe("Tiki Chicken");
     expect(cans(apiRef)[0].id).toBeTruthy();
     expect(cans(apiRef)[0].remainingGrams).toBe(40);
+  });
+
+  // The feature, through the real seams: stock says Quail even though Chicken is first in the list.
+  it("opens the flavor there's most of, not the next one in the list", async () => {
+    const { apiRef } = await renderApp();
+    act(() => apiRef.current.ration.setItems([PACK]));
+    act(() => apiRef.current.setStockOf("Tiki Chicken", 1));
+    act(() => apiRef.current.setStockOf("Tiki Quail", 5));
+    act(() => apiRef.current.consumeRotationSlot("slot1", 40));
+    expect(cans(apiRef)[0].name).toBe("Tiki Quail");
+    expect(apiRef.current.cupboard.find((r) => r.name === "Tiki Quail").count).toBe(4);
+  });
+
+  it("with no counts kept, the list order still decides", async () => {
+    const { apiRef } = await renderApp();
+    act(() => apiRef.current.ration.setItems([PACK]));
+    act(() => apiRef.current.consumeRotationSlot("slot1", 40));
+    expect(cans(apiRef)[0].name).toBe("Tiki Chicken");
   });
 });

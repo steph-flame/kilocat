@@ -219,7 +219,11 @@ function mergeCat(local, incoming) {
     profile: newer.profile,
     ration: newer.ration,
     start: newer.start,
-    ...(newer.fridge !== undefined ? { fridge: newer.fridge } : {}), // rides with the LWW bundle; absent stays absent
+    // The three can/stock fields ride with the LWW bundle, like every other per-cat current-state
+    // field; absent stays absent, so an older export doesn't materialise empty ones.
+    ...(newer.fridge !== undefined ? { fridge: newer.fridge } : {}),
+    ...(newer.cupboard !== undefined ? { cupboard: newer.cupboard } : {}),
+    ...(newer.cases !== undefined ? { cases: newer.cases } : {}),
     tr: newer.tr,
     expSettings: newer.expSettings,
     stateModAt: Math.max(localModAt, incModAt),
@@ -248,6 +252,8 @@ function normalizeCat(cat) {
     ration: cat.ration,
     start: cat.start,
     ...(cat.fridge !== undefined ? { fridge: cat.fridge } : {}),
+    ...(cat.cupboard !== undefined ? { cupboard: cat.cupboard } : {}),
+    ...(cat.cases !== undefined ? { cases: cat.cases } : {}),
     tr: cat.tr,
     expSettings: cat.expSettings,
     stateModAt: cat.stateModAt ?? 0,

@@ -151,6 +151,10 @@ export function buildDemoCat(today) {
       kcalPerUnit: foods.wet.kcalPerUnit, gramsPerUnit: foods.wet.gramsPerUnit,
       openedDate: addDaysISO(today, -1), canGrams: foods.wet.gramsPerUnit, remainingGrams: 40,
     }],
+    // And a few unopened ones behind it, so the Cans tab's cupboard half isn't blank on Biscuit.
+    // Deliberately UNEVEN — that's the case the stock rule exists for (see lib/cupboard.js).
+    cupboard: [{ name: foods.wet.name, count: 5 }],
+    cases: [],
     weightLog: buildWeightLog(rand, startDate, nextId),
     intakeLog: buildIntakeLog(rand, startDate, foods, nextId),
     intakeDayStatus: {}, // Biscuit's log is always complete — never flagged, never mutated

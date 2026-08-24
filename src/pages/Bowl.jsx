@@ -58,7 +58,7 @@ function useEditableRation(ration, isDemo, activeCatId) {
 }
 
 export default function Bowl() {
-  const { p, intent, ration: liveRation, start: liveStart, library, t, tr, setTr, activeCatId, saveFood, today, fridge, fridgeDays } = useApp();
+  const { p, intent, ration: liveRation, start: liveStart, library, t, tr, setTr, activeCatId, saveFood, today, fridge, fridgeDays, cupboard } = useApp();
   const isDemo = activeCatId === DEMO_CAT_ID;
   const ration = useEditableRation(liveRation, isDemo, activeCatId);
   const start = useEditableRation(liveStart, isDemo, activeCatId);
@@ -66,7 +66,7 @@ export default function Bowl() {
   // Resolve any variety-pack rotation slot to today's active flavor before splitting, so grams,
   // macros and the distribution all reflect what actually goes in the bowl today — finishing an
   // open can before starting a new flavor (falls back to the calendar cycle when nothing's open).
-  const resolvedItems = resolveRotationsWithFridge(ration.items, today, fridge, fridgeDays);
+  const resolvedItems = resolveRotationsWithFridge(ration.items, today, fridge, fridgeDays, cupboard);
   const dist = distributeBowl(resolvedItems, target);
   const byId = Object.fromEntries(dist.rows.map((r) => [r.id, r]));
   const savedNames = new Set((library.foods || []).map((x) => x.name.trim().toLowerCase()));
@@ -333,7 +333,7 @@ function AmountRow({ left, grams }) {
 }
 
 function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFood, saved }) {
-  const { today, fridge, fridgeDays } = useApp();
+  const { today, fridge, fridgeDays, cupboard } = useApp();
   const [showDetails, setShowDetails] = useState(false);
   // The flavor list is an EDITOR, not a readout — a 6-flavor pack pushed the rest of the ration off
   // the screen for the sake of a list that's right for weeks at a time. Collapsed by default; the
@@ -347,7 +347,7 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
   // is the food we display and price against.
   const isRot = hasRotation(f);
   const rotating = isRotating(f); // has ≥2 flavors and not paused
-  const af = isRot ? (activeMemberWithFridge(f, today, fridge, fridgeDays) || {}) : f;
+  const af = isRot ? (activeMemberWithFridge(f, today, fridge, fridgeDays, cupboard) || {}) : f;
   const activeIdx = isRot ? f.rotation.findIndex((m) => m === af || (m.name || "") === (af.name || "")) : -1;
   const type = foodType(af);
   const color = dotColor(af);

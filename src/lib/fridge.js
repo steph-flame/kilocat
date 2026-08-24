@@ -11,6 +11,7 @@ import { foodFieldsOf, hasRotation, isRotating, activeMember } from "./rotation.
 import { foodType, kcalPerG } from "./foods.js";
 import { addDays, diffDays } from "./series.js";
 import { num } from "./util.js";
+import { stockStartIndex } from "./cupboard.js";
 
 const keyOf = (name) => String(name || "").trim().toLowerCase();
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -95,13 +96,13 @@ export function planDraw(fridge, food, grams, today, fridgeDays) {
 //
 // Returns { segs, shortfall } where each seg is { food, name, grams, kcal, kind: "open"|"new",
 // can?, status? }. `shortfall` is kcal that couldn't be placed (no density to convert with).
-export function planSlotDraw(food, kcal, date, fridge, fridgeDays, maxSegs = 12) {
+export function planSlotDraw(food, kcal, date, fridge, fridgeDays, maxSegs = 12, cupboard) {
   const need0 = num(kcal);
   if (!(need0 > 0) || !food) return { segs: [], shortfall: 0 };
   // The flavors to walk, starting at whichever the pack is actually on today.
   const members = isRotating(food)
     ? (() => {
-        const start = packStartIndex(food, fridge, date, fridgeDays);
+        const start = packStartIndex(food, fridge, date, fridgeDays, cupboard);
         return food.rotation.map((_, i) => food.rotation[norm(start + i, food.rotation.length)]);
       })()
     : [food];
@@ -188,28 +189,35 @@ function openPackStart(f, fridge, today, fridgeDays) {
   return best;
 }
 
-// Where a pack's draw begins today: finish whatever's physically open, else the stored cursor.
-export function packStartIndex(f, fridge, today, fridgeDays) {
+// Where a pack's draw begins today, in order of who gets to answer:
+//   1. a can that is physically open — always finish it, whatever any count says;
+//   2. the cupboard — of the unopened cans, the flavor there's most of (see lib/cupboard.js), which
+//      is what stops a case ending on a run of whatever came four-to-a-box;
+//   3. the cursor — plain list order, exactly as before counts existed.
+// `cupboard` is optional throughout: a pack nobody keeps stock for skips straight from 1 to 3.
+export function packStartIndex(f, fridge, today, fridgeDays, cupboard) {
   if (!isRotating(f)) return 0;
   const open = openPackStart(f, fridge, today, fridgeDays);
-  return open >= 0 ? open : norm(num(f.rotIndex), f.rotation.length);
+  if (open >= 0) return open;
+  const stocked = stockStartIndex(f.rotation, cupboard);
+  return stocked >= 0 ? stocked : norm(num(f.rotIndex), f.rotation.length);
 }
 
 // The flavor a rotation slot feeds first on `date` (what the Bowl/Log show as "today's" flavor).
-export function activeMemberWithFridge(f, date, fridge, fridgeDays) {
+export function activeMemberWithFridge(f, date, fridge, fridgeDays, cupboard) {
   if (!hasRotation(f)) return null;
   if (!isRotating(f)) return activeMember(f, date); // paused / single flavor → fixed, ignore the fridge
-  return f.rotation[packStartIndex(f, fridge, date, fridgeDays)];
+  return f.rotation[packStartIndex(f, fridge, date, fridgeDays, cupboard)];
 }
 
 // Advance a pack's cursor to the next flavor — used when you tap "Finish can" on a variety pack so
 // the next flavor becomes current.
 export const nextPackIndex = (f) => (isRotating(f) ? norm(num(f.rotIndex) + 1, f.rotation.length) : 0);
 
-export function resolveRotationsWithFridge(items, date, fridge, fridgeDays) {
+export function resolveRotationsWithFridge(items, date, fridge, fridgeDays, cupboard) {
   return (items || []).map((f) => {
     if (!hasRotation(f)) return f;
-    const chosen = activeMemberWithFridge(f, date, fridge, fridgeDays);
+    const chosen = activeMemberWithFridge(f, date, fridge, fridgeDays, cupboard);
     if (!chosen) return f;
     const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex } = f;
     return { ...chosen, id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex };

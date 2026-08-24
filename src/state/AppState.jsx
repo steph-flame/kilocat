@@ -23,6 +23,7 @@ import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../
 import { toPortableExport, toPortableImport, findCredentialFields } from "../lib/portableExport.js";
 import { openCan, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, nextPackIndex } from "../lib/fridge.js";
 import { hasRotation } from "../lib/rotation.js";
+import { normalizeCupboard, normalizeCases, setStock, addStock, addItems, takeOne, blankCase } from "../lib/cupboard.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
   syncAllWeights as lrSyncAllWeights, migrateConnection, autoMatchPetsByName, FIRST_SYNC_DAYS,
@@ -70,6 +71,8 @@ const sanitizeCat = (cat) => ({
   ration: (cat?.ration || []).map(cleanFood),
   start: (cat?.start || []).map(cleanFood),
   fridge: Array.isArray(cat?.fridge) ? cat.fridge : [], // open-can inventory (tier B); snapshots kept as-is
+  cupboard: normalizeCupboard(cat?.cupboard),           // unopened stock, per flavor (lib/cupboard.js)
+  cases: normalizeCases(cat?.cases),                    // the mixes you buy by the box
 
   // repairWeighInDate: self-heals any weigh-in whose stored `date` was UTC-derived (from
   // before `today` below was fixed to local) and now disagrees with its own `ts` — see
@@ -361,7 +364,38 @@ export function AppProvider({ children }) {
 
   // Open-can fridge — a current-state-bundle field like ration/start (LWW by stateModAt on merge).
   const fridge = activeCat.fridge || [];
-  const setFridge = (updater) => updateActiveCat((cat) => ({ ...cat, fridge: typeof updater === "function" ? updater(cat.fridge || []) : updater, stateModAt: Date.now() }));
+  const cupboard = activeCat.cupboard || [];
+  const cases = activeCat.cases || [];
+
+  // EVERY route that opens a can goes through here, which is why the cupboard is decremented here
+  // and nowhere else. There are five of them — the Fridge page's button, a slot's "open can", a
+  // logged meal drawing an empty shelf, an edited meal drawing more, and a pack advancing — and
+  // asking each to remember would be the duplicated-caller bug this project keeps re-learning. So
+  // the rule is stated once, structurally: a can that appears in the fridge left the cupboard.
+  // Diffing by id rather than trusting callers also means the auto-open inside consumeFromFridge
+  // (which is pure and knows nothing about stock) is covered for free.
+  const setFridge = (updater) => updateActiveCat((cat) => {
+    const before = cat.fridge || [];
+    const after = typeof updater === "function" ? updater(before) : updater;
+    const had = new Set(before.map((c) => c.id));
+    let cup = cat.cupboard || [];
+    for (const c of after) if (!had.has(c.id)) cup = takeOne(cup, c.name);
+    return { ...cat, fridge: after, cupboard: cup, stateModAt: Date.now() };
+  });
+
+  // The cupboard itself: counts of what's still in the box, and the named mixes you buy by the box.
+  // Both are current-state-bundle fields, like the fridge they feed.
+  const setCupboard = (updater) => updateActiveCat((cat) => ({ ...cat, cupboard: typeof updater === "function" ? updater(cat.cupboard || []) : updater, stateModAt: Date.now() }));
+  const setStockOf = (name, count) => setCupboard((c) => setStock(c, name, count));
+  const bumpStock = (name, delta) => setCupboard((c) => addStock(c, name, delta));
+  const setCases = (updater) => updateActiveCat((cat) => ({ ...cat, cases: typeof updater === "function" ? updater(cat.cases || []) : updater, stateModAt: Date.now() }));
+  const addCase = (label, items = []) => { const c = { ...blankCase(label), items }; setCases((cs) => [...cs, c]); return c.id; };
+  const removeCase = (id) => setCases((cs) => cs.filter((c) => c.id !== id));
+  const setCaseLabel = (id, label) => setCases((cs) => cs.map((c) => (c.id === id ? { ...c, label } : c)));
+  const setCaseItem = (id, name, count) => setCases((cs) => cs.map((c) => (c.id === id ? { ...c, items: setStock(c.items, name, count) } : c)));
+  // "+1 case": pour the mix into the pool. The case definition itself is a shopping list, not a
+  // container — it isn't consumed, so the same box can be bought again next month.
+  const stockCase = (id) => setCupboard((cup) => { const c = (activeCat.cases || []).find((x) => x.id === id); return c ? addItems(cup, c.items) : cup; });
   // Higher-level ops so pages don't need the fridge lib or uid: open a fresh can, toss one, set the
   // grams left by hand, or consume grams of a food (used when logging a wet meal — draws oldest-
   // first, and opens a can only when none of that food is open). `today`/`fridgeDays` are closed
@@ -376,13 +410,13 @@ export function AppProvider({ children }) {
   // the explicit Finish button below.
   const consumeRotationSlot = (slotId, grams) => setFridge((fr) => {
     const item = (activeCat.ration || []).find((x) => x.id === slotId);
-    const flavor = item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays) : item;
+    const flavor = item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays, activeCat.cupboard) : item;
     return flavor ? consumeFromFridge(fr, flavor, grams, today, fridgeDays, uid) : fr;
   });
   // Explicit "Open can" for a ration slot: opens the current flavor's can (the cursor flavor for a
   // pack). Explicit "Finish can": removes the slot's open can — and for a pack, advances to the next
   // flavor so the next "Open" opens it. Both are user actions; nothing about cans is inferred.
-  const slotFlavor = (item, fr) => (item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays) : item);
+  const slotFlavor = (item, fr) => (item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays, activeCat.cupboard) : item);
   const openSlotCan = (slotId) => setFridge((fr) => {
     const f = slotFlavor((activeCat.ration || []).find((x) => x.id === slotId), fr);
     return f ? [...fr, openCan(f, today, uid)] : fr;
@@ -676,6 +710,7 @@ export function AppProvider({ children }) {
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
     fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan,
+    cupboard, setStockOf, bumpStock, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure, intent, weighOffsets, collar,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,
