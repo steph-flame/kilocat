@@ -21,8 +21,8 @@ import { toV2, migrateV1 } from "../lib/migrate.js";
 import { resolveIntent } from "../lib/intent.js";
 import { mergeV2, pruneTombstones, weightKey, intakeKey, visibleCats } from "../lib/mergeData.js";
 import { toPortableExport, toPortableImport, findCredentialFields } from "../lib/portableExport.js";
-import { openCan, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, nextPackIndex } from "../lib/fridge.js";
-import { hasRotation } from "../lib/rotation.js";
+import { openCan, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, nextPackIndex, resolvePantrySlots } from "../lib/fridge.js";
+import { hasRotation, followsPantry } from "../lib/rotation.js";
 import { normalizeCupboard, normalizeCases, setStock, addStock, addItems, takeOne, forgetStock, blankCase } from "../lib/cupboard.js";
 import {
   login as lrLogin, listAllRobots as lrListAllRobots, listPets as lrListPets,
@@ -413,15 +413,19 @@ export function AppProvider({ children }) {
   // flavor is open, feeding it means one was opened, so the fridge records that (consumeFromFridge
   // only ever does this off an empty shelf). The cursor doesn't move — advancing the pack is still
   // the explicit Finish button below.
+  // A pantry-following slot has no flavour list of its own — materialize it from the cupboard
+  // (resolvePantrySlots) before asking which flavour is current. One helper so the three slot
+  // actions below can't drift apart on this.
+  const matSlot = (item, fr) => (item ? resolvePantrySlots([item], { cupboard: activeCat.cupboard, fridge: fr, library: library.foods, date: today, fridgeDays })[0] : item);
   const consumeRotationSlot = (slotId, grams) => setFridge((fr) => {
-    const item = (activeCat.ration || []).find((x) => x.id === slotId);
+    const item = matSlot((activeCat.ration || []).find((x) => x.id === slotId), fr);
     const flavor = item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays, activeCat.cupboard) : item;
     return flavor ? consumeFromFridge(fr, flavor, grams, today, fridgeDays, uid) : fr;
   });
   // Explicit "Open can" for a ration slot: opens the current flavor's can (the cursor flavor for a
   // pack). Explicit "Finish can": removes the slot's open can — and for a pack, advances to the next
   // flavor so the next "Open" opens it. Both are user actions; nothing about cans is inferred.
-  const slotFlavor = (item, fr) => (item && hasRotation(item) ? activeMemberWithFridge(item, today, fr, fridgeDays, activeCat.cupboard) : item);
+  const slotFlavor = (item, fr) => { const m = matSlot(item, fr); return m && hasRotation(m) ? activeMemberWithFridge(m, today, fr, fridgeDays, activeCat.cupboard) : m; };
   const openSlotCan = (slotId) => setFridge((fr) => {
     const f = slotFlavor((activeCat.ration || []).find((x) => x.id === slotId), fr);
     return f ? [...fr, openCan(f, today, uid)] : fr;
@@ -432,7 +436,8 @@ export function AppProvider({ children }) {
     const before = cat.fridge || [];
     const nf = finishOpenCan(before, slotFlavor(item, before), today, fridgeDays);
     const removed = nf.length < before.length;
-    if (!hasRotation(item) || !removed) return { ...cat, fridge: nf, stateModAt: Date.now() };
+    // A pantry slot's next flavour comes from the stock rule, not a cursor — nothing to advance.
+    if (!hasRotation(item) || !removed || followsPantry(item)) return { ...cat, fridge: nf, stateModAt: Date.now() };
     return { ...cat, fridge: nf, ration: cat.ration.map((x) => (x.id === slotId ? { ...x, rotIndex: nextPackIndex(item) } : x)), stateModAt: Date.now() };
   });
   // Reconcile a logged wet meal's fridge draw after its grams are edited: a positive delta draws

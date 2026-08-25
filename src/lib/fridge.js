@@ -7,11 +7,11 @@
 // treats don't spoil in a few days. Pure functions — no I/O; the caller (AppState) owns the array
 // and supplies an id factory.
 
-import { foodFieldsOf, hasRotation, isRotating, activeMember } from "./rotation.js";
+import { foodFieldsOf, hasRotation, isRotating, activeMember, followsPantry } from "./rotation.js";
 import { foodType, kcalPerG } from "./foods.js";
 import { addDays, diffDays } from "./series.js";
 import { num } from "./util.js";
-import { stockStartIndex } from "./cupboard.js";
+import { stockStartIndex, stockOf } from "./cupboard.js";
 
 const keyOf = (name) => String(name || "").trim().toLowerCase();
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -212,15 +212,48 @@ export function activeMemberWithFridge(f, date, fridge, fridgeDays, cupboard) {
 
 // Advance a pack's cursor to the next flavor — used when you tap "Finish can" on a variety pack so
 // the next flavor becomes current.
-export const nextPackIndex = (f) => (isRotating(f) ? norm(num(f.rotIndex) + 1, f.rotation.length) : 0);
+// A pantry-following slot has no cursor — the stock rule decides — and no rotation array on the
+// raw row to take a length from, so it sits out entirely.
+export const nextPackIndex = (f) => (isRotating(f) && Array.isArray(f.rotation) && f.rotation.length ? norm(num(f.rotIndex) + 1, f.rotation.length) : 0);
 
-export function resolveRotationsWithFridge(items, date, fridge, fridgeDays, cupboard) {
+// The flavours a pantry-following slot rotates through TODAY: every saved wet can that's either
+// on the shelf (stock > 0) or already open in the fridge (including one sitting at zero awaiting
+// confirmation — it's still the can being fed). Ordered most-stock-first, ties by name, so the
+// list reads in the order the stock rule will open them. Recomputed at read time from the
+// cupboard — buying a case changes the rotation by itself, nothing on the row to maintain.
+export function pantryMembers(cupboard, fridge, library, date, fridgeDays) {
+  const out = [];
+  for (const f of library || []) {
+    if (!isCanned(f)) continue;
+    const stocked = (stockOf(cupboard, f.name) || 0) > 0;
+    const open = availableCansOf(fridge, f.name, date, fridgeDays).length > 0 || emptiedCansOf(fridge, f.name).length > 0;
+    if (stocked || open) out.push(f);
+  }
+  return out.sort((a, b) =>
+    (stockOf(cupboard, b.name) || 0) - (stockOf(cupboard, a.name) || 0) || String(a.name).localeCompare(String(b.name)));
+}
+
+// Materialize pantry-following slots into ordinary rotation rows, so every consumer downstream —
+// packStartIndex, planSlotDraw, the transition's slot keyer, the Bowl's "next up" — works on them
+// unchanged. An EMPTY pantry falls back to the slot's own food fields (the last flavour it was),
+// flagged pantryEmpty so the UI can say so rather than silently feeding a stale plan.
+export function resolvePantrySlots(items, { cupboard, fridge, library, date, fridgeDays }) {
   return (items || []).map((f) => {
+    if (!followsPantry(f)) return f;
+    const members = pantryMembers(cupboard, fridge, library, date, fridgeDays);
+    if (members.length === 0) return { ...f, rotation: [foodFieldsOf(f)], pantryEmpty: true };
+    return { ...f, rotation: members };
+  });
+}
+
+export function resolveRotationsWithFridge(items, date, fridge, fridgeDays, cupboard, library) {
+  const mat = resolvePantrySlots(items, { cupboard, fridge, library, date, fridgeDays });
+  return mat.map((f) => {
     if (!hasRotation(f)) return f;
     const chosen = activeMemberWithFridge(f, date, fridge, fridgeDays, cupboard);
     if (!chosen) return f;
-    const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex } = f;
-    return { ...chosen, id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex };
+    const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex, rotateSource, pantryEmpty } = f;
+    return { ...chosen, id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex, rotateSource, ...(pantryEmpty ? { pantryEmpty } : {}) };
   });
 }
 

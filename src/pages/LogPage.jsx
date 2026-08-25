@@ -194,7 +194,7 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
   // was actually fed yesterday (see lib/transition.js for why that beats counting calendar days).
   const ramp = useMemo(() => {
     if (!tr?.on || !(startItems || []).length) return null;
-    const resolved = resolveRotationsWithFridge(ration.items, viewedDate, fridge, fridgeDays, cupboard);
+    const resolved = resolveRotationsWithFridge(ration.items, viewedDate, fridge, fridgeDays, cupboard, library.foods);
     // The most recent PRIOR day that actually has entries (up to a week back) — missing a day of
     // logging shouldn't rewind the ramp to day 1; it advances by however many days have passed.
     let prior = [], gapDays = 1;
@@ -208,7 +208,7 @@ function FoodTab({ intakeLog, ration, tr, startItems, library, viewedDate, today
   }, [tr?.on, tr?.days, startItems, ration.items, target, viewedDate, fridge, fridgeDays, intakeLog.items]);
 
   const steps = useMemo(() => {
-    const resolved = ramp ? ramp.resolved : resolveRotationsWithFridge(ration.items, viewedDate, fridge, fridgeDays, cupboard); // rotation slot → the flavor to feed (open can first)
+    const resolved = ramp ? ramp.resolved : resolveRotationsWithFridge(ration.items, viewedDate, fridge, fridgeDays, cupboard, library.foods); // rotation slot → the flavor to feed (open can first)
     // Mid-ramp: blend today's share of the new ration with what's fading out. Otherwise: the ration.
     const rows = ramp
       ? transitionSteps({ startItems, resolvedRationItems: resolved, target, day: ramp.day, days: ramp.days })

@@ -11,8 +11,13 @@
 // A row HAS rotation data if it holds a flavor list. It's actively ROTATING only with ≥2 flavors and
 // not paused (`rotateOff`) — a paused pack, or one down to a single flavor, just feeds its first
 // flavor. Pausing (rather than deleting) is what lets the ↻ button be non-destructive.
-export const hasRotation = (f) => Array.isArray(f?.rotation) && f.rotation.length > 0;
-export const isRotating = (f) => hasRotation(f) && f.rotation.length >= 2 && !f.rotateOff;
+// A slot rotates because it carries a flavor list, OR because it's flagged to follow the pantry
+// (rotateSource: "pantry") — in the second case the list doesn't live on the row at all: it's
+// materialized from the cupboard at read time (see fridge.js's resolvePantrySlots), so raw rows
+// answer these questions by the flag alone.
+export const followsPantry = (f) => f?.rotateSource === "pantry";
+export const hasRotation = (f) => followsPantry(f) || (Array.isArray(f?.rotation) && f.rotation.length > 0);
+export const isRotating = (f) => hasRotation(f) && !f.rotateOff && (followsPantry(f) || f.rotation.length >= 2);
 
 // Whole days since the unix epoch for a YYYY-MM-DD date. Forced to UTC midnight so the counter is
 // timezone-independent and stable for a given calendar date (the same discipline series.js uses).
@@ -21,7 +26,7 @@ const dayIndex = (date) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000
 // Index of the flavor active on `date` — cycles one step per calendar day when rotating, else the
 // first flavor (paused / single-flavor).
 export function activeRotationIndex(f, date) {
-  if (!hasRotation(f)) return -1;
+  if (!hasRotation(f) || !Array.isArray(f?.rotation) || f.rotation.length === 0) return hasRotation(f) ? 0 : -1;
   if (!isRotating(f)) return 0;
   const n = f.rotation.length;
   if (!date || !Number.isFinite(dayIndex(date))) return 0;
@@ -29,7 +34,7 @@ export function activeRotationIndex(f, date) {
 }
 export function activeMember(f, date) {
   const i = activeRotationIndex(f, date);
-  return i < 0 ? null : f.rotation[i];
+  return i < 0 ? null : (f.rotation?.[i] ?? null);
 }
 
 // The next `n` flavor names in PACK ORDER starting at `startIdx` — a preview of the cycle so the
@@ -57,7 +62,7 @@ export const resolveRotations = (items, date) => (items || []).map((f) => resolv
 // The food-only fields of a row (no id / split / rotation / cursor) — used to seed a rotation from
 // the single food already in a slot, and to write a picked/edited flavor back into the list.
 export function foodFieldsOf(f) {
-  const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex, ...food } = f || {};
+  const { id, splitMode, pct, fixedKcal, treatCount, rotation, rotateOff, rotIndex, rotateSource, ...food } = f || {};
   return food;
 }
 

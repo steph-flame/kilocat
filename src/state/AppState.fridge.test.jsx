@@ -189,3 +189,45 @@ describe("a variety pack slot", () => {
     expect(cans(apiRef)[0].name).toBe("Tiki Chicken");
   });
 });
+
+// The pantry-following slot through the real seams — the flavour it feeds comes from the
+// cupboard's counts, not from any list on the row.
+describe("a slot that rotates through the pantry", () => {
+  const DUCK = { name: "Pantry Duck", mode: "perUnit", type: "wet", kcalPerUnit: 66, gramsPerUnit: 80 };
+  const CHICKEN = { name: "Pantry Chicken", mode: "perUnit", type: "wet", kcalPerUnit: 70, gramsPerUnit: 80 };
+  const SLOT = { id: "ps1", ...DUCK, rotateSource: "pantry", splitMode: "remainder", pct: 100 };
+
+  const setup = async () => {
+    const { apiRef } = await renderApp();
+    act(() => { apiRef.current.library.upsert(DUCK); });
+    act(() => { apiRef.current.library.upsert(CHICKEN); });
+    act(() => apiRef.current.ration.setItems([SLOT]));
+    return apiRef;
+  };
+
+  it("feeds the fullest pile, and the can it opens leaves the shelf", async () => {
+    const apiRef = await setup();
+    act(() => apiRef.current.setStockOf(DUCK.name, 1));
+    act(() => apiRef.current.setStockOf(CHICKEN.name, 6));
+    act(() => apiRef.current.consumeRotationSlot("ps1", 40));
+    expect(cans(apiRef)).toHaveLength(1);
+    expect(cans(apiRef)[0].name).toBe(CHICKEN.name); // not the row's own Duck — the pantry decided
+    expect(apiRef.current.cupboard.find((r) => r.name === CHICKEN.name).count).toBe(5);
+  });
+
+  it("with an empty pantry it falls back to the slot's own flavour", async () => {
+    const apiRef = await setup();
+    act(() => apiRef.current.consumeRotationSlot("ps1", 40));
+    expect(cans(apiRef)).toHaveLength(1);
+    expect(cans(apiRef)[0].name).toBe(DUCK.name);
+  });
+
+  it("finishing its can doesn't crash on the missing cursor, and the can goes", async () => {
+    const apiRef = await setup();
+    act(() => apiRef.current.setStockOf(CHICKEN.name, 2));
+    act(() => apiRef.current.consumeRotationSlot("ps1", 40));
+    expect(cans(apiRef)).toHaveLength(1);
+    act(() => apiRef.current.finishSlotCan("ps1"));
+    expect(cans(apiRef)).toHaveLength(0);
+  });
+});

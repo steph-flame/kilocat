@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, planSlotDraw, isEmptied, emptiedCansOf, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex } from "./fridge.js";
+import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, planSlotDraw, isEmptied, emptiedCansOf, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex, pantryMembers, resolvePantrySlots } from "./fridge.js";
 
 let idn = 0;
 const mkId = () => `can-${idn++}`;
@@ -304,5 +304,58 @@ describe("a can that reads empty is confirmed, not assumed", () => {
     const fresh = { ...openCan(wet, "2026-02-01", mk), remainingGrams: 20 };
     const after = finishOpenCan([stale, fresh], wet, today, 3);
     expect(after.map((c) => c.id)).toEqual([stale.id]); // the fresh one was the "open" one
+  });
+});
+
+// A slot that follows the pantry: its flavour list IS the cupboard, materialized at read time.
+describe("rotating through the pantry", () => {
+  const LIB = [
+    { name: "Duck Can", mode: "perUnit", type: "wet", kcalPerUnit: 66, gramsPerUnit: 80 },
+    { name: "Chicken Can", mode: "perUnit", type: "wet", kcalPerUnit: 70, gramsPerUnit: 80 },
+    { name: "Quail Can", mode: "perUnit", type: "wet", kcalPerUnit: 60, gramsPerUnit: 80 },
+    { name: "Kibble", mode: "perKg", type: "dry", kcalPerKg: 3800 },          // never a member
+    { name: "Unstocked Can", mode: "perUnit", type: "wet", kcalPerUnit: 66, gramsPerUnit: 80 },
+  ];
+  const CUP = [{ name: "Duck Can", count: 2 }, { name: "Chicken Can", count: 5 }, { name: "Quail Can", count: 0 }];
+  const DAY = "2026-02-02";
+  const slot = { id: "s1", name: "Duck Can", mode: "perUnit", type: "wet", kcalPerUnit: 66, gramsPerUnit: 80, rotateSource: "pantry", splitMode: "remainder", pct: 100 };
+  const ctx = (fridge = [], cupboard = CUP) => ({ cupboard, fridge, library: LIB, date: DAY, fridgeDays: 3 });
+
+  it("members are the stocked (or open) wet cans, fullest pile first", () => {
+    const m = pantryMembers(CUP, [], LIB, DAY, 3);
+    expect(m.map((f) => f.name)).toEqual(["Chicken Can", "Duck Can"]); // 5, then 2; Quail at 0 and Unstocked are out
+  });
+
+  it("an open can keeps its flavour in the rotation even with zero stock", () => {
+    const fridge = [openCan(LIB[2], DAY, mkId)]; // Quail open, 0 in cupboard
+    const m = pantryMembers(CUP, fridge, LIB, DAY, 3);
+    expect(m.some((f) => f.name === "Quail Can")).toBe(true);
+    // and the open can WINS the start position — finish what's open, whatever the counts say
+    const mat = resolvePantrySlots([slot], ctx(fridge))[0];
+    expect(mat.rotation[packStartIndex(mat, fridge, DAY, 3, CUP)].name).toBe("Quail Can");
+  });
+
+  it("materializes the slot into an ordinary rotation row", () => {
+    const mat = resolvePantrySlots([slot], ctx())[0];
+    expect(mat.rotation.map((f) => f.name)).toEqual(["Chicken Can", "Duck Can"]);
+    expect(activeMemberWithFridge(mat, DAY, [], 3, CUP).name).toBe("Chicken Can"); // fullest pile opens next
+  });
+
+  it("an empty pantry falls back to the slot's own last flavour, flagged", () => {
+    const mat = resolvePantrySlots([slot], ctx([], []))[0];
+    expect(mat.pantryEmpty).toBe(true);
+    expect(mat.rotation).toHaveLength(1);
+    expect(mat.rotation[0].name).toBe("Duck Can"); // the row's own fields — never a blank bowl
+  });
+
+  it("buying a case changes the rotation by itself", () => {
+    const restocked = [...CUP.filter((r) => r.name !== "Quail Can"), { name: "Quail Can", count: 9 }];
+    const mat = resolvePantrySlots([slot], ctx([], restocked))[0];
+    expect(mat.rotation[0].name).toBe("Quail Can"); // tallest pile now leads
+  });
+
+  it("leaves explicit-list slots exactly alone", () => {
+    const explicit = { id: "s2", rotation: [LIB[0], LIB[1]], rotIndex: 1 };
+    expect(resolvePantrySlots([explicit], ctx())[0]).toBe(explicit);
   });
 });

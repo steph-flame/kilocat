@@ -141,3 +141,54 @@ describe("Ration row details, after the type/energy controls were shared", () =>
     expect(container.textContent).toMatch(/0\.5 g per treat · worked out from the label/);
   });
 });
+
+// The pantry-following slot on the Ration page: no hand list to edit, the caption says where the
+// flavours come from, and the switch turns it on and off without losing the explicit list.
+describe("Ration → a slot that follows the pantry", () => {
+  const WET = (name, kcal = 66) => ({ name, mode: "perUnit", type: "wet", kcalPerUnit: kcal, gramsPerUnit: 80 });
+  const pantrySeed = () => {
+    const s = seed([{ id: "ps1", ...WET("Duck Can"), rotateSource: "pantry", splitMode: "remainder", pct: 100 }]);
+    s.cats.c1.cupboard = [{ name: "Duck Can", count: 2 }, { name: "Chicken Can", count: 5 }];
+    s.library = [WET("Duck Can"), WET("Chicken Can", 70)];
+    return s;
+  };
+
+  it("names today's flavour from the cupboard and says it follows the pantry", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(pantrySeed()));
+    const { container } = await mount();
+    expect(container.textContent).toMatch(/follows the pantry · 2 flavours in stock/);
+    expect(container.textContent).toMatch(/Chicken Can/); // fullest pile is today's flavour
+  });
+
+  it("offers no hand-edited flavour rows — the cupboard owns the list", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(pantrySeed()));
+    const { container } = await mount();
+    fireEvent.click(screen.getByRole("button", { name: /show or hide the flavor list/i }));
+    expect(flavorRows()).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /add flavor/i })).toBeNull();
+    expect(container.textContent).toMatch(/Flavours come from the/);
+    expect(screen.getByRole("button", { name: /rotate through the pantry/i })).toHaveProperty("ariaPressed", "true");
+  });
+
+  it("says so, rather than feeding a stale plan, when the pantry is empty", async () => {
+    const s = pantrySeed();
+    s.cats.c1.cupboard = [];
+    window.localStorage.setItem("catration_v1", JSON.stringify(s));
+    const { container } = await mount();
+    expect(container.textContent).toMatch(/nothing in stock, showing the last flavour/);
+    expect(container.textContent).toMatch(/Duck Can/); // the slot's own last flavour
+  });
+
+  it("an ordinary pack offers the switch, and keeps its list across a round trip", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed(PACK)));
+    const { container } = await mount();
+    fireEvent.click(toggle());
+    const sw = () => screen.getByRole("button", { name: /rotate through the pantry/i });
+    expect(sw()).toHaveProperty("ariaPressed", "false");
+    fireEvent.click(sw()); // on: the 4 hand rows vanish
+    expect(flavorRows()).toHaveLength(0);
+    fireEvent.click(sw()); // off: the explicit list is back, intact
+    expect(flavorRows()).toHaveLength(4);
+    expect(container.textContent).toMatch(/variety pack · 4 flavors/);
+  });
+});
