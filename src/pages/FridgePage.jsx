@@ -68,10 +68,14 @@ export default function FridgePage() {
           <p style={{ ...cap, margin: 0 }}>What {name} has left unopened, and what's open and ticking. Counting the cupboard is optional — but it's what lets a variety pack open the flavour you have most of, so a case finishes evenly instead of ending on four of the same.</p>
         </div>
 
+        {/* Side by side on a wide screen — the cupboard IS one column and the fridge the other,
+            which is also just what the page is: unopened on the left, open on the right. Phones
+            keep the stack (the grid, and .alm-col with it, only exist at >=900px). */}
         <CupboardCard {...{ options, cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, removeCaseItem, stockCase, ration, library, openFridgeCan }} />
 
+        <div className="alm-col">
         {/* open a can */}
-        <Card className="span-all">
+        <Card>
           <div style={label({ marginBottom: 8 })}>Open a can</div>
           {options.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
@@ -92,7 +96,7 @@ export default function FridgePage() {
         </Card>
 
         {/* the open cans */}
-        <Card className="span-all">
+        <Card>
           <div style={label({ marginBottom: cans.length ? 10 : 0 })}>{cans.length} open{cans.length === 1 ? " can" : " cans"}</div>
           {cans.length === 0 ? (
             <p style={{ fontSize: 12.5, color: A.muted }}>Nothing open right now. Open a can above, or log a wet meal and it'll appear here.</p>
@@ -122,6 +126,7 @@ export default function FridgePage() {
             </div>
           )}
         </Card>
+        </div>
       </div>
     </div>
   );
@@ -152,7 +157,7 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, forgetFlavor, 
   }, {});
 
   return (
-    <Card className="span-all">
+    <Card>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: rows.length ? 10 : 0 }}>
         <span style={label()}>cupboard · unopened</span>
         {total > 0 && <span style={{ fontFamily: TYPE.mono, fontSize: 12, color: A.ink }}>{total} can{total === 1 ? "" : "s"}</span>}

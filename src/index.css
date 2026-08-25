@@ -100,4 +100,22 @@ select:focus-visible,
   .alm-grid > .span-all {
     grid-column: 1 / -1;
   }
+  /* A named column: several cards sharing one grid cell, stacked. On mobile it doesn't exist
+     (display: contents below) so its cards flow exactly as if they were loose on the page. */
+  .alm-grid > .alm-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .alm-grid > .alm-col > * {
+    margin: 0;
+  }
+}
+.alm-col {
+  display: contents;
+}
+@media (min-width: 900px) {
+  .alm-grid > .alm-col {
+    display: flex;
+  }
 }

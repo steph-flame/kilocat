@@ -155,6 +155,23 @@ describe("Cans page — cupboard", () => {
   });
 });
 
+describe("Cans page — layout", () => {
+  // jsdom applies no media queries, so this pins the STRUCTURE the desktop grid keys on: the
+  // cupboard card as its own grid child, and both fridge cards inside one .alm-col wrapper.
+  // (On phones .alm-col is display:contents, so the same structure stacks as before.)
+  it("cupboard and fridge are grid siblings, fridge cards share a column wrapper", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    const { container } = await mount();
+    const grid = container.querySelector(".alm-grid");
+    const col = grid.querySelector(":scope > .alm-col");
+    expect(col).toBeTruthy();
+    expect(col.textContent).toMatch(/Open a can/i);
+    expect(col.textContent).toMatch(/open can|Nothing open/i);
+    expect(col.textContent).not.toMatch(/cupboard · unopened/i); // the cupboard is NOT inside it
+    expect(grid.textContent).toMatch(/cupboard · unopened/i);    // ...but is on the page
+  });
+});
+
 describe("Cans page — cases", () => {
   const newCase = async () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save a case mix/i })); });
