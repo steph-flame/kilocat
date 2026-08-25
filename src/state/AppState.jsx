@@ -195,7 +195,10 @@ export function AppProvider({ children }) {
         : Object.keys(visibleIds)[0] ?? DEMO_CAT_ID;
       setCatsState({ activeCatId, cats, deletedCats: d.deletedCats || {} });
     }
-    if (d.library) library.setFoods(dedupeFoods(ensureBuiltins(d.library.map(cleanFood))));
+    // deletedFoods rides with the library: without handing the tombstones to ensureBuiltins,
+    // this line was the resurrection bug — every load re-added whatever the owner had deleted.
+    if (d.deletedFoods) library.setDeleted(d.deletedFoods);
+    if (d.library) library.setFoods(dedupeFoods(ensureBuiltins(d.library.map(cleanFood), d.deletedFoods || {})));
     if (typeof d.fridgeDays === "number") setFridgeDaysRaw(d.fridgeDays);
     if (typeof d.skin === "string" && SKINS[d.skin]) setSkinState(d.skin);
     const resolved = resolveUnit(d.unit, activeCatId && cats[activeCatId]?.expSettings?.unit);
@@ -210,7 +213,7 @@ export function AppProvider({ children }) {
   const persistData = {
     v: 2, activeCatId: catsState.activeCatId, cats: catsState.cats, library: library.foods,
     fridgeDays, intakeMethod, skin, unit, estimator, litterRobot,
-    deletedCats: catsState.deletedCats || {}, settingsModAt,
+    deletedCats: catsState.deletedCats || {}, deletedFoods: library.deleted || {}, settingsModAt,
   };
   const loaded = usePersistence(persistData, hydrate);
 
@@ -394,6 +397,7 @@ export function AppProvider({ children }) {
   const removeCase = (id) => setCases((cs) => cs.filter((c) => c.id !== id));
   const setCaseLabel = (id, label) => setCases((cs) => cs.map((c) => (c.id === id ? { ...c, label } : c)));
   const setCaseItem = (id, name, count) => setCases((cs) => cs.map((c) => (c.id === id ? { ...c, items: setStock(c.items, name, count) } : c)));
+  const removeCaseItem = (id, name) => setCases((cs) => cs.map((c) => (c.id === id ? { ...c, items: forgetStock(c.items, name) } : c)));
   // "+1 case": pour the mix into the pool. The case definition itself is a shopping list, not a
   // container — it isn't consumed, so the same box can be bought again next month.
   const stockCase = (id) => setCupboard((cup) => { const c = (activeCat.cases || []).find((x) => x.id === id); return c ? addItems(cup, c.items) : cup; });
@@ -711,7 +715,7 @@ export function AppProvider({ children }) {
     ration, start, library, weightLog, intakeLog, intakeDayStatus, setIntakeDayFlag, saveFood,
     tr, setTr, fridgeDays, setFridgeDays, expSettings, setExpSettings,
     fridge, openFridgeCan, tossCan, setCanRemaining, consumeFridge, reconcileFridge, consumeRotationSlot, openSlotCan, finishSlotCan,
-    cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase,
+    cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, removeCaseItem, stockCase,
     skin, setSkin, unit, setUnit, estimator, setEstimator,
     t, expenditure, intent, weighOffsets, collar,
     activeCatId: catsState.activeCatId, catsSummary, switchCat, addCat, deleteCat, clearCatHistory, updateCatProfile, eraseAll,

@@ -75,7 +75,7 @@
 //  - activeCatId: kept LOCAL.
 
 import { num } from "./util.js";
-import { stripKind, FOOD_NUM_KEYS } from "./foods.js";
+import { stripKind, foodKey, FOOD_NUM_KEYS } from "./foods.js";
 
 /* ---------- tombstones ---------- */
 
@@ -119,6 +119,7 @@ export function pruneTombstones(snapshot, now = Date.now()) {
   const s = snapshot || {};
   const prevDeletedCats = s.deletedCats || {};
   const deletedCats = gcTombstoneMap(prevDeletedCats, now);
+  const deletedFoods = gcTombstoneMap(s.deletedFoods || {}, now);
   const cats = {};
   for (const [id, cat] of Object.entries(s.cats || {})) {
     const prevTomb = prevDeletedCats[id];
@@ -126,7 +127,7 @@ export function pruneTombstones(snapshot, now = Date.now()) {
     if (tombJustExpired && !isCatVisible(cat, prevTomb)) continue; // orphaned hidden data — GC'd with its tombstone
     cats[id] = cat?.deletedEntries ? { ...cat, deletedEntries: gcTombstoneMap(cat.deletedEntries, now) } : cat;
   }
-  return { ...s, cats, deletedCats };
+  return { ...s, cats, deletedCats, ...(s.deletedFoods !== undefined || Object.keys(deletedFoods).length ? { deletedFoods } : {}) };
 }
 
 /* ---------- read-time cat visibility (the projection half of the join-semilattice) ---------- */
@@ -312,10 +313,14 @@ function combineFoodEntry(a, b) {
   const type = combineField(a.type, b.type, isBlankStr); // wet/dry/treat — travels like mode
   const out = { id, name, mode, type };
   for (const k of FOOD_NUM_KEYS) out[k] = combineField(a[k], b[k], isBlankNum);
+  // modAt joins as max, explicitly — combineField breaks number conflicts by STRING order, which
+  // is wrong for timestamps, and modAt is the evidence isFoodVisible weighs against a tombstone.
+  const modAt = Math.max(a.modAt ?? 0, b.modAt ?? 0);
+  if (modAt > 0) out.modAt = modAt;
   return out;
 }
 
-const libKeyOf = (name) => String(name || "").trim().toLowerCase();
+const libKeyOf = foodKey; // the ONE food identity — same one upsert/dedupe/tombstones use
 
 // Merge two food-library arrays, deduped by the same identity foods.js's dedupeFoods uses
 // (name, case-insensitive, "(dry)"/"(wet)"-stripped), but order-independently: a genuine
@@ -328,7 +333,7 @@ export function mergeLibrary(localList, incomingList) {
   const order = [];
   const byKey = new Map();
   for (const f of [...(localList || []), ...(incomingList || [])]) {
-    const key = f?.name != null ? libKeyOf(stripKind(f.name)) : "";
+    const key = f?.name != null ? libKeyOf(f.name) : ""; // foodKey strips "(dry)"/"(wet)" itself
     if (!key) { order.push(f); continue; } // no identity to dedupe by — pass through untouched
     if (byKey.has(key)) {
       const idx = byKey.get(key);
@@ -339,6 +344,14 @@ export function mergeLibrary(localList, incomingList) {
     }
   }
   return order;
+}
+
+// A food is hidden iff a deletedFoods tombstone DOMINATES it — deletedAt at least as new as the
+// food's own modAt (stamped by upsertFood on every save/edit). Same rule, word for word, as
+// isCatVisible below: re-adding or editing the food after the deletion un-hides it, so deletion
+// doesn't permanently poison a name.
+export function isFoodVisible(food, deletedAt) {
+  return deletedAt === undefined || deletedAt < (food?.modAt ?? 0);
 }
 
 /* ---------- top-level merge ---------- */
@@ -354,6 +367,7 @@ export function mergeV2(local, incoming, now = Date.now()) {
   const l = local || {};
   const inc = incoming || {};
   const deletedCats = unionTombstones(l.deletedCats, inc.deletedCats);
+  const deletedFoods = unionTombstones(l.deletedFoods, inc.deletedFoods);
   const localSettingsAt = l.settingsModAt ?? 0;
   const incSettingsAt = inc.settingsModAt ?? 0;
   // Shared-settings bundle (fridgeDays/skin/unit/estimator) moves together, LWW by
@@ -363,7 +377,13 @@ export function mergeV2(local, incoming, now = Date.now()) {
     v: 2,
     activeCatId: l.activeCatId,
     cats: mergeCats(l.cats, inc.cats),
-    library: mergeLibrary(l.library || [], inc.library || []),
+    // Union first (order-independent), then project deletions out — a food survives only by
+    // carrying a modAt newer than its tombstone, exactly the cat rule. Unlike cats, a dropped
+    // food has no logs hanging off it, so projecting at merge time loses nothing else.
+    library: mergeLibrary(l.library || [], inc.library || []).filter((f) => isFoodVisible(f, deletedFoods[libKeyOf(f?.name)])),
+    // absent stays absent (like fridge above): a legacy snapshot merged with itself must come out
+    // byte-identical, or every idempotence guarantee this file makes quietly breaks
+    ...(l.deletedFoods !== undefined || inc.deletedFoods !== undefined ? { deletedFoods } : {}),
     fridgeDays: settings.fridgeDays,
     intakeMethod: settings.intakeMethod,
     skin: settings.skin,

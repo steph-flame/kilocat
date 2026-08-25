@@ -28,6 +28,7 @@ export function migrateV1(d) {
   // settingsModAt/deletedCats: same new top-level tombstone/LWW fields as above, one level up.
   if (src.settingsModAt !== undefined) out.settingsModAt = src.settingsModAt;
   if (src.deletedCats !== undefined) out.deletedCats = src.deletedCats;
+  if (src.deletedFoods !== undefined) out.deletedFoods = src.deletedFoods; // library deletion tombstones ride along
   return out;
 }
 

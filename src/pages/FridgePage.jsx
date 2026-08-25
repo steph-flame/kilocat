@@ -49,7 +49,7 @@ function rationCanOptions(items) {
 
 export default function FridgePage() {
   const { p, ration, library, fridge, fridgeDays, openFridgeCan, tossCan, setCanRemaining, today,
-    cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase } = useApp();
+    cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, removeCaseItem, stockCase } = useApp();
   const name = p?.name || "your cat";
   const [pick, setPick] = useState("");
 
@@ -68,7 +68,7 @@ export default function FridgePage() {
           <p style={{ ...cap, margin: 0 }}>What {name} has left unopened, and what's open and ticking. Counting the cupboard is optional — but it's what lets a variety pack open the flavour you have most of, so a case finishes evenly instead of ending on four of the same.</p>
         </div>
 
-        <CupboardCard {...{ options, cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase, ration, library, openFridgeCan }} />
+        <CupboardCard {...{ options, cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, removeCaseItem, stockCase, ration, library, openFridgeCan }} />
 
         {/* open a can */}
         <Card className="span-all">
@@ -129,7 +129,7 @@ export default function FridgePage() {
 // The unopened half. One row per wet flavour the ration knows about, with its count — plus any
 // flavour that has stock but has since left the ration, so cans can't go invisible just because
 // the plan changed.
-function CupboardCard({ options, cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, stockCase, ration, library, openFridgeCan }) {
+function CupboardCard({ options, cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, removeCaseItem, stockCase, ration, library, openFridgeCan }) {
   const [editing, setEditing] = useState(null); // case id whose mix is open for editing
   const [pick, setPick] = useState("");         // a flavour being added that isn't on the list yet
   // Every flavour worth showing: the ration's, then anything stocked that isn't in it any more.
@@ -243,27 +243,53 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, forgetFlavor, 
               {c.items.length ? `${c.items.reduce((n, i) => n + i.count, 0)} cans · ${c.items.filter((i) => i.count > 0).map((i) => `${i.count}× ${firstWord(i.name)}`).join(", ")}` : "no mix set — open the mix and say what's in the box"}
             </div>
             {editing === c.id && (
-              <div style={{ marginTop: 8, borderTop: `1px solid ${A.hairline}`, paddingTop: 8 }}>
-                {/* `rows`, not `options`: a case can perfectly well contain a flavour that isn't in
-                    the ration, and anything stocked already belongs on this list too. */}
-                {rows.length === 0 && <p style={{ fontSize: 11.5, color: A.muted, margin: 0 }}>Add a flavour above first, then say how many come in the box.</p>}
-                {rows.map((f) => (
-                  <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
-                    <span style={{ width: 7, height: 7, borderRadius: 999, background: dotColor(f), flex: "none" }} />
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: A.body, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-                    <input type="number" min="0" step="1" value={stockOf(c.items, f.name) ?? ""} placeholder="0"
-                      onChange={(e) => setCaseItem(c.id, f.name, e.target.value === "" ? 0 : Number(e.target.value))}
-                      aria-label={`${f.name} per case`}
-                      style={{ width: 38, fontFamily: TYPE.mono, fontSize: 14, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "center", padding: "1px 2px", flex: "none" }} />
-                  </div>
-                ))}
-              </div>
+              <CaseMixEditor c={c} library={library} setCaseItem={setCaseItem} removeCaseItem={removeCaseItem} />
             )}
           </div>
         ))}
         <button onClick={() => addCase("")} style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.good, background: "none", border: "none", cursor: "pointer", padding: 0 }}>+ save a case mix</button>
       </div>
     </Card>
+  );
+}
+
+// A case's mix is ITS OWN list, edited the way it reads on the box: it starts empty and grows one
+// food at a time from your saved foods. The first version instead projected the whole cupboard's
+// flavour list into the editor with a counter each — backwards on both ends: a case has no reason
+// to mention foods that aren't in it, and every reason to be able to contain a food the cupboard's
+// list didn't happen to know yet.
+function CaseMixEditor({ c, library, setCaseItem, removeCaseItem }) {
+  const [pick, setPick] = useState("");
+  const items = c.items; // shown exactly as stored — a 0 row stays visible and editable
+  const add = (name) => {
+    if (!String(name || "").trim()) return;
+    setCaseItem(c.id, String(name).trim(), (stockOf(c.items, name) || 0) + 1);
+    setPick("");
+  };
+  return (
+    <div style={{ marginTop: 8, borderTop: `1px solid ${A.hairline}`, paddingTop: 8 }}>
+      {items.length === 0 && <p style={{ fontSize: 11.5, color: A.muted, margin: "0 0 6px" }}>Empty box so far — add what's in it below.</p>}
+      {items.map((it) => (
+        <div key={it.name} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: A.body, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
+          <input type="number" min="0" step="1" value={it.count}
+            onChange={(e) => setCaseItem(c.id, it.name, e.target.value === "" ? 0 : Number(e.target.value))}
+            aria-label={`${it.name} per case`}
+            style={{ width: 38, fontFamily: TYPE.mono, fontSize: 14, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "center", padding: "1px 2px", flex: "none" }} />
+          <button onClick={() => removeCaseItem(c.id, it.name)} aria-label={`Remove ${it.name} from this case`}
+            style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 13, flex: "none" }}>×</button>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+        <div style={{ flex: 1, minWidth: 0, border: `1px solid ${A.cardBorder}`, borderRadius: 10, padding: "4px 8px" }}>
+          <FoodSearch value={pick} search={library.search} ariaLabel={`Add a food to ${c.label || "this case"}`}
+            onChangeName={setPick} onPick={(food) => add(food.name)} />
+        </div>
+        <button onClick={() => add(pick)} disabled={!pick.trim()} aria-label="Add this food to the case"
+          style={{ fontFamily: TYPE.mono, fontSize: 11, borderRadius: 8, padding: "6px 10px", border: "none", flex: "none",
+            background: pick.trim() ? A.good : A.track, color: pick.trim() ? A.card : A.muted, cursor: pick.trim() ? "pointer" : "default" }}>+ add</button>
+      </div>
+    </div>
   );
 }
 

@@ -98,7 +98,8 @@ describe("Foods page", () => {
     expect(container.textContent).toMatch(/supplement · 4 kcal \/ 1 g sachet/);
   });
 
-  // A half-typed food would be offered in every search on every screen.
+  // A half-typed food would be offered in every search on every screen. The bar is
+  // isCompleteFood — the SAME one the ration's bookmark uses, so the library's two doors agree.
   it("won't save one without a name and an energy", async () => {
     await mount();
     await openForm();
@@ -106,6 +107,15 @@ describe("Foods page", () => {
     await type(/new food name/i, "Nameless Energy");
     expect(screen.getByRole("button", { name: /save food/i }).disabled).toBe(true); // still no energy
     await type(/^Energy$/i, "3800");
+    expect(screen.getByRole("button", { name: /save food/i }).disabled).toBe(false);
+  });
+
+  it("a can's energy alone is enough — same as saving it from a ration row", async () => {
+    await mount();
+    await openForm();
+    await type(/new food name/i, "Gramless Can");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /is wet food/i })); });
+    await type(/Energy \/ can/i, "60"); // no grams/can — the bookmark path accepts exactly this
     expect(screen.getByRole("button", { name: /save food/i }).disabled).toBe(false);
   });
 
@@ -152,6 +162,67 @@ describe("Foods page", () => {
     expect(screen.queryByDisplayValue("Doomed Duck")).toBeNull();
     expect(container.textContent).toMatch(/Nothing matches that/);
     confirm.mockRestore();
+  });
+
+  // THE reported bug, exactly as reported: "I tried removing some of the default foods from my
+  // library yesterday, but now they are back." Remove a starter food, come back tomorrow (a fresh
+  // mount over the same storage), and it must still be gone — ensureBuiltins used to re-add it on
+  // every load.
+  it("keeps a removed starter food removed across a reload", async () => {
+    const first = await mount();
+    // the starter list carries this recipe in TWO can sizes — remove every one, or the survivor
+    // makes the reload assertion pass for the wrong reason
+    await type(/search your foods/i, "Tiki Cat After Dark Chicken & Beef");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    while (screen.queryAllByRole("button", { name: /^remove/i }).length) {
+      await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: /^remove/i })[0]); });
+    }
+    confirm.mockRestore();
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); }); // debounced save
+    first.unmount();
+    cleanup();
+    const { container } = await mount(); // "the next morning": same storage, fresh app
+    await type(/search your foods/i, "Tiki Cat After Dark Chicken & Beef");
+    expect(container.textContent).toMatch(/Nothing matches that/);
+  });
+
+  it("but re-adding it by hand un-deletes it, including across a reload", async () => {
+    const first = await mount();
+    await type(/search your foods/i, "Tiki Cat After Dark Chicken & Beef");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    while (screen.queryAllByRole("button", { name: /^remove/i }).length) {
+      await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: /^remove/i })[0]); });
+    }
+    confirm.mockRestore();
+    await type(/search your foods/i, "");
+    await openForm();
+    await type(/new food name/i, "Tiki Cat After Dark Chicken & Beef");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /is wet food/i })); });
+    await type(/Energy \/ can/i, "60");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save food/i })); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+    first.unmount();
+    cleanup();
+    await mount();
+    // scope to the food rows' own name inputs — the search box is also an input holding the query
+    expect(screen.getAllByLabelText(/Chicken & Beef.*name$/i).length).toBeGreaterThan(0);
+  });
+
+  // Steph's rule, checked in the place it was broken: the form must save through the same seam
+  // the ration's bookmark uses (saveFood → toLibraryEntry), so the row-only fields the draft
+  // carries (blankFood's pct, a scratch id) never land in the library.
+  it("saves through the shared seam — no ration-only fields leak into the library", async () => {
+    await mount();
+    await openForm();
+    await type(/new food name/i, "Seam Check");
+    await type(/^Energy$/i, "3800");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save food/i })); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+    const saved = JSON.parse(window.localStorage.getItem("catration_v1"));
+    const f = saved.library.find((x) => x.name === "Seam Check");
+    expect(f).toBeTruthy();
+    expect(f.pct).toBeUndefined();
+    expect(f.modAt).toBeGreaterThan(0);
   });
 
   // The hand-off from the cupboard: it links here with the name it couldn't do anything with.

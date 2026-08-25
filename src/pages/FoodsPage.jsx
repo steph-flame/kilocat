@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
-import { blankFood, foodType, kcalPerG } from "../lib/foods.js";
+import { blankFood, foodType, kcalPerG, isCompleteFood } from "../lib/foods.js";
 import { hashParam } from "../hooks/useHashRoute.js";
 import GuaranteedAnalysis from "../components/GuaranteedAnalysis.jsx";
 import { TypePicker, EnergyFields, typePatch } from "../components/FoodTypeFields.jsx";
@@ -37,7 +37,10 @@ function NewFood({ onSave, prefillName }) {
   const [open, setOpen] = useState(!!prefillName);
   const set = (k, v) => setF((cur) => ({ ...cur, [k]: v }));
   const patch = (obj) => setF((cur) => ({ ...cur, ...obj }));
-  const usable = f.name.trim() && kcalPerG(f) > 0;
+  // isCompleteFood, not a local rule: it's the SAME bar the ration's bookmark holds a row to
+  // before saving. This form briefly had its own stricter one (energy density, which for a can
+  // demands grams too) — so the two doors into the library disagreed about what a food needs.
+  const usable = isCompleteFood(f);
   const save = () => { if (usable) { onSave(f); setF({ ...blankFood(), ...typePatch(foodType(f)) }); setOpen(false); } };
 
   if (!open) {
@@ -109,7 +112,7 @@ function FoodCard({ f, library }) {
 }
 
 export default function FoodsPage() {
-  const { library } = useApp();
+  const { library, saveFood } = useApp();
   const [q, setQ] = useState("");
   const [prefill] = useState(() => hashParam("new")); // a name handed over from the cupboard
   // Search to find a food, then fix its name — which is the moment a live filter turns against you,
@@ -135,7 +138,11 @@ export default function FoodsPage() {
           <p style={{ ...cap, margin: 0 }}>Everything the app can offer you when you build a ration or stock the cupboard. Shared by all your cats — a tin's label doesn't change per animal.</p>
         </div>
 
-        <NewFood prefillName={prefill} onSave={(f) => library.upsert(f)} />
+        {/* saveFood, not library.upsert: the ONE seam every food-save goes through (the ration's
+            bookmark uses it too). It runs toLibraryEntry, which strips the row-only fields — the
+            raw draft here still carries blankFood's pct and a scratch id, neither of which
+            belongs in the library. */}
+        <NewFood prefillName={prefill} onSave={saveFood} />
 
         <Card className="span-all">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>

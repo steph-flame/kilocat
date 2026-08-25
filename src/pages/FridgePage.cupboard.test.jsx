@@ -156,12 +156,43 @@ describe("Cans page — cupboard", () => {
 });
 
 describe("Cans page — cases", () => {
+  const newCase = async () => {
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save a case mix/i })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /edit the mix/i })); });
+  };
+  const addToCase = async (name) => {
+    await act(async () => { fireEvent.change(screen.getByLabelText(/add a food to this case/i), { target: { value: name } }); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /add this food to the case/i })); });
+  };
+
+  // As reported: the editor used to project the WHOLE cupboard list in with a counter each. A
+  // case's mix is its own list — it starts empty and grows one food at a time.
+  it("a new case starts empty, not as a copy of the cupboard's list", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Duck", count: 5 }])));
+    const { container } = await mount();
+    await newCase();
+    expect(container.textContent).toMatch(/Empty box so far/);
+    expect(screen.queryByLabelText(/Duck per case/i)).toBeNull(); // the cupboard's Duck isn't pre-listed
+  });
+
+  it("grows from saved foods, and can hold one the cupboard never mentioned", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    await mount();
+    await newCase();
+    await addToCase("Brand New Flavour");
+    expect(screen.getByLabelText(/Brand New Flavour per case/i).value).toBe("1");
+    await addToCase("Brand New Flavour"); // adding again bumps, not duplicates
+    expect(screen.getByLabelText(/Brand New Flavour per case/i).value).toBe("2");
+    expect(screen.getAllByLabelText(/per case/i)).toHaveLength(1);
+  });
+
   it("saves a mix and adds it by the box", async () => {
     window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
     const { container } = await mount();
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save a case mix/i })); });
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /edit the mix/i })); });
-    await act(async () => { fireEvent.change(screen.getByLabelText(/^Chicken per case/i), { target: { value: "4" } }); });
+    await newCase();
+    await addToCase("Chicken");
+    await act(async () => { fireEvent.change(screen.getByLabelText(/Chicken per case/i), { target: { value: "4" } }); });
+    await addToCase("Duck");
     await act(async () => { fireEvent.change(screen.getByLabelText(/Duck per case/i), { target: { value: "2" } }); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /\+ 1 case/i })); });
     expect(countBox("Chicken").value).toBe("4");
@@ -170,6 +201,17 @@ describe("Cans page — cases", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /\+ 1 case/i })); });
     expect(countBox("Chicken").value).toBe("8");
     expect(container.textContent).toMatch(/6 cans ·/); // the case still describes its own mix
+  });
+
+  it("a line can be taken back out of the mix", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    await mount();
+    await newCase();
+    await addToCase("Chicken");
+    await addToCase("Duck");
+    await act(async () => { fireEvent.click(screen.getByLabelText(/Remove Chicken from this case/i)); });
+    expect(screen.queryByLabelText(/Chicken per case/i)).toBeNull();
+    expect(screen.getByLabelText(/Duck per case/i)).toBeTruthy();
   });
 
   it("won't add an empty case", async () => {

@@ -329,12 +329,20 @@ export const isCompleteFood = (f) =>
   (f.mode === "perKg" ? num(f.kcalPerKg) > 0 : num(f.kcalPerUnit) > 0);
 
 const keyOf = (name) => String(name || "").trim().toLowerCase();
+// THE food identity, shared by everything that answers "is this the same food?": upsert, dedupe,
+// the library merge, and deletion tombstones. Case-insensitive, "(dry)"/"(wet)"-stripped. One
+// definition on purpose — two notions of "same food" is how a deletion misses its target.
+export const foodKey = (name) => keyOf(stripKind(name));
 
 // Insert or update by name (case-insensitive). Keeps the existing id on update so
 // React keys stay stable; new foods get a fresh id.
-export function upsertFood(list, entry) {
+// `modAt` is stamped on every insert/update: it's the food's side of the LWW race against a
+// deletion tombstone (see mergeData.js's isFoodVisible) — re-adding a deleted food has to carry
+// proof it's newer than the deletion, or the next merge would quietly re-delete it.
+export function upsertFood(list, entry, now = Date.now()) {
   const k = keyOf(entry.name);
   if (!k) return list;
+  entry = { ...entry, modAt: now };
   const idx = list.findIndex((f) => keyOf(f.name) === k);
   if (idx < 0) return [...list, { id: uid(), ...entry }];
   const next = list.slice();
@@ -406,9 +414,15 @@ export function migrateLegacyFood(f) {
 
 // Ensure every current built-in is present in a saved library (adds only what's missing,
 // leaves the user's own foods), so existing users pick up food-list changes on load.
-export function ensureBuiltins(list) {
+//
+// EXCEPT the ones the owner deleted. This ran unconditionally on every load, which made deleting
+// a built-in impossible: the deletion removed it, the next load saw it "missing" and put it back.
+// A deleted food's tombstone (see useFoodLibrary/mergeData) says "missing on purpose" — only an
+// explicit library reset, or re-adding it by hand, brings a tombstoned built-in back.
+export function ensureBuiltins(list, deletedFoods = {}) {
   const out = list.slice();
   for (const b of BUILTIN_FOODS) {
+    if (foodKey(b.name) in deletedFoods) continue;
     if (!out.some((f) => keyOf(f.name) === keyOf(b.name))) out.push({ id: uid(), name: b.name, mode: b.mode, ...macrosOf(b) });
   }
   return out;

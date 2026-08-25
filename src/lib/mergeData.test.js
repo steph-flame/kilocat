@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mergeV2, weightKey, intakeKey, pruneTombstones, TOMBSTONE_TTL_MS, visibleCats, mergeLibrary } from "./mergeData.js";
 import { validateImport } from "./validate.js";
 import { migrateV1 } from "./migrate.js";
+import { foodKey } from "./foods.js";
 
 /* ---------- fixtures ---------- */
 
@@ -755,5 +756,45 @@ describe("mergeV2 result always validates", () => {
 
   it("validates even for a minimal single-cat merge with empty logs", () => {
     expect(validateImport(mergeV2(snap(), snap()))).toBe(true);
+  });
+});
+
+// Deleting a food from the library has to survive both a merge and a round trip — the union used
+// to resurrect every deletion, which (with ensureBuiltins) is why removed starter foods came back.
+describe("library deletions propagate instead of resurrecting", () => {
+  const rabbit = { id: "f1", name: "Rabbit Feast", mode: "perKg", kcalPerKg: 1500, modAt: 1000 };
+  const base = (extra) => ({ v: 2, activeCatId: "c", cats: {}, library: [], ...extra });
+
+  it("a tombstone newer than the food removes it from the merged library", () => {
+    const local = base({ library: [rabbit] });
+    const incoming = base({ deletedFoods: { [foodKey(rabbit.name)]: 2000 } });
+    const m = mergeV2(local, incoming, 10_000);
+    expect(m.library.some((f) => f.name === rabbit.name)).toBe(false);
+    expect(m.deletedFoods[foodKey(rabbit.name)]).toBe(2000);
+  });
+
+  it("re-adding the food AFTER the deletion wins — a name isn't poisoned forever", () => {
+    const local = base({ library: [{ ...rabbit, modAt: 3000 }] }); // re-created after the delete
+    const incoming = base({ deletedFoods: { [foodKey(rabbit.name)]: 2000 } });
+    expect(mergeV2(local, incoming, 10_000).library.some((f) => f.name === rabbit.name)).toBe(true);
+  });
+
+  it("is order-independent either way", () => {
+    const a = base({ library: [rabbit] });
+    const b = base({ deletedFoods: { [foodKey(rabbit.name)]: 2000 } });
+    const ab = mergeV2(a, b, 10_000), ba = mergeV2(b, a, 10_000);
+    expect(ab.library).toEqual(ba.library);
+    expect(ab.deletedFoods).toEqual(ba.deletedFoods);
+  });
+
+  it("a food with no modAt at all (legacy) loses to any tombstone", () => {
+    const { modAt, ...legacy } = rabbit;
+    const m = mergeV2(base({ library: [legacy] }), base({ deletedFoods: { [foodKey(rabbit.name)]: 1 } }), 10_000);
+    expect(m.library.some((f) => f.name === rabbit.name)).toBe(false);
+  });
+
+  it("old tombstones age out through the same GC as every other tombstone", () => {
+    const m = mergeV2(base({ deletedFoods: { gone: 1000 } }), base({}), Number.MAX_SAFE_INTEGER / 2);
+    expect(m.deletedFoods.gone).toBeUndefined();
   });
 });

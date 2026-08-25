@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   distribute, waterfall, transitionAmount, kcalPerG, kcalFromGrams, isValidQty,
   upsertFood, searchFoods, isCompleteFood, toLibraryEntry, makeLibrarySeed, dedupeFoods, canonicalFoodName,
-  migrateLegacyFood, ensureBuiltins, macroProfile, backfillBuiltinMacros, blankFood, BUILTIN_FOODS, FOOD_NUM_KEYS,
+  migrateLegacyFood, ensureBuiltins, upsertFood, foodKey, macroProfile, backfillBuiltinMacros, blankFood, BUILTIN_FOODS, FOOD_NUM_KEYS,
   rationMacroProfile, aafcoCheck, treatEnergy, foodType,
 } from "./foods.js";
 
@@ -207,6 +207,25 @@ describe("migrateLegacyFood (retire the generic Tiki)", () => {
     expect(migrateLegacyFood(real)).toBe(real);
     const other = { name: "Fromm Kitten Gold", mode: "perKg", kcalPerKg: 3941 };
     expect(migrateLegacyFood(other)).toBe(other);
+  });
+});
+
+describe("deleting a food actually sticks", () => {
+  const dead = () => ({ [foodKey(BUILTIN_FOODS[0].name)]: 1000 });
+
+  it("ensureBuiltins leaves a tombstoned built-in out", () => {
+    const out = ensureBuiltins([], dead());
+    expect(out.some((f) => f.name === BUILTIN_FOODS[0].name)).toBe(false);
+    expect(out.length).toBe(BUILTIN_FOODS.length - 1); // only the one is missing
+  });
+
+  it("upsertFood stamps modAt, the food's side of the race against a tombstone", () => {
+    const out = upsertFood([], { name: "Rabbit", mode: "perKg", kcalPerKg: 1500 }, 5000);
+    expect(out[0].modAt).toBe(5000);
+  });
+
+  it("foodKey is the one identity: case/whitespace/'(dry)' can't dodge a tombstone", () => {
+    expect(foodKey("  Tiki Chicken (dry) ")).toBe(foodKey("tiki chicken"));
   });
 });
 

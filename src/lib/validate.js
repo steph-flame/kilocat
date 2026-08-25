@@ -105,6 +105,7 @@ function isLRConnection(v) {
 // treatment as stateModAt/deletedEntries above.
 function validateSharedShape(d) {
   if (d.library !== undefined && !arrOf(d.library, isFoodEntry)) return false;
+  if (d.deletedFoods !== undefined && !isTombstoneMap(d.deletedFoods)) return false;
   if (d.fridgeDays !== undefined && typeof d.fridgeDays !== "number") return false;
   if (d.intakeMethod !== undefined && typeof d.intakeMethod !== "string") return false;
   if (d.litterRobot !== undefined && !isLRConnection(d.litterRobot)) return false;
