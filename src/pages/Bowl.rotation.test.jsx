@@ -102,3 +102,42 @@ describe("starting a rotation", () => {
     expect(flavorRows()).toHaveLength(2); // the food that was there + one to fill in
   });
 });
+
+// The type picker and energy fields moved out of this page into a shared component so the Foods
+// page could stop offering only wet and dry. That refactor has to leave the ration exactly as it
+// was, including the treat handling that only ever lived here.
+describe("Ration row details, after the type/energy controls were shared", () => {
+  const PLAIN_DRY = [{ id: "slot1", name: "Kibble", mode: "perKg", type: "dry", kcalPerKg: 3800, splitMode: "remainder", pct: 100 }];
+
+  const openDetails = () => fireEvent.click(screen.getByRole("button", { name: /details/i }));
+
+  it("still offers all four types", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed(PLAIN_DRY)));
+    await mount();
+    openDetails();
+    for (const re of [/is dry food/i, /is wet food/i, /is a treat/i, /is a supplement/i]) {
+      expect(screen.getByRole("button", { name: re })).toBeTruthy();
+    }
+  });
+
+  it("swaps the energy fields with the type, as it always did", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed(PLAIN_DRY)));
+    await mount();
+    openDetails();
+    expect(screen.getByLabelText(/^Energy$/i)).toBeTruthy();           // dry: kcal/kg
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /is wet food/i })); });
+    expect(screen.getByLabelText(/Energy \/ can/i)).toBeTruthy();
+  });
+
+  // The one piece of real logic in that block: a treat's weight is worked out from the two
+  // figures on the package rather than typed.
+  it("still derives a treat's weight from the label", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed(PLAIN_DRY)));
+    const { container } = await mount();
+    openDetails();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /is a treat/i })); });
+    await act(async () => { fireEvent.change(screen.getByLabelText(/Calories \/ treat/i), { target: { value: "2" } }); });
+    await act(async () => { fireEvent.change(screen.getByLabelText(/Calories \/ kg/i), { target: { value: "4000" } }); });
+    expect(container.textContent).toMatch(/0\.5 g per treat · worked out from the label/);
+  });
+});

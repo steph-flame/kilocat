@@ -4,6 +4,7 @@ import { A, TYPE } from "../almanac.js";
 import { blankFood, foodType, kcalPerG } from "../lib/foods.js";
 import { hashParam } from "../hooks/useHashRoute.js";
 import GuaranteedAnalysis from "../components/GuaranteedAnalysis.jsx";
+import { TypePicker, EnergyFields, typePatch } from "../components/FoodTypeFields.jsx";
 
 // Foods — the saved-food library, as a place of its own.
 //
@@ -20,58 +21,24 @@ import GuaranteedAnalysis from "../components/GuaranteedAnalysis.jsx";
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 const cap = { fontSize: 12.5, color: A.bodyOnFill, lineHeight: 1.45, margin: "6px 0 0" };
 const dotColor = (f) => (foodType(f) === "wet" ? A.food.wet : foodType(f) === "treat" ? A.food.treat : A.food.dry);
-const numBox = { width: 78, fontFamily: TYPE.mono, fontSize: 14, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, textAlign: "right", padding: "2px 2px" };
+const UNIT_WORD = { wet: "can", treat: "treat", supplement: "sachet", dry: "serving" };
 
 function Card({ children, style, className }) {
   return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "16px 18px", margin: "0 18px 14px", ...style }}>{children}</div>;
-}
-
-// A food is fed by the KILO (kibble from a bag) or by the UNIT (a can, pouch, or treat). That one
-// choice decides which two energy fields make sense, which is why it's a control and not a guess.
-const MODES = [["perKg", "by weight", "kibble from a bag"], ["perUnit", "by the can", "cans, pouches, treats"]];
-
-function EnergyFields({ f, onField }) {
-  const rows = f.mode === "perUnit"
-    ? [["kcalPerUnit", "Energy per can", "kcal"], ["gramsPerUnit", "Grams per can", "g"]]
-    : [["kcalPerKg", "Energy", "kcal/kg"], ["gramsPerCup", "Grams per cup", "g (optional)"]];
-  return (
-    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10 }}>
-      {rows.map(([k, lbl, suf]) => (
-        <label key={k} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <span style={label({ fontSize: 9 })}>{lbl}</span>
-          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>
-            <input type="number" step="any" min="0" value={f[k] ?? ""} onChange={(e) => onField(k, e.target.value)}
-              aria-label={`${f.name || "food"} ${lbl}`} style={numBox} />
-            <span style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted }}>{suf}</span>
-          </span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function ModePicker({ mode, onChange, name }) {
-  return (
-    <div style={{ display: "flex", gap: 5 }}>
-      {MODES.map(([m, lbl, hint]) => (
-        <button key={m} onClick={() => onChange(m)} aria-pressed={mode === m} title={hint}
-          aria-label={`${name || "food"} measured ${lbl}`}
-          style={{ fontFamily: TYPE.mono, fontSize: 10, letterSpacing: ".06em", textTransform: "uppercase", borderRadius: 7, padding: "4px 9px", cursor: "pointer",
-            border: mode === m ? "none" : `1px solid ${A.cardBorder}`, background: mode === m ? A.ink : "transparent", color: mode === m ? A.card : A.muted }}>{lbl}</button>
-      ))}
-    </div>
-  );
 }
 
 // Creating one. Deliberately its own form rather than "add a blank row and edit it": a half-typed
 // food in the library is offered in every search on every screen, so nothing is saved until the
 // two things that make a food usable — a name and an energy — are actually filled in.
 function NewFood({ onSave, prefillName }) {
-  const [f, setF] = useState(() => ({ ...blankFood(), name: prefillName, mode: "perKg" }));
+  // Starts as dry only because something has to be selected; the picker is right there, and the
+  // type carries its own mode (see FoodTypeFields) so the energy fields follow the choice.
+  const [f, setF] = useState(() => ({ ...blankFood(), name: prefillName, ...typePatch("dry") }));
   const [open, setOpen] = useState(!!prefillName);
   const set = (k, v) => setF((cur) => ({ ...cur, [k]: v }));
+  const patch = (obj) => setF((cur) => ({ ...cur, ...obj }));
   const usable = f.name.trim() && kcalPerG(f) > 0;
-  const save = () => { if (usable) { onSave({ ...f, type: f.mode === "perUnit" ? "wet" : "dry" }); setF({ ...blankFood(), mode: f.mode }); setOpen(false); } };
+  const save = () => { if (usable) { onSave(f); setF({ ...blankFood(), ...typePatch(foodType(f)) }); setOpen(false); } };
 
   if (!open) {
     return (
@@ -88,8 +55,8 @@ function NewFood({ onSave, prefillName }) {
       <input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Name as it reads on the tin" autoFocus
         aria-label="New food name"
         style={{ width: "100%", background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, outline: "none", fontFamily: TYPE.sans, fontSize: 15, color: A.ink, padding: "3px 0" }} />
-      <div style={{ marginTop: 10 }}><ModePicker mode={f.mode} onChange={(m) => set("mode", m)} name={f.name} /></div>
-      <EnergyFields f={f} onField={set} />
+      <div style={{ marginTop: 12 }}><TypePicker food={f} onPatch={patch} name={f.name || "new food"} /></div>
+      <EnergyFields food={f} onPatch={patch} />
       <GuaranteedAnalysis food={f} onEditField={set} />
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
         <button onClick={save} disabled={!usable}
@@ -120,15 +87,17 @@ function FoodCard({ f, library }) {
           aria-label={`Remove ${f.name}`} style={{ color: A.muted, border: "none", background: "none", cursor: "pointer", fontSize: 15, flex: "none" }}>×</button>
       </div>
       <div style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted, paddingLeft: 17 }}>
+        {foodType(f)}
+        {" · "}
         {f.mode === "perUnit"
-          ? `${f.kcalPerUnit || "?"} kcal / ${f.gramsPerUnit || "?"} g can`
+          ? `${f.kcalPerUnit || "?"} kcal / ${f.gramsPerUnit || "?"} g ${UNIT_WORD[foodType(f)]}`
           : `${f.kcalPerKg || "?"} kcal/kg`}
-        {density > 0 ? ` · ${Number((density * 1000).toFixed(0))} kcal/kg` : ""}
+        {density > 0 && f.mode === "perUnit" ? ` · ${Number((density * 1000).toFixed(0))} kcal/kg` : ""}
       </div>
       {open && (
         <div style={{ paddingLeft: 17, marginTop: 8 }}>
-          <ModePicker mode={f.mode} onChange={(m) => edit("mode", m)} name={f.name} />
-          <EnergyFields f={f} onField={edit} />
+          <TypePicker food={f} onPatch={(obj) => library.edit(f.id, obj)} name={f.name} />
+          <EnergyFields food={f} onPatch={(obj) => library.edit(f.id, obj)} />
           <GuaranteedAnalysis food={f} onEditField={edit} />
           <p style={{ fontSize: 11, color: A.muted, marginTop: 8, lineHeight: 1.45 }}>
             Editing a saved food changes what future searches fill in. Rations you've already built keep the numbers they were built with.

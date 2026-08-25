@@ -50,14 +50,52 @@ describe("Foods page", () => {
     const { container } = await mount();
     await openForm();
     await type(/new food name/i, "Fancy Rabbit Pâté");
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /by the can/i })); });
-    await type(/Energy per can/i, "82");
-    await type(/Grams per can/i, "85");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /is wet food/i })); });
+    await type(/Energy \/ can/i, "82");
+    await type(/Grams \/ can/i, "85");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save food/i })); });
     expect(screen.getByDisplayValue("Fancy Rabbit Pâté")).toBeTruthy();
     await type(/search your foods/i, "rabbit");
     expect(screen.getByDisplayValue("Fancy Rabbit Pâté")).toBeTruthy();
     expect(container.textContent).toMatch(/1 shown/);
+  });
+
+  // The four types the app actually has. Offering only "by weight / by the can" derived the type
+  // from the measurement, which silently made every non-kibble food wet — so a treat or a
+  // supplement could not be created anywhere but a ration row.
+  it("offers all four types, not just how it's measured", async () => {
+    await mount();
+    await openForm();
+    for (const re of [/is dry food/i, /is wet food/i, /is a treat/i, /is a supplement/i]) {
+      expect(screen.getByRole("button", { name: re })).toBeTruthy();
+    }
+  });
+
+  it("creates a treat, with the label's own two figures", async () => {
+    const { container } = await mount();
+    await openForm();
+    await type(/new food name/i, "Temptations");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /is a treat/i })); });
+    // a treat is entered as the package states it — per treat AND per kg
+    await type(/Calories \/ treat/i, "2");
+    await type(/Calories \/ kg/i, "4000");
+    expect(container.textContent).toMatch(/g per treat · worked out from the label/); // weight derived
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save food/i })); });
+    await type(/search your foods/i, "Tempt");
+    expect(screen.getByDisplayValue("Temptations")).toBeTruthy();
+    expect(container.textContent).toMatch(/treat ·/);
+  });
+
+  it("creates a supplement, which is given by the sachet", async () => {
+    const { container } = await mount();
+    await openForm();
+    await type(/new food name/i, "Probiotic Sachet");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /is a supplement/i })); });
+    await type(/Calories \/ sachet/i, "4");
+    await type(/Grams \/ sachet/i, "1");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save food/i })); });
+    await type(/search your foods/i, "Probiotic");
+    expect(container.textContent).toMatch(/supplement · 4 kcal \/ 1 g sachet/);
   });
 
   // A half-typed food would be offered in every search on every screen.
@@ -67,7 +105,7 @@ describe("Foods page", () => {
     expect(screen.getByRole("button", { name: /save food/i }).disabled).toBe(true);
     await type(/new food name/i, "Nameless Energy");
     expect(screen.getByRole("button", { name: /save food/i }).disabled).toBe(true); // still no energy
-    await type(/Energy$/i, "3800");
+    await type(/^Energy$/i, "3800");
     expect(screen.getByRole("button", { name: /save food/i }).disabled).toBe(false);
   });
 
@@ -77,7 +115,7 @@ describe("Foods page", () => {
     await mount();
     await openForm();
     await type(/new food name/i, "Typo Chicken");
-    await type(/Energy$/i, "3800");
+    await type(/^Energy$/i, "3800");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save food/i })); });
     await type(/search your foods/i, "Typo");
     // rename it to something that no longer matches "Typo" — it must stay put
@@ -92,7 +130,7 @@ describe("Foods page", () => {
     const { container } = await mount();
     await openForm();
     await type(/new food name/i, "Typo Chicken");
-    await type(/Energy$/i, "3800");
+    await type(/^Energy$/i, "3800");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save food/i })); });
     await act(async () => { fireEvent.change(screen.getByLabelText(/Typo Chicken name/i), { target: { value: "Fixed Chicken" } }); });
     expect(screen.getByDisplayValue("Fixed Chicken")).toBeTruthy();
@@ -103,7 +141,7 @@ describe("Foods page", () => {
     const { container } = await mount();
     await openForm();
     await type(/new food name/i, "Doomed Duck");
-    await type(/Energy$/i, "3800");
+    await type(/^Energy$/i, "3800");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save food/i })); });
     await type(/search your foods/i, "Doomed");
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);

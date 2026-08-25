@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
 import { distributeBowl } from "../lib/bowl.js";
-import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, treatEnergy, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
+import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { hasRotation, isRotating, foodFieldsOf, upcomingFlavors, packLabel } from "../lib/rotation.js";
 import { makeSlotKeyer } from "../lib/transition.js";
 import { resolveRotationsWithFridge, activeMemberWithFridge } from "../lib/fridge.js";
@@ -10,6 +10,7 @@ import { num, uid } from "../lib/util.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import { BookmarkPlus, BookmarkCheck } from "lucide-react";
 import FoodSearch from "../components/FoodSearch.jsx";
+import { TypePicker, EnergyFields } from "../components/FoodTypeFields.jsx";
 import GuaranteedAnalysis from "../components/GuaranteedAnalysis.jsx";
 import { DistributionBody, Toggle } from "../components/FoodDistribution.jsx";
 import { foodSummary, macroBreakdown } from "../lib/foodStats.js";
@@ -21,18 +22,8 @@ const r0 = (n) => Math.round(n);
 const g1 = (g) => (g == null ? "—" : `${Number(Number(g).toFixed(1))} g`); // grams to 1 decimal, trimmed
 const label = (extra) => ({ fontFamily: TYPE.mono, fontSize: 10.5, letterSpacing: ".16em", textTransform: "uppercase", color: A.muted, fontWeight: 500, ...extra });
 const MODES = [["fixed", "fixed"], ["share", "share"], ["remainder", "rest"]];
-const TYPES = [["wet", "wet"], ["dry", "dry"], ["treat", "treat"], ["supplement", "supp"]];
 const dotColor = (f) => { const ty = foodType(f); return ty === "treat" ? A.food.treat : ty === "supplement" ? A.food.supplement : ty === "wet" ? A.food.wet : A.food.dry; };
 // energy fields per food type (all accept decimals). treats are priced per treat.
-const ENERGY_FIELDS = {
-  dry: [["kcalPerKg", "Energy", "kcal/kg"], ["gramsPerCup", "Grams / cup", "g"]],
-  wet: [["kcalPerUnit", "Energy / can", "kcal"], ["gramsPerUnit", "Grams / can", "g"]],
-  // Treats: enter exactly what's on the package — calories per treat AND calories per kg. The
-  // treat's weight (gramsPerUnit) is derived from those, not entered.
-  treat: [["kcalPerUnit", "Calories / treat", "kcal"], ["kcalPerKg", "Calories / kg", "kcal/kg"]],
-  // Supplements (a probiotic sachet, a powder): given by the sachet/scoop — calories and grams per.
-  supplement: [["kcalPerUnit", "Calories / sachet", "kcal"], ["gramsPerUnit", "Grams / sachet", "g"]],
-};
 
 function Card({ children, style, className }) {
   return <div className={className} style={{ background: A.card, border: `1px solid ${A.cardBorder}`, borderRadius: 20, padding: "14px 16px", margin: "0 18px 14px", ...style }}>{children}</div>;
@@ -356,7 +347,6 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
   const setFixedGrams = (v) => { setGEdit(v); ration.setField(f.id, "fixedKcal", v === "" ? "" : Math.round(Number(v) * kpg * 100) / 100); };
   const gramsShown = gEdit != null ? gEdit : (row.grams != null ? String(Number(row.grams.toFixed(1))) : "");
   const patch = (obj) => ration.setItems((fs) => fs.map((x) => (x.id === f.id ? { ...x, ...obj } : x)));
-  const setType = (ty) => patch({ type: ty, mode: ty === "dry" ? "perKg" : "perUnit" });
   // A treat is given by count; its fixed kcal follows the per-treat energy.
   const setTreatCount = (c) => patch({ treatCount: c, fixedKcal: c === "" ? "" : num(c) * num(af.kcalPerUnit) });
 
@@ -518,49 +508,17 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
         </div>
       )}
 
-      {showDetails && !isRot && <FoodDetails f={f} type={type} patch={patch} setType={setType} ration={ration} />}
+      {showDetails && !isRot && <FoodDetails f={f} patch={patch} />}
     </div>
   );
 }
 
-function FoodDetails({ f, type, patch, setType, ration }) {
-  // For treats, changing calories/treat or calories/kg re-derives the treat's weight (gramsPerUnit)
-  // so grams throughout the app still work — the owner only ever types what's on the package.
-  const changeEnergy = (k, v) => {
-    if (type !== "treat") return patch({ [k]: v });
-    const next = { ...f, [k]: v };
-    patch({ [k]: v, gramsPerUnit: treatEnergy({ kcalPerTreat: next.kcalPerUnit, kcalPerKg: next.kcalPerKg }).gramsPerUnit });
-  };
+function FoodDetails({ f, patch }) {
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${A.cardBorder}` }}>
       <div style={label({ marginBottom: 6 })}>Type</div>
-      <div style={{ display: "flex", gap: 5 }}>
-        {TYPES.map(([ty, lbl]) => {
-          const on = type === ty;
-          return (
-            <button key={ty} onClick={() => setType(ty)} aria-pressed={on}
-              style={{ fontFamily: TYPE.mono, fontSize: 11, borderRadius: 999, padding: "4px 12px", cursor: "pointer",
-                border: on ? "none" : `1px solid ${A.cardBorder}`, background: on ? A.ink : "transparent", color: on ? A.card : A.body }}>{lbl}</button>
-          );
-        })}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
-        {ENERGY_FIELDS[type].map(([k, lbl, suf]) => (
-          <label key={k} style={{ display: "block" }}>
-            <span style={label({ fontSize: 10 })}>{lbl}</span>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 3 }}>
-              <input type="number" step="any" min="0" value={f[k] ?? ""} onChange={(e) => changeEnergy(k, e.target.value === "" ? "" : Number(e.target.value))}
-                aria-label={lbl} style={{ width: "100%", fontFamily: TYPE.mono, fontSize: 15, color: A.ink, background: "transparent", border: "none", borderBottom: `1px solid ${A.cardBorder}`, padding: "2px 0" }} />
-              <span style={{ fontFamily: TYPE.mono, fontSize: 11, color: A.muted }}>{suf}</span>
-            </div>
-          </label>
-        ))}
-      </div>
-      {type === "treat" && kcalPerG(f) > 0 && (
-        <div style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.muted, marginTop: 8 }}>≈ {Number((f.gramsPerUnit || 0).toFixed(2))} g per treat · worked out from the label</div>
-      )}
-
+      <TypePicker food={f} onPatch={patch} />
+      <EnergyFields food={f} onPatch={patch} />
       <GuaranteedAnalysis food={f} onEditField={(k, v) => patch({ [k]: v })} />
     </div>
   );
