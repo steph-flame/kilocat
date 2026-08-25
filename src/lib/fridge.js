@@ -8,7 +8,7 @@
 // and supplies an id factory.
 
 import { foodFieldsOf, hasRotation, isRotating, activeMember, followsPantry } from "./rotation.js";
-import { foodType, kcalPerG } from "./foods.js";
+import { foodType, kcalPerG, foodKey } from "./foods.js";
 import { addDays, diffDays } from "./series.js";
 import { num } from "./util.js";
 import { stockStartIndex, stockOf } from "./cupboard.js";
@@ -231,6 +231,30 @@ export function pantryMembers(cupboard, fridge, library, date, fridgeDays) {
   }
   return out.sort((a, b) =>
     (stockOf(cupboard, b.name) || 0) - (stockOf(cupboard, a.name) || 0) || String(a.name).localeCompare(String(b.name)));
+}
+
+// Why a stocked (or open) flavour is NOT in the pantry rotation — so the rule above is never a
+// black box. Membership needs isCanned: a saved food, wet, measured by the can, with a grams
+// figure. Each miss has a distinct fix, and the UI names it:
+//   unsaved  — a bare typed name; nothing to feed or open a can OF
+//   dry      — saved as dry/treat/supplement; those never rotate
+//   byWeight — saved wet but measured per-kg; mark it "by the can"
+//   noGrams  — a can with kcal but no grams-per-can, which the draw can't turn into a scoop
+//     (savable on purpose — see isCompleteFood — but not rotatable, and that gap was silent)
+export function pantryExclusions(cupboard, fridge, library, date, fridgeDays) {
+  const names = new Map(); // key -> display name, for every flavour with stock or an open can
+  for (const r of cupboard || []) if (num(r.count) > 0) names.set(foodKey(r.name), r.name);
+  for (const c of fridge || []) names.set(foodKey(c.name), c.name);
+  const out = [];
+  for (const [k, name] of names) {
+    const f = (library || []).find((x) => foodKey(x.name) === k);
+    if (f && isCanned(f)) continue; // a member — nothing to explain
+    out.push({
+      name,
+      reason: !f ? "unsaved" : foodType(f) !== "wet" ? "dry" : f.mode !== "perUnit" ? "byWeight" : "noGrams",
+    });
+  }
+  return out;
 }
 
 // Materialize pantry-following slots into ordinary rotation rows, so every consumer downstream —

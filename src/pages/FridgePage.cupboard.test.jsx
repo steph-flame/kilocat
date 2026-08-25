@@ -197,6 +197,17 @@ describe("Cans page — opening from the row", () => {
     expect(countBox("Chicken").value).toBe(""); // still untracked, not silently started at 0
   });
 
+  // The row-level version of the pantry exclusions: saved, counted, and still not openable —
+  // the row says which of the three reasons applies instead of just hiding the button.
+  it("a can saved without grams says so on its row", async () => {
+    const s = seed([{ name: "Gramless Can", count: 4 }]);
+    s.library = [{ id: "gl", name: "Gramless Can", mode: "perUnit", type: "wet", kcalPerUnit: 66 }];
+    window.localStorage.setItem("catration_v1", JSON.stringify(s));
+    const { container } = await mount();
+    expect(screen.queryByLabelText(/Open a can of Gramless Can/i)).toBeNull();
+    expect(container.textContent).toMatch(/needs grams per can to open/);
+  });
+
   it("a bare typed name gets no open button — there's no can size to open", async () => {
     window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Mystery Flavour", count: 2 }])));
     await mount();

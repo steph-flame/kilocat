@@ -192,3 +192,37 @@ describe("Ration → a slot that follows the pantry", () => {
     expect(container.textContent).toMatch(/variety pack · 4 flavors/);
   });
 });
+
+// ↻ means "rotate through the pantry" whenever the pantry can answer — hand-lists are the
+// fallback, not the front door ("I have to add all the foods manually" was the front door).
+describe("Ration → starting a rotation, pantry first", () => {
+  const WET2 = (name, kcal = 66) => ({ name, mode: "perUnit", type: "wet", kcalPerUnit: kcal, gramsPerUnit: 80 });
+
+  it("↻ on a plain wet slot with a stocked pantry follows the pantry, no blank list", async () => {
+    const s = seed(PLAIN);
+    s.cats.c1.cupboard = [{ name: "Duck Can", count: 3 }, { name: "Chicken Can", count: 5 }];
+    s.library = [WET2("Duck Can"), WET2("Chicken Can", 70)];
+    window.localStorage.setItem("catration_v1", JSON.stringify(s));
+    const { container } = await mount();
+    fireEvent.click(screen.getByRole("button", { name: /rotate flavors/i }));
+    expect(container.textContent).toMatch(/follows the pantry · 2 flavours in stock/);
+    expect(flavorRows()).toHaveLength(0); // nothing to hand-fill
+  });
+
+  it("with a pantry that can't answer, ↻ seeds the hand-list exactly as before", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed(PLAIN))); // no cupboard at all
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: /rotate flavors/i }));
+    expect(flavorRows()).toHaveLength(2); // current food + one to fill in
+  });
+
+  it("a stocked flavour that CAN'T rotate is named, with its reason", async () => {
+    const s = seed([{ id: "ps1", ...WET2("Duck Can"), rotateSource: "pantry", splitMode: "remainder", pct: 100 }]);
+    s.cats.c1.cupboard = [{ name: "Duck Can", count: 2 }, { name: "Gramless Can", count: 4 }];
+    s.library = [WET2("Duck Can"), { name: "Gramless Can", mode: "perUnit", type: "wet", kcalPerUnit: 66 }];
+    window.localStorage.setItem("catration_v1", JSON.stringify(s));
+    const { container } = await mount();
+    expect(container.textContent).toMatch(/In the cupboard but not rotating:/);
+    expect(container.textContent).toMatch(/Gramless Can \(needs grams per can\)/);
+  });
+});

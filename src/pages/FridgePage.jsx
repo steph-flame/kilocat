@@ -175,6 +175,15 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, forgetFlavor, 
                       not in your foods · add it ›
                     </a>
                   )}
+                  {/* Saved, counted — and still not openable or rotatable. Every one of these was
+                      a silent exclusion from the pantry rotation; now the row says which and why. */}
+                  {f.usable && food && !openable && (
+                    <a href="#/foods" style={{ fontFamily: TYPE.mono, fontSize: 9.5, color: A.caution.text, textDecoration: "none" }}>
+                      {foodType(food) !== "wet" ? "saved as dry — won't rotate or open"
+                        : food.mode !== "perUnit" ? "saved by weight — mark it by the can ›"
+                        : "needs grams per can to open · fix ›"}
+                    </a>
+                  )}
                 </div>
                 {openable && (
                   <button onClick={() => openFridgeCan(food)} aria-label={`Open a can of ${f.name}`} title="Open a can (moves it to the fridge)"

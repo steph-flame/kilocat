@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, planSlotDraw, isEmptied, emptiedCansOf, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex, pantryMembers, resolvePantrySlots } from "./fridge.js";
+import { isCanned, openCan, canStatus, cansOf, availableCansOf, planDraw, planSlotDraw, isEmptied, emptiedCansOf, consumeFromFridge, returnToFridge, finishOpenCan, activeMemberWithFridge, packStartIndex, nextPackIndex, pantryMembers, resolvePantrySlots, pantryExclusions } from "./fridge.js";
 
 let idn = 0;
 const mkId = () => `can-${idn++}`;
@@ -357,5 +357,44 @@ describe("rotating through the pantry", () => {
   it("leaves explicit-list slots exactly alone", () => {
     const explicit = { id: "s2", rotation: [LIB[0], LIB[1]], rotIndex: 1 };
     expect(resolvePantrySlots([explicit], ctx())[0]).toBe(explicit);
+  });
+});
+
+// The membership rule is fine; its SILENCE wasn't. Everything stocked-but-excluded gets a reason.
+describe("pantryExclusions — why a stocked flavour isn't rotating", () => {
+  const LIB = [
+    { name: "Good Can", mode: "perUnit", type: "wet", kcalPerUnit: 66, gramsPerUnit: 80 },
+    { name: "Gramless Can", mode: "perUnit", type: "wet", kcalPerUnit: 66 },        // savable, not rotatable
+    { name: "ByWeight Wet", mode: "perKg", type: "wet", kcalPerKg: 900 },
+    { name: "Kibble", mode: "perKg", type: "dry", kcalPerKg: 3800 },
+  ];
+  const DAY = "2026-02-02";
+  const stock = (names) => names.map((name) => ({ name, count: 2 }));
+
+  it("names each miss with its distinct fix", () => {
+    const out = pantryExclusions(stock(["Good Can", "Gramless Can", "ByWeight Wet", "Kibble", "Mystery"]), [], LIB, DAY, 3);
+    const by = Object.fromEntries(out.map((m) => [m.name, m.reason]));
+    expect(by["Good Can"]).toBeUndefined();          // a member — nothing to explain
+    expect(by["Gramless Can"]).toBe("noGrams");
+    expect(by["ByWeight Wet"]).toBe("byWeight");
+    expect(by["Kibble"]).toBe("dry");
+    expect(by["Mystery"]).toBe("unsaved");
+  });
+
+  // The trap that prompted this: the Foods page deliberately saves a can on kcal alone
+  // (isCompleteFood), and the pantry rule then excluded it without a word.
+  it("a can saved without grams is countable but flagged, not silently dropped", () => {
+    const out = pantryExclusions(stock(["Gramless Can"]), [], LIB, DAY, 3);
+    expect(out).toEqual([{ name: "Gramless Can", reason: "noGrams" }]);
+    expect(pantryMembers(stock(["Gramless Can"]), [], LIB, DAY, 3)).toEqual([]);
+  });
+
+  it("an open can of an unsaved food is an exclusion too, not invisible", () => {
+    const out = pantryExclusions([], [{ id: "c1", name: "Orphan Open", openedDate: DAY, canGrams: 80, remainingGrams: 40 }], LIB, DAY, 3);
+    expect(out).toEqual([{ name: "Orphan Open", reason: "unsaved" }]);
+  });
+
+  it("zero stock and nothing open is not an exclusion — it's just not stocked", () => {
+    expect(pantryExclusions([{ name: "Kibble", count: 0 }], [], LIB, DAY, 3)).toEqual([]);
   });
 });

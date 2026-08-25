@@ -5,7 +5,7 @@ import { distributeBowl } from "../lib/bowl.js";
 import { foodType, kcalPerG, libEntry, blankFood, isCompleteFood, rationMacroProfile, aafcoCheck } from "../lib/foods.js";
 import { hasRotation, isRotating, followsPantry, foodFieldsOf, upcomingFlavors, packLabel } from "../lib/rotation.js";
 import { makeSlotKeyer } from "../lib/transition.js";
-import { resolveRotationsWithFridge, activeMemberWithFridge, resolvePantrySlots } from "../lib/fridge.js";
+import { resolveRotationsWithFridge, activeMemberWithFridge, resolvePantrySlots, pantryExclusions, pantryMembers } from "../lib/fridge.js";
 import { num, uid } from "../lib/util.js";
 import { DEMO_CAT_ID } from "../lib/catStore.js";
 import { BookmarkPlus, BookmarkCheck } from "lucide-react";
@@ -365,9 +365,17 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
     if (!next || next.length <= 1) { const { rotation, rotateOff, ...rest } = x; return { ...rest, ...(next && next[0] ? foodFieldsOf(next[0]) : {}) }; }
     return { ...x, rotation: next };
   }));
-  // Seed with the current food + one empty slot, and OPEN the editor: the new slot is blank and
-  // needs filling in, so collapsing here would make ↻ look like it did nothing.
-  const startRotation = () => { setMembers([foodFieldsOf(f), foodFieldsOf(blankFood())]); setShowFlavors(true); };
+  // ↻ on a plain wet row: rotating MEANS eating through the pantry, whenever the pantry can
+  // actually answer (≥2 eligible flavours in stock or open) — zero flavour lists to type. Only a
+  // pantry with nothing to say falls back to seeding a hand-list with the current food + a blank.
+  // The panel opens either way, with the switch to go the other way right there — hand-adding
+  // flavours the cupboard already knew about is exactly the "manual instead of fetched" complaint.
+  const startRotation = () => {
+    const members = pantryMembers(cupboard, fridge, library.foods, today, fridgeDays);
+    if (members.length >= 2) patch({ rotateSource: "pantry" });
+    else setMembers([foodFieldsOf(f), foodFieldsOf(blankFood())]);
+    setShowFlavors(true);
+  };
   const togglePause = () => patch({ rotateOff: !f.rotateOff }); // non-destructive: keeps every flavor
   const addFlavor = () => setMembers((cur) => [...cur, foodFieldsOf(blankFood())]);
   const removeFlavor = (idx) => setMembers((cur) => cur.filter((_, i) => i !== idx));
@@ -517,6 +525,25 @@ function BowlRow({ f, row, target, first, library, ration, setSplitMode, saveFoo
               Flavours come from the <a href="#/fridge" style={{ color: A.good }}>cupboard</a>: whatever wet food is in stock or already open rotates in, fullest pile first. Buy a case and it joins by itself.
             </p>
           )}
+          {/* The rule, never a black box: anything stocked that ISN'T rotating is named here with
+              its reason — the silent version of this was "why does the ration not go through the
+              whole pantry?", and the answer lived only in source code. */}
+          {pantry && (() => {
+            const missing = pantryExclusions(cupboard, fridge, library.foods, today, fridgeDays);
+            if (!missing.length) return null;
+            const WHY = {
+              unsaved: "not in your foods yet",
+              dry: "saved as dry — dry food doesn't rotate",
+              byWeight: "saved by weight — mark it \u201cby the can\u201d",
+              noGrams: "needs grams per can",
+            };
+            return (
+              <div style={{ marginTop: 8, fontFamily: TYPE.mono, fontSize: 10, color: A.caution.text, lineHeight: 1.6 }}>
+                In the cupboard but not rotating:{" "}
+                {missing.map((m) => `${m.name} (${WHY[m.reason]})`).join(" · ")} — <a href="#/foods" style={{ color: A.caution.text }}>fix in Foods ›</a>
+              </div>
+            );
+          })()}
           {rotating && (
             <p style={{ fontFamily: TYPE.mono, fontSize: 10.5, color: A.body, marginTop: showFlavors ? 8 : 0, lineHeight: 1.5 }}>
               Next up: <b style={{ color: A.ink }}>{upcomingFlavors(fm, activeIdx < 0 ? 0 : activeIdx, 3).join(" → ")}</b>{fm.rotation.length > 3 ? " → …" : ""}
