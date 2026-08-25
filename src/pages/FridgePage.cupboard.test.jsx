@@ -165,10 +165,42 @@ describe("Cans page — layout", () => {
     const grid = container.querySelector(".alm-grid");
     const col = grid.querySelector(":scope > .alm-col");
     expect(col).toBeTruthy();
-    expect(col.textContent).toMatch(/Open a can/i);
-    expect(col.textContent).toMatch(/open can|Nothing open/i);
+    expect(col.textContent).toMatch(/open cans|Nothing open/i);
     expect(col.textContent).not.toMatch(/cupboard · unopened/i); // the cupboard is NOT inside it
     expect(grid.textContent).toMatch(/cupboard · unopened/i);    // ...but is on the page
+  });
+});
+
+// Opening moved ONTO the cupboard row — a can leaves the shelf, so the button lives at the shelf.
+// The old separate card was the ration's flavours as pills (the cupboard list's subset, twice).
+describe("Cans page — opening from the row", () => {
+  it("the separate Open-a-can card is gone", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    const { container } = await mount();
+    expect(container.textContent).not.toMatch(/Pick any wet food from your saved foods/);
+  });
+
+  it("open on a row moves one can shelf → fridge", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Duck", count: 3 }])));
+    const { container } = await mount();
+    await act(async () => { fireEvent.click(screen.getByLabelText(/Open a can of Duck/i)); });
+    expect(countBox("Duck").value).toBe("2");                   // one left the shelf...
+    expect(container.textContent).toMatch(/1 open can/);        // ...and is now in the fridge
+    expect(screen.getByLabelText(/grams left of Duck/i)).toBeTruthy();
+  });
+
+  it("an uncounted ration flavour can still be opened — counts stay optional", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed()));
+    const { container } = await mount();
+    await act(async () => { fireEvent.click(screen.getByLabelText(/Open a can of Chicken/i)); });
+    expect(container.textContent).toMatch(/1 open can/);
+    expect(countBox("Chicken").value).toBe(""); // still untracked, not silently started at 0
+  });
+
+  it("a bare typed name gets no open button — there's no can size to open", async () => {
+    window.localStorage.setItem("catration_v1", JSON.stringify(seed([{ name: "Mystery Flavour", count: 2 }])));
+    await mount();
+    expect(screen.queryByLabelText(/Open a can of Mystery Flavour/i)).toBeNull();
   });
 });
 

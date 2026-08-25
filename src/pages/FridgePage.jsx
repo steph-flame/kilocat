@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../state/AppState.jsx";
 import { A, TYPE } from "../almanac.js";
-import { foodType } from "../lib/foods.js";
+import { foodType, foodKey } from "../lib/foods.js";
 import { canStatus, isCanned, cansOf } from "../lib/fridge.js";
 import { stockOf, packStock } from "../lib/cupboard.js";
 import { hasRotation } from "../lib/rotation.js";
@@ -51,7 +51,6 @@ export default function FridgePage() {
   const { p, ration, library, fridge, fridgeDays, openFridgeCan, tossCan, setCanRemaining, today,
     cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, removeCaseItem, stockCase } = useApp();
   const name = p?.name || "your cat";
-  const [pick, setPick] = useState("");
 
   // Sort soonest-to-expire first; expired cans float to the very top (they need attention).
   const cans = [...(fridge || [])]
@@ -65,7 +64,7 @@ export default function FridgePage() {
         <div className="span-all" style={{ padding: "18px 24px 2px" }}>
           <div style={label({ color: A.labelOnFill, letterSpacing: ".18em" })}>cans</div>
           <h1 style={{ fontFamily: TYPE.serif, fontWeight: 400, fontSize: 26, lineHeight: 1.24, letterSpacing: "-.012em", margin: "10px 0 6px" }}>Cupboard &amp; fridge</h1>
-          <p style={{ ...cap, margin: 0 }}>What {name} has left unopened, and what's open and ticking. Counting the cupboard is optional — but it's what lets a variety pack open the flavour you have most of, so a case finishes evenly instead of ending on four of the same.</p>
+          <p style={{ ...cap, margin: 0 }}>What {name} has left unopened, and what's open and ticking. Open a can from its cupboard row; counting the cupboard is optional — but it's what lets a variety pack open the flavour you have most of, so a case finishes evenly instead of ending on four of the same.</p>
         </div>
 
         {/* Side by side on a wide screen — the cupboard IS one column and the fridge the other,
@@ -74,32 +73,15 @@ export default function FridgePage() {
         <CupboardCard {...{ options, cupboard, setStockOf, bumpStock, forgetFlavor, cases, addCase, removeCase, setCaseLabel, setCaseItem, removeCaseItem, stockCase, ration, library, openFridgeCan }} />
 
         <div className="alm-col">
-        {/* open a can */}
-        <Card>
-          <div style={label({ marginBottom: 8 })}>Open a can</div>
-          {options.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-              {options.map((f) => (
-                <button key={f.name} onClick={() => openFridgeCan(f)}
-                  style={{ fontFamily: TYPE.sans, fontSize: 12.5, borderRadius: 999, padding: "6px 12px", cursor: "pointer", border: `1px solid ${A.cardBorder}`, background: "transparent", color: A.ink, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 999, background: dotColor(f) }} /> + {f.name}
-                </button>
-              ))}
-            </div>
-          )}
-          <div style={{ border: `1px solid ${A.cardBorder}`, borderRadius: 12, padding: 8 }}>
-            <FoodSearch value={pick} search={library.search} ariaLabel="Open a can of this food"
-              onChangeName={setPick}
-              onPick={(food) => { if (isCanned(food)) { openFridgeCan(food); setPick(""); } }} />
-          </div>
-          <p style={{ ...cap, fontSize: 11 }}>Pick any wet food from your saved foods, or tap one from the ration above. Dry food and treats aren't tracked here.</p>
-        </Card>
-
+        {/* Opening happens ON the cupboard row now — a can leaves the shelf, so the button lives
+            where the shelf is. The old separate "Open a can" card was pill buttons for the ration's
+            own flavours (a subset of the cupboard's list, shown twice) plus a search; opening
+            something brand new is now: add it to the cupboard, tap open. */}
         {/* the open cans */}
         <Card>
           <div style={label({ marginBottom: cans.length ? 10 : 0 })}>{cans.length} open{cans.length === 1 ? " can" : " cans"}</div>
           {cans.length === 0 ? (
-            <p style={{ fontSize: 12.5, color: A.muted }}>Nothing open right now. Open a can above, or log a wet meal and it'll appear here.</p>
+            <p style={{ fontSize: 12.5, color: A.muted }}>Nothing open right now. Tap open on a cupboard row, or log a wet meal and it'll appear here.</p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {cans.map(({ c, s }) => {
@@ -170,6 +152,11 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, forgetFlavor, 
           {rows.map((f) => {
             const n = stockOf(cupboard, f.name);
             const isNext = most.n > 0 && most.name === f.name;
+            // The full food behind this row — the ration flavour itself, or the saved food for a
+            // row that only exists as a count. A bare typed name has nothing to open a can OF
+            // (no can size, no energy), so it gets no button; it already links to Foods instead.
+            const food = f.orphan ? library.foods.find((x) => foodKey(x.name) === foodKey(f.name)) : f;
+            const openable = food && isCanned(food);
             return (
               <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: dotColor(f), flex: "none" }} />
@@ -189,6 +176,10 @@ function CupboardCard({ options, cupboard, setStockOf, bumpStock, forgetFlavor, 
                     </a>
                   )}
                 </div>
+                {openable && (
+                  <button onClick={() => openFridgeCan(food)} aria-label={`Open a can of ${f.name}`} title="Open a can (moves it to the fridge)"
+                    style={{ fontFamily: TYPE.mono, fontSize: 10, borderRadius: 999, padding: "3px 9px", border: `1px solid ${A.good}`, background: "transparent", color: A.good, cursor: "pointer", flex: "none" }}>open</button>
+                )}
                 <button onClick={() => bumpStock(f.name, -1)} disabled={!n} aria-label={`One fewer ${f.name}`}
                   style={{ ...stepBtn, color: n ? A.muted : A.cardBorder, cursor: n ? "pointer" : "default" }}>−</button>
                 <input type="number" min="0" step="1" value={n == null ? "" : n} placeholder="—"
